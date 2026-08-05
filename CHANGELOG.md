@@ -4,6 +4,41 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.11.0] — 2026-08-05
+
+The backlog, cleared. Both items are the same shape: the tool knew something and was not saying it.
+
+### Added
+- **`crowdsim cache-ab --run`** ([#29](https://github.com/HiWay-Media/crowdsim/issues/29)) loads each leg
+  with the same profile at the same peak and then prints the delta, instead of bringing the legs up, printing
+  two `crowdsim load` lines, and leaving the comparison to whoever remembers to make it. The whole reason for
+  two legs is the number between them.
+  - **Sequential, not concurrent.** Two generators at once on one host measure the host, and the delta they
+    produce is between two runs throttled by the same laptop. The cost is that "same window" means the same
+    session rather than the same second, and the output says that rather than glossing over it.
+  - The comparison is `crowdsim compare`, refusals included — demonstrated the first time it ran here, where
+    both legs 502'd and it refused to produce a delta between two runs that never reached their target.
+  - **It grants itself no allowlist.** The legs are on `127.0.0.1`, so that host must be allowlisted like any
+    other; the check runs before a container starts. A subcommand that can authorise a host on your behalf
+    turns the gate into a suggestion.
+- **A load run inside a VM says so before it generates anything**
+  ([#30](https://github.com/HiWay-Media/crowdsim/issues/30)). That the Docker network layer on macOS and
+  Windows saturates before the target does is measured and was documented in three places — while the tool
+  let the run happen and reported `generator_ok: false` afterwards, which is the failure the bandwidth
+  estimate exists to pre-empt.
+
+  Detection is `/.dockerenv` (or the cgroup path) plus a `linuxkit` / `WSL` kernel release — verified from
+  inside a container rather than assumed. It **warns and does not refuse**: the signal misses every VM
+  runtime that does not brand its kernel, and refusing on a check with false negatives buys nothing, while
+  its one false positive (Docker Desktop on a Linux host) is a case where the warning is still right, because
+  the VM boundary is the problem. A detection that can be wrong must not become a gate. The GUI is
+  unaffected — it is a page, not a generator.
+
+### Changed
+- `cache-ab/README.md` documents `--run` and one trap found by running it: both leg templates proxy to
+  `${ORIGIN_ADDR}:443`, so a plain-HTTP origin answers 502 on every request and the run reads as "target
+  never answered". Correct behaviour, confusing for ten minutes.
+
 ## [1.10.0] — 2026-08-05
 
 Milestone [v1.4.0](https://github.com/HiWay-Media/crowdsim/milestone/5), and one theme: a judgement that

@@ -127,3 +127,40 @@ STUB
   [ "$status" -eq 3 ]
   [ ! -f "$DOCKER_LOG" ]
 }
+
+@test "--run refuses when loopback is not allowlisted, before a container starts" {
+  # The realistic case: a profile that allowlists the real site, which is exactly the profile somebody points
+  # at cache-ab. The legs are on 127.0.0.1, and this command does NOT grant itself that host — the moment a
+  # subcommand can authorise a host on your behalf, the gate is a suggestion.
+  run env CROWDSIM_ALLOW_TARGETS='www.example.test' \
+    "$CROWDSIM" cache-ab --profile "$FIXTURES/minimal.json" --base-url https://www.example.test --run
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"--run loads the legs on 127.0.0.1"* ]]
+  [[ "$output" == *"grants no allowlist to itself"* ]]
+  [ ! -f "$DOCKER_LOG" ]
+}
+
+@test "--run loads each leg in turn and then compares them" {
+  run "$CROWDSIM" cache-ab --profile "$FIXTURES/minimal.json" --run --peak 12
+  [ "$status" -eq 0 ]
+
+  # Both legs, in order, at the same peak — and sequential, because two generators on one host measure the
+  # host rather than the legs.
+  [[ "$output" == *"leg asis (http://127.0.0.1:8081)"* ]]
+  [[ "$output" == *"leg candidate (http://127.0.0.1:8082)"* ]]
+  [[ "$output" == *"sequential on purpose"* ]]
+  [[ "$output" == *"the delta between the legs"* ]]
+
+  # What it does NOT claim: that the two runs happened in the same second.
+  [[ "$output" == *"minutes apart — not the same second"* ]]
+}
+
+@test "--run with a third leg compares that one too" {
+  run "$CROWDSIM" cache-ab --new-leg "$LEG"
+  [ "$status" -eq 0 ]
+  run "$CROWDSIM" cache-ab --profile "$FIXTURES/minimal.json" --run --third "$LEG" --peak 12
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"leg third (http://127.0.0.1:8083)"* ]]
+  [[ "$output" == *"asis → candidate"* ]]
+  [[ "$output" == *"asis → third"* ]]
+}

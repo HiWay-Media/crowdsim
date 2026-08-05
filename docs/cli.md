@@ -134,6 +134,20 @@ per class. Exits 0 whenever it executed — **including when the brake tripped**
 the intended outcome. Writes `out/summary-<run>.json`, `out/load-<run>.log`, and appends to
 `out/history.tsv`.
 
+It also refuses to stay quiet about a generator that cannot win. A load run started **from a container
+inside a VM** — Docker Desktop on macOS or Windows, or WSL2 — says so before generating anything:
+
+```
+  ⚠️  THIS GENERATOR IS IN A CONTAINER INSIDE A VM (kernel 6.3.13-linuxkit).
+      → run k6 natively on this machine, or put this container on a Linux host near the target.
+```
+
+Measured, repeatedly: the Docker network layer saturates before the target does, the iterations get dropped,
+and the summary comes back `generator_ok: false` after the window is gone. It is a **warning, not a gate**:
+the detection (a container marker plus a `linuxkit`/`WSL` kernel) misses runtimes that do not brand their
+kernel, and refusing on a signal with false negatives buys nothing. The GUI in a container is unaffected —
+it is a page, not a generator.
+
 Before starting it states the bandwidth the requested peak implies, from the newest `probe` of that target:
 
 ```
@@ -168,6 +182,19 @@ It refuses (exit 2) a leg template that does not carry the candidate's warning a
 `Cache-Control` — a third leg is a copy, and a copy is where that paragraph goes missing — and a leg still
 identifying itself as `candidate` in `X-AB-Leg`, because two legs answering with the same name cannot be told
 apart in the results. `--new-leg` satisfies both by construction and never overwrites an existing file.
+
+`--run` goes the last step: it loads each leg with the same profile at the same peak, one at a time, and then
+prints the delta between them.
+
+```bash
+crowdsim cache-ab --profile p.json --run --peak 60
+```
+
+Sequential on purpose — two generators at once on one host measure the host — so "same window" means the same
+session, not the same second, and the output says so. The comparison is `crowdsim compare`, refusals
+included. The legs live on `127.0.0.1`, and `--run` does **not** grant itself that allowlist: it is checked
+before a container starts, because a subcommand that can authorise a host on your behalf turns the gate into
+a suggestion.
 
 ### `validate`
 

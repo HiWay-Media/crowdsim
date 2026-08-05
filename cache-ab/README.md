@@ -50,12 +50,33 @@ profile's resolved target.
   nginx performance.
 - **The cache lives on tmpfs**, sized at 2g. Below your working set you measure evictions instead of
   hits; on a disk volume you measure your disk.
+- **The legs speak HTTPS to the origin.** Both templates proxy to `${ORIGIN_ADDR}:443` with SNI from
+  `ORIGIN_HOST`, because that is what a real origin is. Pointing them at a plain-HTTP origin gives 502 on
+  every request and a run that reads as "target never answered" — change the `upstream` line if that is
+  really what you want to measure.
 - **`proxy_read_timeout` must match production.** It is where 504s are born, and the whole point of the
   measurement is how much of the traffic crosses it.
 - **The cache key is the hardest line in the file.** Include a header that varies per user and the hit
   ratio collapses; omit one that genuinely changes the response and you serve the wrong body to the wrong
   visitor. When the origin does not send a correct `Vary`, nginx cannot help you — you are deciding by
   hand.
+
+## Running the legs and getting the number
+
+```bash
+crowdsim cache-ab --profile p.json --run --peak 60
+```
+
+Loads each leg with the same profile at the same peak and then prints the delta between them, instead of
+printing the commands and leaving the comparison to whoever remembers to make it.
+
+- **Sequential, not concurrent.** Two generators at once on one host measure the host, and the delta they
+  produce is between two runs that were both throttled by the same laptop. The cost is that "same window"
+  means the same session rather than the same second, and the output says so rather than glossing over it.
+- **The comparison is `crowdsim compare`**, refusals included: if a leg never answered, or the generator did
+  not hold the rate, you get the reason instead of a number.
+- **It does not grant itself an allowlist.** The legs are on `127.0.0.1`, so that host has to be allowlisted
+  like any other — checked before a container starts, not surfaced as an exit 3 from a child process later.
 
 ## Adding a third leg
 

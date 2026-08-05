@@ -36,7 +36,7 @@
 #                     [--peak 120] [--start 30] [--steps 4] [--step-dur 60s] [--hold 120s]
 #                     [--rsc-mode repeat|random] [--max-5xx 0.05] [--max-p95 5000]
 #                     [--safe-peak 150] [--i-know-this-breaks-production] [--touch-and-go] [--dry-run]
-#   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10] [--third <leg.conf.template>]
+#   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10] [--third <leg.conf.template>] [--run]
 #   crowdsim cache-ab --new-leg <leg.conf.template>
 #   crowdsim compare  <run-a> <run-b> [--json]
 #   crowdsim record   <file.har> [--out <journey.json>] [--origin <url>] [--rsc-query _rsc] [--force]
@@ -110,6 +110,7 @@ while [ $# -gt 0 ]; do
     --bind) GUI_BIND="$2"; shift 2;;
     --json) COMPARE_JSON=1; shift;;
     --bench) BENCH=1; shift;;
+    --run) RUN_LEGS=1; shift;;
     --third) THIRD_LEG="$2"; shift 2;;
     --new-leg) NEW_LEG="$2"; shift 2;;
     --out) JOURNEY_OUT="$2"; shift 2;;
@@ -740,6 +741,43 @@ PY
 # was doing it. It is a WARNING and never a gate: the estimate assumes every request weighs what that one
 # page weighed, which is wrong in both directions (assets are smaller, search results larger), and a wrong
 # estimate must never be able to stop a run somebody needs. The one thing it must not do is stay silent.
+# ─────────── the generator that cannot win: a container on a macOS/Windows host ─────────────────────
+# That the Docker network layer on macOS and Windows saturates before the target does is measured, and it
+# has been documented in three places — while the tool happily let the run happen and reported
+# generator_ok: false afterwards, which is the failure the bandwidth estimate exists to pre-empt.
+#
+# What can actually be detected, checked from inside a container rather than assumed:
+#   · /.dockerenv (and the cgroup path, on older setups) says we are in a container;
+#   · `uname -r` says `…-linuxkit` under Docker Desktop and `…-microsoft-standard-WSL2` under WSL2 — both
+#     mean the container is inside a VM, with the host's network stack behind a translation layer.
+#
+# It WARNS and does not refuse, deliberately. The detection has a false negative for every VM runtime that
+# does not brand its kernel (Colima and friends), and refusing on a signal that misses half the cases buys
+# nothing; while a false positive — Docker Desktop on a Linux host — is a case where the warning is still
+# correct, because the VM boundary is the problem, not the operating system on the other side of it.
+# A detection that can be wrong must not become a gate.
+virtualised_generator_note() {
+  local marker="${CROWDSIM_CONTAINER_MARKER:-/.dockerenv}"
+  local in_container=0
+  if [ -e "$marker" ] || grep -qE 'docker|containerd|kubepods' /proc/1/cgroup 2>/dev/null; then
+    in_container=1
+  fi
+  [ "$in_container" = "1" ] || return 0
+
+  local kernel; kernel="$(uname -r 2>/dev/null || echo unknown)"
+  case "$kernel" in
+    *linuxkit*|*microsoft*|*WSL*) ;;
+    *) return 0;;
+  esac
+
+  warn "THIS GENERATOR IS IN A CONTAINER INSIDE A VM (kernel $kernel)."
+  say  "     On macOS and Windows the Docker network layer saturates before your target does: the"
+  say  "     iterations get dropped, the summary comes back generator_ok: false, and the window is gone."
+  say  "     Measured, repeatedly. It is not a tuning problem."
+  say  "     → run k6 natively on this machine, or put this container on a Linux host near the target."
+  say  "     The GUI in a container is fine anywhere: it is a page, not a generator."
+}
+
 bandwidth_note() {
   local peak="$1" declared
   declared="$(pf safety.generator_mbps)"
@@ -823,6 +861,7 @@ cmd_load() {
   gate_allowlist
   gate_peak
   bandwidth_note "$PEAK"
+  virtualised_generator_note
   k6_bin
 
   local summary="$OUT_DIR/summary-$RUN_ID.json"
@@ -1264,6 +1303,90 @@ cache_ab_new_leg() {
   exit 0
 }
 
+# Load each leg and print the delta, instead of printing the commands and hoping.
+#
+# The whole reason for two legs is the number between them, and until now the command stopped one step
+# short: it brought the legs up, printed two `crowdsim load` lines, and left the comparison to whoever
+# remembered to make it. `crowdsim compare` exists now, refusals and all.
+#
+# Sequential, not concurrent. Two generators at once on one host measure the host — and the delta they
+# produce is between two runs that were both throttled by the same laptop, which is a number about the
+# laptop. The cost is that "same window" means "same session, minutes apart" rather than "same second";
+# that is stated in the output rather than glossed over.
+# The legs live on loopback, so the runs against them need 127.0.0.1 allowlisted — and this command does
+# NOT grant it. No default allowlist, anywhere, for anyone: the moment a subcommand can authorise a host on
+# your behalf, the gate is a suggestion. It is one line in the profile, and it is checked here, before any
+# container starts, instead of surfacing as an exit 3 from a child process three screens later.
+cache_ab_require_loopback_allowed() {
+  local allow="${CROWDSIM_ALLOW_TARGETS:-$(pf safety.allow_hosts | tr -d '[]"' | tr -d ' ')}"
+  local m=0 pat
+  IFS=',' read -r -a _pats <<< "$allow"
+  for pat in "${_pats[@]}"; do
+    case "127.0.0.1" in $pat) m=1;; esac
+  done
+  if [ "$m" != "1" ]; then
+    die "--run loads the legs on 127.0.0.1, and that host is not allowlisted (${allow:-nothing is}).
+
+  Add it where the rest of this test's configuration lives:
+      \"safety\": { \"allow_hosts\": [\"127.0.0.1\", …] }
+  or for this shell: CROWDSIM_ALLOW_TARGETS=127.0.0.1
+
+  crowdsim grants no allowlist to itself, not even for containers it started a second ago." 3
+  fi
+}
+
+cache_ab_run_legs() {
+  local third_abs="$1"
+  local -a legs=("asis:8081" "candidate:8082")
+  if [ -n "$third_abs" ]; then legs+=("third:8083"); fi
+
+  say ""
+  say "▶ loading each leg in turn, same profile, same pool, same peak (${PEAK} req/s)"
+  say "  sequential on purpose: two generators at once on this host would measure this host."
+
+  local -a ids=() names=()
+  local leg name port rc out id
+  for leg in "${legs[@]}"; do
+    name="${leg%%:*}"; port="${leg##*:}"
+    say ""
+    say "── leg $name (http://127.0.0.1:$port) ──────────────────────────────────────────"
+    rc=0
+    # The driver runs itself: one load path, one set of gates, one summary format. A second inlined copy of
+    # the run logic here would be a second thing to keep correct.
+    out="$("$0" load --profile "$PROFILE_F" --base-url "http://127.0.0.1:$port" \
+             --peak "$PEAK" --start "$START" --steps "$STEPS" --step-dur "$STEP_DUR" --hold "$HOLD" \
+             2>&1)" || rc=$?
+    printf '%s\n' "$out" | tail -24
+    if [ "$rc" != "0" ]; then
+      die "leg $name exited $rc — stopping here rather than comparing against a run that did not happen" "$rc"
+    fi
+    id="$(printf '%s\n' "$out" | sed -nE 's/^[[:space:]]*run[[:space:]]+([0-9]{8}T[0-9]{6}Z)[[:space:]]*$/\1/p' | head -1)"
+    if [ -z "$id" ]; then
+      die "leg $name produced no run id, so there is nothing to compare" 4
+    fi
+    ids+=("$id"); names+=("$name")
+  done
+
+  say ""
+  say "╔══════════════════════════════════════════════════════════════════════════════╗"
+  say "║  cache-ab: the delta between the legs"
+  say "╚══════════════════════════════════════════════════════════════════════════════╝"
+  say "  Every leg saw the same pool at the same peak, minutes apart — not the same second. A cache is"
+  say "  warmed by the traffic before it, so a leg that ran second had the same cold start as the first,"
+  say "  but the ORIGIN behind them did not: read a small delta with that in mind."
+
+  local i
+  for i in $(seq 1 $(( ${#ids[@]} - 1 ))); do
+    say ""
+    say "── ${names[0]} → ${names[$i]} ──────────────────────────────────────────────────────"
+    # Refusals are compare's, not ours: if these two runs are not comparable it says so and exits 2, and
+    # that is the honest end of this command too.
+    "$0" compare "${ids[0]}" "${ids[$i]}" || true
+  done
+  say ""
+  say "  then:  cd $ROOT/cache-ab && docker compose ${third_abs:+--profile third }down"
+}
+
 cmd_cache_ab() {
   if [ -n "${NEW_LEG:-}" ]; then cache_ab_new_leg "$NEW_LEG"; fi
   need_profile; resolve_profile; resolve_target; gate_allowlist
@@ -1273,6 +1396,8 @@ cmd_cache_ab() {
   # about nginx starting: a template without the warning is a copy that lost the one paragraph explaining
   # what ignoring Cache-Control costs, and a template still calling itself "candidate" makes two legs
   # indistinguishable in the very header the comparison is read from.
+  if [ "${RUN_LEGS:-0}" = "1" ]; then cache_ab_require_loopback_allowed; fi
+
   local -a compose_profile=()
   local third_abs=""
   if [ -n "${THIRD_LEG:-}" ]; then
@@ -1300,6 +1425,9 @@ cmd_cache_ab() {
   if [ -n "$third_abs" ]; then say "  third leg: $third_abs"; fi
   ( cd "$ROOT/cache-ab" && ORIGIN_ADDR="$origin_addr" ORIGIN_HOST="$origin_host" CACHE_TTL="$TTL" \
       THIRD_TEMPLATE="$third_abs" docker compose "${compose_profile[@]}" up -d --force-recreate )
+  if [ "${RUN_LEGS:-0}" = "1" ]; then cache_ab_run_legs "$third_abs"; return 0; fi
+
+
   say ""
   say "  legs up. Now run the load against each and compare:"
   say "      crowdsim load --profile $PROFILE_F --base-url http://127.0.0.1:8081 --peak $PEAK   # as-is"

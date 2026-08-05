@@ -273,3 +273,63 @@ PY
   [[ "$output" != *"measuring what this machine can generate"* ]]
   [ -z "$(ls "$CROWDSIM_OUT"/bench-*.json 2>/dev/null)" ]
 }
+
+@test "a generator in a container inside a VM says so before it generates anything" {
+  # #30: measured — on macOS/Windows the Docker network layer saturates before the target does, and the run
+  # comes back generator_ok: false after the window is gone. The container is detectable, and so is the VM
+  # kernel Docker Desktop and WSL2 boot.
+  mkdir -p "$CROWDSIM_OUT"
+  touch "$BATS_TEST_TMPDIR/dockerenv"
+  cat > "$BATS_TEST_TMPDIR/stub/uname" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "-r" ]; then echo "6.3.13-linuxkit"; else /usr/bin/uname "$@"; fi
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/stub/uname"
+
+  CROWDSIM_CONTAINER_MARKER="$BATS_TEST_TMPDIR/dockerenv" \
+    run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 40 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CONTAINER INSIDE A VM"* ]]
+  [[ "$output" == *"run k6 natively"* ]]
+  [[ "$output" == *"a page, not a generator"* ]]
+}
+
+@test "it is a warning, not a gate: a detection that can be wrong must not stop a run" {
+  # Colima and friends do not brand their kernel, so the check has false negatives — and Docker Desktop on a
+  # LINUX host is a false positive where the warning happens to still be right. Neither justifies refusing.
+  touch "$BATS_TEST_TMPDIR/dockerenv"
+  cat > "$BATS_TEST_TMPDIR/stub/uname" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "-r" ]; then echo "6.3.13-linuxkit"; else /usr/bin/uname "$@"; fi
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/stub/uname"
+  CROWDSIM_CONTAINER_MARKER="$BATS_TEST_TMPDIR/dockerenv" \
+    run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 40 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"(dry run) k6 run"* ]]
+}
+
+@test "a container on a Linux host is the intended way to run it, and says nothing" {
+  touch "$BATS_TEST_TMPDIR/dockerenv"
+  cat > "$BATS_TEST_TMPDIR/stub/uname" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "-r" ]; then echo "6.8.0-51-generic"; else /usr/bin/uname "$@"; fi
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/stub/uname"
+  CROWDSIM_CONTAINER_MARKER="$BATS_TEST_TMPDIR/dockerenv" \
+    run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 40 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"CONTAINER INSIDE A VM"* ]]
+}
+
+@test "not in a container: nothing to warn about, whatever the kernel says" {
+  cat > "$BATS_TEST_TMPDIR/stub/uname" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "-r" ]; then echo "6.3.13-linuxkit"; else /usr/bin/uname "$@"; fi
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/stub/uname"
+  CROWDSIM_CONTAINER_MARKER="$BATS_TEST_TMPDIR/definitely-not-here" \
+    run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 40 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"CONTAINER INSIDE A VM"* ]]
+}
