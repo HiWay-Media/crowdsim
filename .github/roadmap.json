@@ -27,6 +27,10 @@
       "description": "Fewer ways to get a wrong answer, and no manual steps left in the loop. Prove the brake aborts a run end to end, warn before a run the generator cannot sustain, stop using URL pools nobody verified, turn a browser recording into a journey, and collapse the two profile validators into one — plus the GUI refinements that keep a click from being a decision made blind."
     },
     {
+      "title": "v1.4.0",
+      "description": "Two answers that exist only in a terminal, and one number that is still a guess. `compare` refuses to compare runs that were not the same experiment — that judgement belongs in the page that shows the archive, not only in the CLI. And `safety.generator_mbps` is declared by hand: the estimate that warns you before a run comes back generator_ok:false is only as good as a number somebody typed once and copied between profiles, so measure it instead."
+    },
+    {
       "title": "Backlog",
       "description": "Accepted but unscheduled. Nothing here blocks a release."
     }
@@ -388,6 +392,70 @@
         "- It refuses to tag a dirty tree, or a version that is already tagged.",
         "- The commits exempt from the rule (roadmap, CI plumbing) are named in one place instead of being argued about per commit.",
         "- A pushed tag publishes a GitHub Release whose notes are that CHANGELOG section, and fails rather than improvising when the section is missing."
+      ]
+    },
+    {
+      "key": "gui-compare-runs",
+      "title": "GUI: compare two runs, with the same refusals as the CLI",
+      "milestone": "v1.4.0",
+      "labels": ["area:gui", "validity"],
+      "body": [
+        "History compares a selected run against previous runs at the same profile, target and shape. Choosing two runs by hand and reading the delta — per class, per cache layer — is `crowdsim compare` in a terminal, and the page that already displays the whole archive is where somebody looks first.",
+        "",
+        "The point is not the table. It is that the refusals travel with it: two runs at different URL pools are two different experiments, and a run with `generator_ok: false` has no numbers at all. A page that renders a delta those two cases would have blocked is a confident percentage with nothing behind it — the exact failure the CLI command was written to prevent.",
+        "",
+        "**Done when**",
+        "- Two runs can be selected in History and compared, showing the same overall, per-class and per-layer deltas the CLI prints.",
+        "- The comparison is refused, with the reason, in every case the CLI refuses it — and the refusal is as visible as a result would have been.",
+        "- A different target or peak is allowed and labelled exactly as in the CLI: a comparison between two targets, not a before/after of one.",
+        "- The rules are not re-implemented in the page. Whatever produces the verdict is shared with `crowdsim compare`, or the two will disagree and the wrong one will be the one on screen."
+      ]
+    },
+    {
+      "key": "doctor-bench-generator",
+      "title": "doctor --bench: measure what this generator can sustain, instead of declaring it",
+      "milestone": "v1.4.0",
+      "labels": ["area:cli", "validity"],
+      "body": [
+        "`load` and `doctor` state the bandwidth a peak implies and compare it against `safety.generator_mbps` — a number typed into the profile by hand. So the warning that exists to predict `generator_ok: false` is only as good as somebody's guess about a laptop, a runner or a VM, and in practice it is copied between profiles once and never revisited.",
+        "",
+        "The machine can answer this itself, without touching the target.",
+        "",
+        "**Done when**",
+        "- `crowdsim doctor --bench` measures what this host can actually push, against a local endpoint it starts itself — never against the profile's target, and never as a side effect of a plain `doctor` run.",
+        "- The measurement is written where the bandwidth estimate can read it, so the warning stops depending on a declared value. A declared `safety.generator_mbps` still wins: somebody who knows the uplink is narrower than loopback is right.",
+        "- It states what it measured and what it did not. Loopback is an upper bound; the path to a real target is narrower than the path to yourself, and a benchmark that let anyone forget that would be worse than none.",
+        "- It stays a warning and never becomes a gate: a wrong estimate must not be able to stop a run somebody needs."
+      ]
+    },
+    {
+      "key": "cache-ab-run-and-compare",
+      "title": "cache-ab: run the legs and print the comparison, instead of printing two commands",
+      "milestone": "Backlog",
+      "labels": ["area:cache-ab", "area:cli"],
+      "body": [
+        "`cache-ab` brings the legs up and then prints the `crowdsim load` commands to run by hand, leaving the comparison to whoever remembers to make it. The whole reason for two legs is the delta between them, and `crowdsim compare` now exists.",
+        "",
+        "**Done when**",
+        "- One command loads each leg with the same pool, in the same window, and prints the delta.",
+        "- The legs are still loaded one at a time unless asked otherwise: two generators at once on one host measure the host.",
+        "- It refuses to report a comparison in every case `crowdsim compare` refuses one."
+      ]
+    },
+    {
+      "key": "refuse-docker-generator-on-laptop",
+      "title": "Refuse (or loudly warn about) generating load from Docker on a macOS/Windows host",
+      "milestone": "Backlog",
+      "labels": ["area:cli", "validity"],
+      "body": [
+        "That the Docker network layer on macOS and Windows saturates before the target does is measured, and documented in three places — and the tool still lets the run happen. The result is `generator_ok: false` diagnosed after the window was agreed and the run burned, which is precisely the failure the bandwidth estimate was added to prevent.",
+        "",
+        "The driver can tell: it knows when it is in a container, and the host kernel is visible from inside one.",
+        "",
+        "**Done when**",
+        "- A load run started from a container on a non-Linux host says so before generating anything, and says what to do instead: native k6 locally, or the container on a Linux host near the target.",
+        "- It does not fire for the GUI, which is a page and not a generator, nor for a container on Linux, which is the intended way to run it.",
+        "- Whether it refuses or only warns follows from how reliably the host can be detected: a detection that can be wrong must not become a gate."
       ]
     }
   ]
