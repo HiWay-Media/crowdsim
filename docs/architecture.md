@@ -143,7 +143,7 @@ gui/server/lib/           args (flag composition), profiles, runner, history, ap
 gui/ui/src/               React: RunPanel, ProfilePanel, HistoryPanel, MixBars, SummaryCard
 profiles/example.json     the only profile in this repo, documented inline
 cache-ab/                 two-leg reverse-proxy A/B harness
-nomad/                    parameterized batch job
+ci/                       nomad job spec (dispatch), and why it is batch — see ci/README.md
 tests/{unit,cli,gui,e2e,image}/   see Development
 docs/                     what you are reading
 scripts/                  roadmap sync, release helper

@@ -74,10 +74,10 @@ test`.
 
 ## Nomad
 
-`nomad/crowdsim.nomad.hcl` is a parameterized **batch** job on the published image:
+`ci/nomad/crowdsim.nomad.hcl` is a parameterized **batch** job on the published image:
 
 ```bash
-nomad job run nomad/crowdsim.nomad.hcl
+nomad job run ci/nomad/crowdsim.nomad.hcl
 nomad job dispatch \
   -meta target=edge -meta peak=120 -meta hold=120s \
   -meta allow_targets='www.example.test' \

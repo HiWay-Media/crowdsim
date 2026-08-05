@@ -13,6 +13,7 @@ node_modules/
 gui/ui/dist/
 .git/
 .github/
+ci/
 .claude/
 graphify-out/
 tests/

@@ -1,6 +1,6 @@
 {
   "name": "@crowdsim/gui-server",
-  "version": "1.4.0",
+  "version": "1.4.1",
   "private": true,
   "description": "HTTP API behind the crowdsim GUI: a form over bin/crowdsim, with the same safety gates",
   "license": "MIT",

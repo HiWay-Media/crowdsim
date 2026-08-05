@@ -5,7 +5,7 @@ Driver bash (`bin/crowdsim`) + generatore k6 (`k6/live-event.js` con la logica p
 da un **profilo JSON** (mix di classi di richiesta, pool di URL, header di cache, SLO, allowlist di
 sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomando `serve`), test
 (`tests/unit` node:test, `tests/cli` bats, `tests/gui` node:test, `tests/e2e` nginx locale + k6 reale),
-`Dockerfile`, job Nomad parametrizzato (`nomad/`), harness A/B cache (`cache-ab/`), `profiles/example.json`.
+`Dockerfile`, job Nomad parametrizzato (`ci/nomad/`), harness A/B cache (`cache-ab/`), `profiles/example.json`.
 
 ## Regole di lavoro (SEMPRE)
 
@@ -29,7 +29,7 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
   commenti, messaggi a schermo, commit message).
 - **Allineare tutto**: ogni modifica fattuale va propagata a `README.md`, header di `bin/crowdsim`
   (è anche l'`--help`), commenti di `k6/live-event.js`, `profiles/example.json`, `Dockerfile`,
-  `nomad/crowdsim.nomad.hcl`, `cache-ab/README.md`, `CHANGELOG.md`. Un flag nuovo tocca almeno: parsing
+  `ci/nomad/crowdsim.nomad.hcl`, `cache-ab/README.md`, `CHANGELOG.md`. Un flag nuovo tocca almeno: parsing
   args + env passato a k6 + header usage + README + **test** (+ `gui/server/lib/args.js` e form della GUI
   se va esposto lì).
 - **`make test` verde prima di ogni commit** (unit + gui + cli: non genera traffico). Logica nuova nel
@@ -151,7 +151,7 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
 - GUI: `gui/server/lib/{args,validate,profiles,runner,history,app}.js` + `gui/ui/src/`; avvio da
   `crowdsim serve` (build UI: `npm run gui:build`)
 - Anatomia del profilo: `profiles/example.json` (commentato inline via chiavi `_comment`)
-- A/B cache: `cache-ab/README.md` · Esecuzione remota: `nomad/crowdsim.nomad.hcl` (batch parametrizzato,
+- A/B cache: `cache-ab/README.md` · Esecuzione remota: `ci/nomad/crowdsim.nomad.hcl` (batch parametrizzato,
   profilo scaricato al dispatch da repo privato)
 - Output di una run: `out/summary-<run_id>.json`, `out/load-<run_id>.log`, `out/history.tsv` (`out/` è
   gitignorata: non committarla mai)

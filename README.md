@@ -116,7 +116,7 @@ Two details that are not incidental:
 > invalid. Native k6 locally; the container on a Linux host near the target. The *GUI* in the container is
 > fine anywhere: it is a page, not a generator.
 
-For Nomad, `nomad/crowdsim.nomad.hcl` is a parameterized batch job on the same image: the target, rate and
+For Nomad, [`ci/nomad/crowdsim.nomad.hcl`](ci/nomad/crowdsim.nomad.hcl) is a parameterized batch job on the same image: the target, rate and
 duration go in the dispatch call, and the profile is fetched at dispatch time from your own private repo.
 
 ## Use
@@ -300,7 +300,7 @@ Full documentation lives in **[docs/](docs/index.md)**:
 
 Alongside them: [`profiles/example.json`](profiles/example.json) documents every field inline,
 [`cache-ab/README.md`](cache-ab/README.md) covers the A/B harness,
-[`nomad/crowdsim.nomad.hcl`](nomad/crowdsim.nomad.hcl) the batch job, `crowdsim --help` every flag, and
+[`ci/README.md`](ci/README.md) how a run is dispatched on Nomad, `crowdsim --help` every flag, and
 [CHANGELOG.md](CHANGELOG.md) what changed in each release.
 
 ## License

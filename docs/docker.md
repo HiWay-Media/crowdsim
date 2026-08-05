@@ -316,12 +316,12 @@ They are an API — the Nomad job, CI and the GUI all branch on them:
 
 ## 9. On a Linux host near the target, and Nomad
 
-`nomad/crowdsim.nomad.hcl` is a parameterized **batch** job on this same image — batch and not service,
+`ci/nomad/crowdsim.nomad.hcl` is a parameterized **batch** job on this same image — batch and not service,
 because a load test is a bounded run with an outcome. A service job that restarts on exit would re-fire
 load at your production every time the brake trips.
 
 ```bash
-nomad job run nomad/crowdsim.nomad.hcl
+nomad job run ci/nomad/crowdsim.nomad.hcl
 nomad job dispatch \
   -meta target=edge -meta peak=120 -meta hold=120s \
   -meta allow_targets='www.example.test' \

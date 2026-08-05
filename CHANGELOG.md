@@ -4,6 +4,25 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] — 2026-08-05
+
+### Changed
+- The Nomad job moved to **`ci/nomad/crowdsim.nomad.hcl`**. It is deployment plumbing — how a run gets
+  dispatched somewhere other than a workstation — and it was sitting at the repository root next to the
+  things you actually use.
+- `ci/README.md` explains what lives there, why the job is `batch` and not `service` (a service that
+  restarts would re-fire load at your production every time the brake trips), and where the workflows are
+  and why they cannot move (`.github/workflows/` is GitHub's).
+- `ci/` is excluded from the Docker build context: none of it belongs in the image.
+- References updated in the README, `docs/install.md`, `docs/docker.md`, `docs/architecture.md`,
+  `docs/index.md` and the agent rules. `profiles/` deliberately stayed where it is — see below.
+
+### Notes
+- `profiles/` was left at the root on purpose. It is not CI: it is the directory a run reads, the default of
+  `CROWDSIM_PROFILES`, the volume `docker compose up` mounts, and the thing `.gitignore` protects so that
+  only the example is ever committed. Moving it would touch ~55 references and break the shape every user's
+  own checkout has, to gain nothing but a shorter root listing.
+
 ## [1.4.0] — 2026-08-05
 
 The profile rules were reachable only from the GUI, so the operator at a terminal — the primary user of
