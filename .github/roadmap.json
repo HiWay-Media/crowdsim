@@ -1,0 +1,242 @@
+{
+  "_comment": "Roadmap source of truth. `scripts/sync-roadmap.sh` turns this file into GitHub milestones, labels and issues, and the roadmap-sync workflow replays it on every push to main. The sync is idempotent and additive: it creates what is missing and re-aligns milestone and labels, it never closes an issue and never rewrites a body somebody edited by hand. Each issue is matched by its `key`, not by its title, so a title can be reworded here without opening a duplicate.",
+
+  "labels": [
+    { "name": "area:cli",       "color": "1d76db", "description": "bin/crowdsim, the bash driver" },
+    { "name": "area:generator", "color": "0e8a16", "description": "k6/live-event.js and k6/lib" },
+    { "name": "area:gui",       "color": "5319e7", "description": "gui/server and gui/ui" },
+    { "name": "area:tests",     "color": "fbca04", "description": "unit, CLI, GUI and e2e suites" },
+    { "name": "area:ci",        "color": "c2e0c6", "description": "CI, image builds, release automation" },
+    { "name": "area:cache-ab",  "color": "bfd4f2", "description": "the two-leg reverse-proxy A/B harness" },
+    { "name": "area:release",   "color": "d4c5f9", "description": "versioning, tags, CHANGELOG" },
+    { "name": "safety",         "color": "b60205", "description": "touches a safety gate — review with care" }
+  ],
+
+  "milestones": [
+    {
+      "title": "v1.1.0",
+      "description": "Modular generator and a test suite that generates no load. Split k6/live-event.js into k6/lib, cover the mix, cache classification and summary logic with unit tests, cover the safety gates with CLI tests, and run all of it in CI."
+    },
+    {
+      "title": "v1.2.0",
+      "description": "A browser front-end for the driver: browse profiles, launch a run, watch it, read the history. The GUI is a client of bin/crowdsim — it must not acquire a second, weaker copy of the safety gates."
+    },
+    {
+      "title": "Backlog",
+      "description": "Accepted but unscheduled. Nothing here blocks a release."
+    }
+  ],
+
+  "issues": [
+    {
+      "key": "release-tag-1-0-0",
+      "title": "Tag the 1.0.0 release commit",
+      "milestone": "v1.1.0",
+      "labels": ["area:release", "documentation"],
+      "body": [
+        "The repository has no tags. `CHANGELOG.md` documents a 1.0.0 release, but the commit that shipped it was never tagged, so `git describe`, the GitHub release list and any consumer pinning a version all see an unreleased repository.",
+        "",
+        "**Done when**",
+        "- An annotated tag `v1.0.0` points at the initial release commit.",
+        "- Every later release keeps the one-commit-one-tag rule the project already follows."
+      ]
+    },
+    {
+      "key": "e2e-suite",
+      "title": "tests/e2e/run.sh: the one suite allowed to generate load",
+      "milestone": "v1.1.0",
+      "labels": ["area:tests", "area:cli"],
+      "body": [
+        "`make test-e2e` is documented as the only suite that starts a real generator, and only against a container on the loopback address. The target exists; `tests/e2e/run.sh` does not, so the target fails.",
+        "",
+        "The value of this suite is that it is the only place where a real k6 process, a real profile and a real HTTP origin meet — it is what catches an argument the wrapper composes but k6 rejects.",
+        "",
+        "**Done when**",
+        "- `tests/e2e/run.sh` brings up the `cache-ab/` origin, runs a short `load` against it, and asserts on the resulting `out/summary-<run>.json`.",
+        "- The run is discarded, loudly, when `generator_ok` is false: a generator-bound run proves nothing.",
+        "- The script refuses to start if the target is not a loopback address, so the suite can never be pointed at somebody's infrastructure by editing one variable.",
+        "- It skips with a clear message, rather than failing, when docker or k6 is missing."
+      ]
+    },
+    {
+      "key": "ci-lint-test",
+      "title": "CI: run make lint and make test on push and pull request",
+      "milestone": "v1.1.0",
+      "labels": ["area:ci", "area:tests"],
+      "body": [
+        "The unit, CLI and GUI suites run entirely against fakes — a stub k6 on PATH, a temporary profile, a loopback HTTP server — which is exactly what makes them safe to run on a shared CI runner. Nothing runs them today.",
+        "",
+        "**Done when**",
+        "- A workflow runs `make lint` and `make test` on push to main and on pull requests.",
+        "- `make test-e2e` is **not** part of it: it generates load and needs docker plus k6.",
+        "- The job fails on a `bash -n` or `node --check` error, so a syntax break in the driver cannot land."
+      ]
+    },
+    {
+      "key": "bats-invocation-mismatch",
+      "title": "Align the bats invocation between Makefile and package.json",
+      "milestone": "v1.1.0",
+      "labels": ["area:tests"],
+      "body": [
+        "`make test-cli` runs `npx bats tests/cli` while `npm run test:cli` runs `bats tests/cli`. The second only works if bats is also installed globally, so the two entry points disagree on a machine that has only the devDependency.",
+        "",
+        "**Done when**",
+        "- Both entry points resolve bats the same way, and a clean clone passes after `npm install` alone."
+      ]
+    },
+    {
+      "key": "document-test-layout",
+      "title": "README: document the test layout and which suite generates load",
+      "milestone": "v1.1.0",
+      "labels": ["documentation", "area:tests"],
+      "body": [
+        "The split between suites is a safety property, not a convention: `make test` must stay runnable on any machine at any time because it touches nothing outside the checkout, and `make test-e2e` must stay separate because it does not.",
+        "",
+        "**Done when**",
+        "- README explains the four suites, what each covers, and states plainly that only the e2e suite generates traffic.",
+        "- The `bin/crowdsim` usage header and `AGENTS.md` agree with it."
+      ]
+    },
+
+    {
+      "key": "gui-server-profiles",
+      "title": "gui/server: profile browsing API",
+      "milestone": "v1.2.0",
+      "labels": ["area:gui", "safety"],
+      "body": [
+        "`package.json` declares the `gui/server` workspace and `make gui` serves it, but the directory is empty.",
+        "",
+        "First slice: read-only. List the profiles the server is allowed to see, return one for inspection, and report whether it parses and carries an allowlist.",
+        "",
+        "**Done when**",
+        "- The server resolves profiles under one configured root and rejects any path that escapes it — a profile path is user input and a profile is a map of somebody's infrastructure.",
+        "- A profile with no `safety.allow_hosts` is reported as such rather than silently listed as usable.",
+        "- The server binds the loopback interface by default.",
+        "- Profile contents are never logged."
+      ]
+    },
+    {
+      "key": "gui-server-run",
+      "title": "gui/server: launch a run without weakening the safety gates",
+      "milestone": "v1.2.0",
+      "labels": ["area:gui", "safety"],
+      "body": [
+        "The GUI must launch runs by invoking `bin/crowdsim`, not by re-implementing argument composition. The driver is where the two gates live, and a second code path that builds k6 arguments is a second place for them to be wrong.",
+        "",
+        "**Done when**",
+        "- A run is started as a child process of `bin/crowdsim`; the GUI never calls k6 directly.",
+        "- The allowlist gate keeps working end to end: a target outside it fails the run with the driver's own exit code 3, surfaced to the browser.",
+        "- `--i-know-this-breaks-production` is never sent by the server. It stays a command-line decision by a human, which is the whole point of it not being a config key.",
+        "- The driver's exit codes are propagated verbatim: a tripped brake is an outcome (0), not an error."
+      ]
+    },
+    {
+      "key": "gui-server-stream",
+      "title": "gui/server: follow a running load test",
+      "milestone": "v1.2.0",
+      "labels": ["area:gui"],
+      "body": [
+        "Reading a run means watching it: the knee is visible while it happens, and a summary read afterwards tells you the run tripped the brake without telling you where.",
+        "",
+        "**Done when**",
+        "- The server streams the run log to the browser as it is written.",
+        "- When the run ends, the summary is delivered and `generator_ok` is displayed prominently — a false value invalidates the run and the UI must say so, not bury it.",
+        "- Closing the browser does not kill the run, and reopening it reattaches."
+      ]
+    },
+    {
+      "key": "gui-ui",
+      "title": "gui/ui: run form and history view",
+      "milestone": "v1.2.0",
+      "labels": ["area:gui"],
+      "body": [
+        "The `gui/ui` workspace is declared and `make gui-dev` / `make gui-build` target it, but it does not exist.",
+        "",
+        "**Done when**",
+        "- A form picks a profile, a target and a shape, and shows the resolved command before it runs — no hidden defaults.",
+        "- The history view reads `out/history.tsv` and marks runs with `generator_ok: false` as unusable rather than plotting them next to valid ones.",
+        "- The UI states that two runs are only comparable when they used the same URL pool."
+      ]
+    },
+    {
+      "key": "tests-gui",
+      "title": "tests/gui: API tests for profiles, run launching and gate propagation",
+      "milestone": "v1.2.0",
+      "labels": ["area:tests", "area:gui", "safety"],
+      "body": [
+        "`make test-gui` and `npm run test:gui` both point at `tests/gui/`, which does not exist yet.",
+        "",
+        "**Done when**",
+        "- Path traversal against the profile endpoints is covered by a test, not by a code review.",
+        "- A test asserts that a target outside the allowlist is refused, and that the server never adds the safe-peak override.",
+        "- The suite runs against a stub `crowdsim` on PATH and a loopback server, so it generates no load and needs no k6."
+      ]
+    },
+    {
+      "key": "gui-docs",
+      "title": "Document the GUI: what it is, what it deliberately cannot do",
+      "milestone": "v1.2.0",
+      "labels": ["documentation", "area:gui"],
+      "body": [
+        "**Done when**",
+        "- README covers `make gui`, `make gui-dev` and `make gui-build`, and states that the server binds the loopback interface and ships no authentication — it is a local console, not a shared dashboard.",
+        "- It says explicitly that the safe-peak override is not available from the GUI, and why."
+      ]
+    },
+
+    {
+      "key": "validate-subcommand",
+      "title": "crowdsim validate <profile>: fail on a broken profile before the run",
+      "milestone": "Backlog",
+      "labels": ["enhancement", "area:cli"],
+      "body": [
+        "A profile that names a journey that does not exist, or a pool file that is missing, currently dies inside the k6 init context with a stack trace — after the operator has already decided to generate load.",
+        "",
+        "**Done when**",
+        "- `crowdsim validate <profile>` checks structure, pools, referenced files, class shares and the presence of an allowlist, and reports every problem at once rather than the first.",
+        "- It exits 2 on a malformed profile and generates no traffic.",
+        "- `doctor` and `load` reuse the same checks, so validation cannot drift from what the run actually requires."
+      ]
+    },
+    {
+      "key": "compare-subcommand",
+      "title": "crowdsim compare <run-a> <run-b>: a delta between two runs",
+      "milestone": "Backlog",
+      "labels": ["enhancement", "area:cli"],
+      "body": [
+        "The tool measures deltas honestly and absolutes optimistically, so comparison is the operation that carries meaning. Today it is done by reading two summary files side by side.",
+        "",
+        "**Done when**",
+        "- `crowdsim compare` prints per-class latency, error and cache deltas between two runs from `out/`.",
+        "- It refuses to compare, rather than quietly comparing, when the two runs used different URL pools or when either has `generator_ok: false`."
+      ]
+    },
+    {
+      "key": "cache-ab-third-leg",
+      "title": "cache-ab: make the third leg a first-class option",
+      "milestone": "Backlog",
+      "labels": ["enhancement", "area:cache-ab"],
+      "body": [
+        "`cache-ab/README.md` explains that the useful third leg is the narrow subset of a fix that can actually ship this week, measured in the same run — but adding it means hand-copying a compose service block and a template.",
+        "",
+        "**Done when**",
+        "- A third leg can be added without editing the compose file by hand.",
+        "- The warning on `candidate.conf.template` about ignoring the origin's `Cache-Control` is carried onto any new template, unchanged."
+      ]
+    },
+    {
+      "key": "ci-image-smoke-test",
+      "title": "CI: build the container image and smoke-test it",
+      "milestone": "Backlog",
+      "labels": ["area:ci"],
+      "body": [
+        "The image pins `grafana/k6` and resets its entrypoint so crowdsim drives k6. Nothing checks that the image still builds and still starts after a change to the driver or to the `k6/` layout.",
+        "",
+        "**Done when**",
+        "- CI builds the image and runs `crowdsim --help` and `crowdsim doctor` inside it.",
+        "- The smoke test asserts that the image refuses to run without an allowlist — the absent default is a feature, and a regression there is the one that matters most.",
+        "- No load is generated: the image is never pointed at a network target in CI."
+      ]
+    }
+  ]
+}

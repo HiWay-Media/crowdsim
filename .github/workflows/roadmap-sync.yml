@@ -1,0 +1,46 @@
+# Replay .github/roadmap.json onto the repository's labels, milestones and issues.
+#
+# The sync is additive: it opens what is missing and re-aligns milestone and labels. It never closes
+# an issue and never rewrites a body, so editing an issue on GitHub is safe — the roadmap file seeds
+# issues, it does not own them.
+name: roadmap-sync
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/roadmap.json
+      - scripts/sync-roadmap.sh
+      - .github/workflows/roadmap-sync.yml
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Report what would change without writing
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: roadmap-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Sync roadmap
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          chmod +x scripts/sync-roadmap.sh
+          if [ "$DRY_RUN" = "true" ]; then
+            scripts/sync-roadmap.sh --dry-run --repo "$GITHUB_REPOSITORY"
+          else
+            scripts/sync-roadmap.sh --repo "$GITHUB_REPOSITORY"
+          fi
