@@ -1,4 +1,10 @@
-# A local target for the end-to-end suite. Loopback only, on a port unlikely to be in use.
+# Local targets for the end-to-end suite. Loopback only, on ports unlikely to be in use.
+#
+#   target  a fast static nginx: proves a healthy system does NOT trip the brake, and that the mix,
+#           the cache classification and the archive all come out right.
+#   slow    a single-threaded origin with a per-request delay: proves the brake ABORTS a run. Nothing
+#           else in the suite can prove that, and a brake that stopped firing would be silent until the
+#           outage it exists to cut short.
 services:
   target:
     image: nginx:1.27-alpine
@@ -10,4 +16,19 @@ services:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 2s
       timeout: 2s
+      retries: 10
+
+  slow:
+    image: python:3.12-alpine
+    ports:
+      - "127.0.0.1:18081:80"
+    volumes:
+      - ./slow-origin.py:/slow-origin.py:ro
+    environment:
+      SLOW_MS: "300"
+    command: ["python3", "/slow-origin.py"]
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request;urllib.request.urlopen('http://127.0.0.1/')"]
+      interval: 2s
+      timeout: 4s
       retries: 10

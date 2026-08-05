@@ -1,0 +1,83 @@
+# Lint and the three suites that generate no load.
+#
+# `make test` is safe on a shared runner by construction: k6 is a stub on PATH and every load path runs
+# --dry-run, so what is asserted is the decision — refused or allowed, and with which arguments. Nothing
+# here sends a request to anything.
+#
+# Deliberately NOT here:
+#   make test-e2e     generates real load (on loopback, but real) and needs docker plus k6
+#   make image-smoke  covered by the image workflow, which owns the build
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # A clean clone must pass after `npm install` alone: no global bats, no global k6. If this step is
+      # ever not enough, the contributor experience is broken, not the runner.
+      - run: npm ci
+
+      # bash -n on the driver and node --check on every JS file. A syntax break in the driver must not be
+      # able to land: it would fail at the worst possible moment, in front of a target.
+      - name: Lint
+        run: make lint
+
+      - name: Unit tests (generator logic)
+        run: make test-unit
+
+      - name: GUI API tests
+        run: make test-gui
+
+      - name: CLI tests (safety gates, exit codes, release helper)
+        run: make test-cli
+
+      # Cheap guard against the docs drifting from the code they describe: every relative link in the
+      # README and in docs/ must resolve. A broken link in an install guide is a support request.
+      - name: Documentation links resolve
+        run: |
+          python3 - <<'PY'
+          import glob, os, re, sys
+          bad = []
+          for f in ['README.md'] + sorted(glob.glob('docs/*.md')):
+              base = os.path.dirname(f)
+              for m in re.finditer(r'\[[^\]]+\]\(([^)#]+)(#[^)]*)?\)', open(f).read()):
+                  t = m.group(1)
+                  if t.startswith('http'):
+                      continue
+                  if not os.path.exists(os.path.normpath(os.path.join(base, t))):
+                      bad.append(f"{f} -> {t}")
+          if bad:
+              print("broken links:"); print("\n".join("  " + b for b in bad)); sys.exit(1)
+          print("all relative links resolve")
+          PY
+
+      # The whole point of the suite split. If a load-generating suite ever sneaks into `make test`, this
+      # catches it here rather than on somebody's production.
+      - name: make test must not reference the load-generating suites
+        run: |
+          recipe=$(make -n test 2>/dev/null)
+          if printf '%s' "$recipe" | grep -qE 'test-e2e|image-smoke'; then
+            echo "::error::make test would run a suite that generates load"
+            exit 1
+          fi
+          echo "make test runs only the fake-backed suites"

@@ -1,0 +1,39 @@
+{
+  "name": "e2e-slow",
+  "description": "Profile for the brake leg of the end-to-end suite: a single-threaded origin on loopback and an SLO tight enough that a modest rate crosses it. The point is to prove the brake ABORTS a run — the fast leg (profile.json) proves the opposite case.",
+
+  "targets": {
+    "default": "slow",
+    "list": {
+      "slow": { "base_url": "http://127.0.0.1:18081" }
+    }
+  },
+
+  "classes": [
+    { "name": "rsc_page", "label": "RSC navigation", "weight": 60, "kind": "rsc", "pool": "pages" },
+    { "name": "html", "label": "HTML document", "weight": 40, "kind": "plain", "pool": "pages" }
+  ],
+
+  "pools": {
+    "pages": ["/", "/news", "/news/latest", "/teams/first-team"]
+  },
+
+  "rsc": { "param": "_rsc", "hashes": ["aa11b", "cc22d"] },
+
+  "cache_headers": [
+    { "label": "proxy", "header": "X-Proxy-Cache", "hit": "HIT|STALE" }
+  ],
+
+  "_slo_comment": "Tight on purpose. guillotine_ms is above max_p95_ms as it must be, but both are low enough that a single-threaded origin at this rate crosses them within one step.",
+  "slo": {
+    "max_failed_rate": 0.5,
+    "max_p95_ms": 700,
+    "guillotine_ms": 1000,
+    "brake_class": "rsc_page"
+  },
+
+  "safety": {
+    "safe_peak_rps": 40,
+    "allow_hosts": ["127.0.0.1"]
+  }
+}

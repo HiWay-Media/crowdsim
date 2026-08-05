@@ -1,5 +1,8 @@
 # crowdsim
 
+[![ci](https://github.com/HiWay-Media/crowdsim/actions/workflows/ci.yml/badge.svg)](https://github.com/HiWay-Media/crowdsim/actions/workflows/ci.yml)
+[![image](https://github.com/HiWay-Media/crowdsim/actions/workflows/image.yml/badge.svg)](https://github.com/HiWay-Media/crowdsim/actions/workflows/image.yml)
+
 Replay a **live-event traffic mix** against a web frontend, find the knee, and measure what caching
 would actually buy you — instead of estimating it from logs after the outage.
 
@@ -193,13 +196,14 @@ make image-smoke  # the built image: still the tool, gates intact (needs docker 
 | `tests/unit/` (`node --test`) | the generator's arithmetic and verdicts, extracted into `k6/lib/`: mix renormalisation, the ramp, VU provisioning, cache classification, `generator_ok`, `target_unreachable`. The tested code is the code k6 imports. |
 | `tests/cli/` (`bats`) | `bin/crowdsim` end to end against a stub k6: both safety gates, exit-code contract, profile and target resolution, empty-pool handling, history, and that the brake tripping still exits 0. |
 | `tests/gui/` (`node --test`) | the API over a real socket: path traversal out of the profile directory, the override confirmation, one-run-at-a-time, gate refusals passed through with their exit code, no webhook leakage. |
-| `tests/e2e/` | the whole chain against a real target: probe, load, mix proportions, cache classification, the history row, and the GUI reading them back. |
+| `tests/e2e/` | two legs on loopback: a fast nginx (the chain works, and a healthy target does **not** trip the brake) and a slow single-worker origin (**the brake does abort a run**, early, with the generator still holding the rate). Skips cleanly without docker or k6. |
 | `tests/image/` | the published artefact: the driver finds the generator, the GUI starts, and the gates survived the build — including that no allowlist default was baked in. Runs in CI before anything is pushed. |
 
 Two things the suites are built around, because they are how a load test lies to you:
 
 - **Nothing in `make test` sends a request.** k6 is a stub on `PATH` and every load path runs `--dry-run`,
-  so what is asserted is the decision — refused or allowed, and with which arguments.
+  so what is asserted is the decision — refused or allowed, and with which arguments. CI runs exactly those
+  suites, and asserts that `make test` cannot grow a dependency on a load-generating one.
 - **The unhappy summaries are fixtures.** A run with dropped iterations, and a run that failed instantly
   at ~0 ms, are asserted to be reported as *invalid* and as *unreachable* — never as a capacity number.
 

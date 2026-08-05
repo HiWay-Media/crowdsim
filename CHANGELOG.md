@@ -4,6 +4,46 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] — 2026-08-05
+
+The brake is now proven to fire, and the suites that prove it run on every push. Until this release the
+brake — the feature that makes it defensible to point this tool at anything — was only tested against
+synthetic metric trees and against a target that was *not* supposed to trip it.
+
+### Added
+- **`tests/e2e/`: a second leg that proves the brake aborts a run.** `slow-origin.py` accepts connections
+  freely and serialises the work through one worker with a delay, so offering it more requests per second
+  than it can serve makes a queue whose wait time grows — the shape of a real collapse. The leg asserts the
+  run aborted, that it stopped **early** (6 s of a planned 30 s — without this, a brake that never fires
+  passes by simply finishing), that the driver still exited 0, that the brake class's p95 crossed its SLO,
+  and that the archive recorded it.
+  - It also asserts `generator_ok` and `target_unreachable`, which is what makes the abort unambiguous:
+    without them an abort could equally mean "the generator collapsed" or "the target stopped answering",
+    and neither is a knee.
+  - It deliberately does not assert a non-zero share past the read timeout: at the moment the brake fires
+    that share is stochastic (0% and 6.7% on two consecutive runs), and the condition that stopped the run
+    is the p95.
+- **`.github/workflows/ci.yml`** — `make lint` plus the three fake-backed suites on every push and pull
+  request, on a clean checkout after `npm install` alone. It also checks that every relative link in the
+  README and `docs/` resolves, and guards that `make test` has not grown a dependency on a load-generating
+  suite. `make test-e2e` and `make image-smoke` are not part of it.
+- CI and image badges in the README.
+
+### Changed
+- **The e2e suite skips instead of failing** when docker or k6 is missing: a clear `⏭ SKIPPED` and exit 0.
+  It is legitimately skipped on most machines, and a red run that means "you don't have docker" teaches
+  people to ignore red runs. A failed assertion still exits 1.
+- The e2e suite's first leg is unchanged, and now runs alongside the second in one invocation; the GUI check
+  asserts both runs appear in the archive and that the aborted one is distinguishable.
+
+### Fixed
+- The slow origin was first written as a single-threaded `HTTPServer`. With HTTP/1.1 keep-alive it stays
+  inside one connection and never returns to `accept()`, so every other client waited for the first one to
+  go away: head-of-line blocking of the whole server, producing 10 s latencies that looked like a knee and
+  were an artefact. The run aborted for the wrong reason. Accepting freely and rationing the work is the
+  correct model, and the difference is visible — the same rate now produces a stable ~900 ms p95 instead of
+  a wall of timeouts.
+
 ## [1.2.2] — 2026-08-05
 
 The versioning rule and the documentation both stop depending on somebody remembering. Writing the docs

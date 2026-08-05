@@ -18,7 +18,7 @@ make image-smoke     # the built image: still the tool, gates intact
 | `tests/unit/` | `node --test` | `k6/lib/`: mix renormalisation, ramp, VU provisioning, RSC modes, cache classification, the three verdicts | no |
 | `tests/cli/` | `bats` | `bin/crowdsim` against a stub k6: both gates, exit codes, profile and target resolution, empty pools, `--touch-and-go`, history, and `scripts/new-release.sh` | no |
 | `tests/gui/` | `node --test` | the API over a real socket: traversal, the override confirmation, one-run-at-a-time, refusals passed through, read-only mounts | no |
-| `tests/e2e/` | shell + docker | the whole chain against a real target: probe, load, mix proportions, cache classification, history row, GUI reading them back | **yes**, on loopback |
+| `tests/e2e/` | shell + docker | two legs: a fast nginx (chain works, healthy target does *not* abort) and a slow single-worker origin (**the brake does abort**, early, generator still holding). Skips (exit 0) without docker or k6 | **yes**, on loopback |
 | `tests/image/` | shell + docker | the published artefact: driver finds generator, GUI starts, gates survived the build, no allowlist default | no |
 
 Two properties hold this together, and both are load-bearing:
@@ -27,9 +27,30 @@ Two properties hold this together, and both are load-bearing:
 is asserted is the *decision* — refused or allowed, and with which arguments. That is what makes the suite
 safe to run anywhere, at any time, including on a shared CI runner.
 
+**CI runs the fake-backed suites on every push and pull request** (`.github/workflows/ci.yml`: `make lint`,
+the three suites, a documentation link check, and a guard that `make test` has not grown a dependency on a
+load-generating suite). It deliberately does not run `make test-e2e` or `make image-smoke` — the image
+workflow owns the second.
+
 **The unhappy summaries are fixtures.** `tests/cli/fixtures/summary-invalid.json` and
 `summary-unreachable.json` are asserted to be reported as *invalid* and as *unreachable* — never as capacity
 numbers. A load test's failure mode is a plausible wrong answer, so the tests aim at exactly that.
+
+### Why the e2e suite has two legs
+
+A brake is only worth having if it fires. `brakeTripped()` is unit-tested against synthetic metric trees,
+and the fast leg asserts the *opposite* case — that a healthy target does not abort a run. Neither would
+notice a threshold expression with a typo, or a metric renamed by a k6 upgrade: the result is a brake that
+no longer stops anything, and the first person to find out is whoever is watching the outage.
+
+So the second leg runs against a slow origin (`tests/e2e/slow-origin.py`: connections accepted freely, work
+serialised through one worker with a delay) and asserts the brake *did* abort — early, with the generator
+still holding the rate and the target still answering. Those last two matter: without them an abort could
+equally mean "the generator collapsed" or "the target stopped talking to us", and neither is a knee.
+
+One thing it does **not** assert is a non-zero share past the read timeout: at the moment the brake fires
+that share is stochastic (0% and 6.7% on two consecutive runs). The condition that actually stopped the run
+is the brake class's p95 against its SLO, and that is what is checked.
 
 ### Writing a test
 
@@ -108,6 +129,7 @@ What the tag triggers once pushed:
 | `release.yml` | Publishes a GitHub Release whose notes are that CHANGELOG section (`new-release.sh notes`). Fails if the section is missing — a release tagged without being described is the thing to prevent. |
 | `image.yml` | Builds for the runner's arch → smoke-tests → builds `linux/amd64,linux/arm64` → pushes `{version}`, `{major}.{minor}` and `latest`. Nothing reaches the registry before the smoke test passes. |
 | `roadmap-sync.yml` | Only on roadmap changes: replays `.github/roadmap.json` onto labels, milestones and issues. |
+| `ci.yml` | On every push and pull request: lint plus the three suites that generate no load. |
 
 Version numbers and milestone names are **independent**. Milestone `v1.2.0` (the GUI) shipped inside release
 1.1.0; release 1.2.0 was the container image. Read the CHANGELOG for what a version contains, and the
