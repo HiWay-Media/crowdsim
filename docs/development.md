@@ -262,9 +262,14 @@ tests, an e2e leg that proves the brake aborts a run, the bandwidth estimate, `d
 (command preview, preflight tables, a restart that does not lose the run). These docs are published at
 [hiway-media.github.io/crowdsim](https://hiway-media.github.io/crowdsim/).
 
-The backlog is whatever is
-[open on the tracker](https://github.com/HiWay-Media/crowdsim/issues), and it is deliberately short. Two
-things are decided *not* to build, so nobody proposes them again as an oversight:
+Next is milestone [v1.4.0](https://github.com/HiWay-Media/crowdsim/milestone/5): two runs compared *in the
+page* with the same refusals the CLI applies, and `doctor --bench` measuring what this generator can sustain
+instead of trusting a `safety.generator_mbps` somebody typed once and copied between profiles. Both are the
+same theme — a judgement that already exists should not depend on which interface you happened to open, or on
+a number nobody re-measured.
+
+The rest is whatever is [open on the tracker](https://github.com/HiWay-Media/crowdsim/issues), and it is
+deliberately short. Two things are decided *not* to build, so nobody proposes them again as an oversight:
 
 - **A scheduler in the GUI.** Recurring load against production belongs somewhere auditable, where the
   target, the rate and the override are attributable to whoever asked. That is the Nomad or Kubernetes

@@ -4,6 +4,16 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.1] — 2026-08-05
+
+### Changed
+- `docs/development.md` names what is next instead of leaving it as "whatever is open on the tracker":
+  milestone [v1.4.0](https://github.com/HiWay-Media/crowdsim/milestone/5) is two runs compared *in the page*
+  with the same refusals the CLI applies, and `doctor --bench` measuring what this generator can sustain
+  rather than trusting a `safety.generator_mbps` somebody typed once and copied between profiles. One theme:
+  a judgement that already exists should not depend on which interface you opened, or on a number nobody
+  re-measured.
+
 ## [1.9.0] — 2026-08-05
 
 The last open feature on the tracker: the cache A/B third leg stops costing a compose edit.
