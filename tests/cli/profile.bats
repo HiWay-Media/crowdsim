@@ -16,8 +16,12 @@ resolved() { cat "$CROWDSIM_OUT"/profile-*.json; }
   [[ "$(resolved)" != *"documentation key"* ]]
 }
 
+# The two fixtures behind this test are deliberately NOT named `pool-*.json`: .gitignore blocks that
+# pattern so a real URL pool can never be committed, and it used to swallow them too — they existed on
+# every developer machine and on no CI runner, where this test failed and the missing-file test below
+# passed for the wrong reason.
 @test "an @file pool reference is inlined (this is what discover writes)" {
-  run "$CROWDSIM" load --profile "$FIXTURES/pool-file.json" --peak 10 --dry-run
+  run "$CROWDSIM" load --profile "$FIXTURES/with-pool-file.json" --peak 10 --dry-run
   [ "$status" -eq 0 ]
   [[ "$(resolved)" == *"/from-file"* ]]
 }

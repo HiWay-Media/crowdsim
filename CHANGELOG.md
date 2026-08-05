@@ -4,6 +4,29 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] — 2026-08-05
+
+Two CI failures, both of the same family: a suite that passed on every developer machine and could not
+pass on a clean checkout. That is the worst way for a test to be wrong — it reports the developer's
+environment, not the code, and it does so in green.
+
+### Fixed
+- **The CLI fixtures for `@file` pools were never in the repository.** `.gitignore` blocks `pool-*.json`
+  so a real URL pool — a map of somebody's site — can never be committed by accident. The rule is right;
+  it also swallowed `tests/cli/fixtures/pool-file.json` and `pool-pages.json`. Both existed locally, on no
+  runner, so the inlining test failed in CI while the *missing-file* test next to it passed for the wrong
+  reason: the file it expected to be absent was absent everywhere. The fixtures are renamed
+  (`with-pool-file.json`, `pages.pool.json`) rather than un-ignored — weakening that pattern to fix a test
+  is the wrong trade.
+- **The "cache-ab without docker" test assumed docker lives in `/usr/local/bin`.** It built a `PATH` from
+  that assumption, which holds on a developer's Mac and not on a Linux runner, where docker is in
+  `/usr/bin` alongside every other tool the driver needs — so docker was found, the exit-5 path was never
+  taken, and the test failed. It now uses a `path_without_docker` helper built from symlinks, the same way
+  the suite already handles a missing `k6` and a missing `node`.
+- `make test-unit` and `make test-gui` pass the test glob unquoted: `node --test` only learned to expand
+  globs in v22, and CI runs the LTS, where a quoted pattern arrives verbatim and fails with
+  "Could not find".
+
 ## [1.5.1] — 2026-08-05
 
 ### Added

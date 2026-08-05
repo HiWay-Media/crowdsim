@@ -109,9 +109,7 @@ setup() { crowdsim_setup; }
 
 @test "cache-ab without docker exits 5 rather than half-starting a leg" {
   # The A/B harness is two containers: without docker there is nothing to fall back to.
-  stub="$BATS_TEST_TMPDIR/stub"
-  PATH="$(printf '%s' "$PATH" | tr ':' '\n' | grep -v '/usr/local/bin' | paste -sd: -)" \
-    run env PATH="$stub:/usr/bin:/bin" "$CROWDSIM" cache-ab --profile "$FIXTURES/minimal.json"
+  run env PATH="$(path_without_docker)" "$CROWDSIM" cache-ab --profile "$FIXTURES/minimal.json"
   [ "$status" -eq 5 ]
   [[ "$output" == *"needs docker"* ]]
 }
