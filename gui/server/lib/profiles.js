@@ -102,13 +102,39 @@ export function writeProfile(dir, name, raw, opts) {
     throw e;
   }
   // Pretty-printed on purpose: profiles are read and diffed by humans, and they live in git.
-  fs.writeFileSync(full, JSON.stringify(parsed, null, 2) + '\n', 'utf8');
+  writeOrExplain(full, JSON.stringify(parsed, null, 2) + '\n');
   return { name, validation };
+}
+
+/**
+ * A read-only profile directory is a completely normal setup — it is what `-v ./profiles:/profiles:ro`
+ * gives you, and mounting your infrastructure map read-only is a reasonable thing to do. Reporting it as
+ * a 500 tells the operator the server is broken when in fact the server is behaving exactly as asked, so
+ * the filesystem's own refusal is translated instead of leaking as an internal error.
+ */
+function writeOrExplain(full, contents) {
+  try {
+    fs.writeFileSync(full, contents, 'utf8');
+  } catch (e) {
+    if (e.code === 'EROFS' || e.code === 'EACCES' || e.code === 'EPERM') {
+      throw new BadProfile(
+        `the profile directory is not writable (${e.code}): the GUI can read and run profiles but not ` +
+        'save them. Mount it read-write, or edit the file outside the GUI.', 409);
+    }
+    throw e;
+  }
 }
 
 export function deleteProfile(dir, name) {
   const full = profilePath(dir, name);
   if (name === 'example.json') throw new BadProfile('example.json is shipped with the repo');
-  try { fs.unlinkSync(full); } catch (e) { throw new BadProfile(`no such profile: ${name}`, 404); }
+  try {
+    fs.unlinkSync(full);
+  } catch (e) {
+    if (e.code === 'EROFS' || e.code === 'EACCES' || e.code === 'EPERM') {
+      throw new BadProfile(`the profile directory is not writable (${e.code})`, 409);
+    }
+    throw new BadProfile(`no such profile: ${name}`, 404);
+  }
   return { name, deleted: true };
 }

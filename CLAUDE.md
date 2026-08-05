@@ -34,6 +34,11 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
   toccano driver, generatore o API.
 - **I gate di sicurezza non si toccano** (vedi sotto): non indebolirli, non aggiungere default, non
   aggiungere prompt interattivi.
+- **Documentare SEMPRE, senza chiederlo.** Ogni cosa user-facing esce con: comandi copia-incollabili
+  (**provati**, non plausibili), reference di env/volumi/porte/exit code, e una tabella di troubleshooting
+  con sintomi reali. La doc serve all'utente per far capire ad altri come si installa e si usa: se manca,
+  la feature non è finita. Guida Docker: `docs/docker.md` (install, GUI, run singole, permessi,
+  troubleshooting). Ogni doc nuova va nell'**indice in README** (§Documentation), altrimenti non esiste.
 - **Il tono della documentazione è parte del prodotto**: spiega *perché* (incluse le trappole misurate),
   non elenca feature. Mantenerlo su ogni nuova sezione; niente marketing, niente numeri inventati.
 
@@ -127,6 +132,8 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
 
 - Verità funzionale: `README.md` (§Safety, §The container, §The GUI, §Tests, §Reading a result) e header
   di `bin/crowdsim`
+- **Guida Docker: `docs/docker.md`** (unica verità su install/uso via container) · `docker-compose.yml`
+  + `.env.example` avviano la GUI · indice doc in README §Documentation
 - Immagine: `Dockerfile` (3 stage) · `make image|image-smoke|image-run` · CI `.github/workflows/image.yml`
   (pubblica su tag `v*`; push su main costruisce e testa senza pubblicare)
 - Test: `make test` · `make test-e2e` · perimetro e razionale nel §Tests del README

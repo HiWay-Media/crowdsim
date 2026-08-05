@@ -48,6 +48,17 @@ crowdsim adds the three things that turn a load test into evidence:
 
 ## Install
 
+Two ways in. **Docker** installs nothing and gets you the GUI in three commands — start here if you just
+want to see it work; the full guide is [docs/docker.md](docs/docker.md):
+
+```bash
+git clone https://github.com/hiway-media/crowdsim && cd crowdsim
+cp .env.example .env                 # put a token in it: openssl rand -hex 16
+docker compose up                    # http://127.0.0.1:8787
+```
+
+**Natively**, which is what you want for running the generator from your own machine:
+
 ```bash
 brew install k6                      # macOS       — or see grafana.com/docs/k6 for Linux
 git clone https://github.com/hiway-media/crowdsim && cd crowdsim
@@ -57,9 +68,23 @@ git clone https://github.com/hiway-media/crowdsim && cd crowdsim
 The CLI needs only `k6`, `curl` and `python3`. `npm install` is optional and buys two things: the GUI
 (`crowdsim serve`) and the test suite.
 
+Which to use for what: the container is right for the GUI anywhere, and for the generator on a Linux host
+near the target. It is **wrong** for generating load from a macOS or Windows laptop against a remote
+target — the Docker network layer saturates before the target does and the run is invalid. Native k6 for
+that. [docs/docker.md](docs/docker.md) explains what that failure looks like so you can recognise it.
+
 ### The container
 
-One image, published on every release, containing the driver, the generator and the GUI:
+One image, published on every release, containing the driver, the generator and the GUI. The complete
+guide — install, mounts, environment, permissions, exit codes, troubleshooting — is
+**[docs/docker.md](docs/docker.md)**. The short version:
+
+```bash
+cp .env.example .env      # put a token in it: openssl rand -hex 16
+docker compose up         # the GUI on http://127.0.0.1:8787
+```
+
+and the pieces that command is made of:
 
 ```bash
 docker pull ghcr.io/hiway-media/crowdsim:1.2.0        # or :1.2, or :latest
@@ -125,8 +150,12 @@ implies, launch, watch the log stream, read the result, compare it with previous
 npm install && npm run gui:build      # once
 crowdsim serve                        # http://127.0.0.1:8787
 
-make image-run                        # or straight from the container image, no node needed
+docker compose up                     # or from the container image: no node, no build
 ```
+
+Running it in Docker has one wrinkle worth knowing — inside a container, binding loopback means
+"reachable by nobody", so the bind moves to `0.0.0.0` and the reachability decision moves to the port
+publication. [docs/docker.md §4](docs/docker.md#4-using-the-gui) covers it.
 
 ```
  ▮▮ crowdsim            k6 v0.52.0   allowlist www.example.test   output ./out
@@ -253,6 +282,18 @@ The GUI has no scheduler and no user accounts, also deliberately. Recurring load
 production is a decision that belongs in something auditable — the Nomad job is dispatched with the
 target, the rate and the override in the dispatch call, which is logged and attributable to whoever made
 it. A cron button on a web page is not.
+
+## Documentation
+
+| Where | What |
+|---|---|
+| this README | what crowdsim measures, why the profile is the whole configuration, how to read a result |
+| [docs/docker.md](docs/docker.md) | install and use from the container image: GUI, single runs, mounts, environment, permissions, exit codes, troubleshooting |
+| [`profiles/example.json`](profiles/example.json) | every profile field, documented inline |
+| [`cache-ab/README.md`](cache-ab/README.md) | measuring what a cache change actually buys |
+| [`nomad/crowdsim.nomad.hcl`](nomad/crowdsim.nomad.hcl) | the parameterized batch job, and why it is batch |
+| `crowdsim --help` | the subcommands and every flag |
+| [CHANGELOG.md](CHANGELOG.md) | what changed in each release |
 
 ## License
 

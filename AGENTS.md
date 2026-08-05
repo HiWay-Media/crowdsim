@@ -38,6 +38,11 @@ in questo repository.
   toccano driver, generatore o API.
 - **I gate di sicurezza non si toccano** (vedi sotto): non indebolirli, non aggiungere default, non
   aggiungere prompt interattivi.
+- **Documentare SEMPRE, senza chiederlo.** Ogni cosa user-facing esce con: comandi copia-incollabili
+  (**provati**, non plausibili), reference di env/volumi/porte/exit code, e una tabella di troubleshooting
+  con sintomi reali. La doc serve all'utente per far capire ad altri come si installa e si usa: se manca,
+  la feature non e finita. Guida Docker: `docs/docker.md`. Ogni doc nuova va nell'**indice in README**
+  (sezione Documentation), altrimenti non esiste.
 - **Il tono della documentazione e parte del prodotto**: spiega il perche (incluse le trappole
   misurate), non elenca feature. Niente marketing, niente numeri inventati.
 
@@ -132,6 +137,8 @@ in questo repository.
 
 - Verita funzionale: `README.md` (sezioni Safety, The container, The GUI, Tests, Reading a result) e
   header di `bin/crowdsim`
+- **Guida Docker: `docs/docker.md`** (unica verita su install/uso via container); `docker-compose.yml` +
+  `.env.example` avviano la GUI; indice doc in README sezione Documentation
 - Immagine: `Dockerfile` (3 stage), `make image|image-smoke|image-run`, CI `.github/workflows/image.yml`
   (pubblica sui tag `v*`; un push su main costruisce e testa senza pubblicare)
 - Test: `make test` e `make test-e2e`; perimetro e razionale nella sezione Tests del README

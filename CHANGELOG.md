@@ -4,6 +4,24 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] — 2026-08-05
+
+### Added
+- **`docs/docker.md`**: the complete Docker guide — what is in the image, the two gates as they behave in
+  a container, pulling or building, verifying what you got, the GUI (compose and `docker run`, and why the
+  bind is `0.0.0.0` while the publication is `127.0.0.1`), single runs, reading the archive, a full
+  reference of environment variables / mounts / ports / exit codes / the uid the image runs as, what the
+  container deliberately cannot do, Nomad, a troubleshooting table, and the publish pipeline.
+- **`docker-compose.yml`** + `.env.example`: `docker compose up` starts the GUI with `./profiles` and
+  `./out` mounted from the checkout. It defines no generator service on purpose — a compose service that
+  restarts would re-fire load every time the brake trips — and it refuses to start without a token.
+- README: a Docker-first install path, a documentation index, and pointers into the guide.
+
+### Fixed
+- Saving a profile with `/profiles` mounted read-only returned a bare `500`. A read-only mount is a normal
+  Docker setup, so the filesystem's refusal is now translated: `409` with "the GUI can read and run
+  profiles but not save them". Listing, validating and running keep working. Covered by a GUI test.
+
 ## [1.2.0] — 2026-08-05
 
 One container image, published to a registry, containing the driver, the generator and the GUI — so the

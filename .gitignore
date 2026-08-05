@@ -24,3 +24,6 @@ gui/ui/dist/
 
 # End-to-end suite scratch (container logs, summaries from the local target)
 tests/e2e/.out/
+
+# Local compose environment: token, hostnames.
+.env

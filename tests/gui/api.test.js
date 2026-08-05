@@ -125,6 +125,25 @@ test('PUT writes a profile, refuses invalid JSON, and refuses one with errors', 
   });
 });
 
+test('a read-only profile directory is explained, not reported as a server error', async () => {
+  // This is what `-v ./profiles:/profiles:ro` gives you, and it is a reasonable way to mount a map of
+  // your infrastructure. A 500 would tell the operator the server is broken when it is doing as asked.
+  await withServer({}, async ({ api, profilesDir }) => {
+    fs.chmodSync(profilesDir, 0o500);
+    try {
+      const r = await api('PUT', '/api/profiles/new.json', { raw: '{"name":"x"}', force: true });
+      assert.equal(r.status, 409);
+      assert.match(r.json.error, /not writable/);
+      assert.match(r.json.error, /read and run profiles but not save/);
+      // reading and listing keep working: a read-only mount is usable, just not editable
+      assert.equal((await api('GET', '/api/profiles')).status, 200);
+      assert.equal((await api('GET', '/api/profiles/site.json')).status, 200);
+    } finally {
+      fs.chmodSync(profilesDir, 0o700);
+    }
+  });
+});
+
 test('example.json is read-only: it is the shipped documentation', async () => {
   await withServer({}, async ({ api }) => {
     const r = await api('PUT', '/api/profiles/example.json', { raw: '{"name":"x"}' });

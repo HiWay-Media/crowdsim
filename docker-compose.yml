@@ -1,0 +1,53 @@
+# The crowdsim GUI, from the published image. Two commands and a browser:
+#
+#   cp .env.example .env && "${EDITOR:-vi}" .env      # set a token and your allowlist
+#   docker compose up
+#
+# then open http://127.0.0.1:8787 and paste the token when the page asks for it.
+#
+# This file starts the GUI and nothing else. It deliberately does NOT define a generator service: a
+# generator is a bounded run with an outcome, not something to keep alive — and a compose service that
+# restarts would re-fire load at your target every time the brake trips, which is the exact opposite of
+# what the brake is for. Runs are started from the page, or with `docker run` (see docs/docker.md).
+
+services:
+  gui:
+    # Pin a released tag. Override with CROWDSIM_IMAGE=crowdsim:dev to use a locally built image.
+    image: ${CROWDSIM_IMAGE:-ghcr.io/hiway-media/crowdsim:1.2.0}
+    command: ["crowdsim", "serve"]
+
+    # 127.0.0.1 on purpose: this page can start a load generator. Publishing it on every interface would
+    # leave a stranger's curiosity one HTTP request away from your production.
+    ports:
+      - "127.0.0.1:8787:8787"
+
+    environment:
+      # Inside a container, binding loopback would mean "reachable by nobody" — the reachability decision
+      # is the port publication above, not this.
+      CROWDSIM_GUI_BIND: "0.0.0.0"
+      # No default, and compose refuses to start without it: the server demands a token for any
+      # non-loopback bind, and it cannot tell how narrowly you published the port.
+      CROWDSIM_GUI_TOKEN: ${CROWDSIM_GUI_TOKEN:?set CROWDSIM_GUI_TOKEN (e.g. openssl rand -hex 16) — see .env.example}
+      # The hosts this container may generate load against. Empty means every run falls back to the
+      # profile's own safety.allow_hosts, and a profile without one cannot run at all.
+      CROWDSIM_ALLOW_TARGETS: ${CROWDSIM_ALLOW_TARGETS:-}
+      # A webhook is a secret: keep it in .env, never in this file.
+      CROWDSIM_SLACK_WEBHOOK: ${CROWDSIM_SLACK_WEBHOOK:-}
+
+    volumes:
+      # Read-write so the GUI's editor can save. Mount it :ro and the page still lists and runs profiles,
+      # it just reports that it cannot save them.
+      - ./profiles:/profiles
+      # The run archive: summaries, logs, history.tsv. The same files the CLI writes.
+      - ./out:/out
+
+    # Never `always`. A crash loop must not become a load loop.
+    restart: "no"
+
+    # The GUI is reachable when /api/env answers; a token is required, so this asks for the page instead.
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:8787/"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 5s
