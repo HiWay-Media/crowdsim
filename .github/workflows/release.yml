@@ -33,10 +33,14 @@ jobs:
           ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0            # the script reads tags
 
+      # Every value that reaches a `run:` block does so through env, never through `${{ }}` pasted into the
+      # script: a tag name is chosen by whoever pushes the tag, and pasted text is code.
       - name: Work out the version
         id: v
+        env:
+          REF: ${{ inputs.tag || github.ref_name }}
         run: |
-          ref="${{ inputs.tag || github.ref_name }}"
+          ref="$REF"
           version="${ref#v}"
           case "$version" in
             [0-9]*.[0-9]*.[0-9]*) ;;
@@ -46,46 +50,56 @@ jobs:
           echo "tag=$ref" >> "$GITHUB_OUTPUT"
 
       - name: Check the version bump landed with the tag
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
         run: |
           in_pkg=$(python3 -c 'import json;print(json.load(open("package.json"))["version"])')
-          if [ "$in_pkg" != "${{ steps.v.outputs.version }}" ]; then
-            echo "::error::package.json says $in_pkg but the tag says ${{ steps.v.outputs.version }} —" \
+          if [ "$in_pkg" != "$VERSION" ]; then
+            echo "::error::package.json says $in_pkg but the tag says $VERSION —" \
                  "the tag does not point at the release commit"
             exit 1
           fi
 
+      # The notes go to a FILE and are handed over with --notes-file. They must never travel through a
+      # shell string: a `${{ }}` expression is pasted into the script before bash parses it, and inside
+      # double quotes bash still honours backticks and $( ) — so a CHANGELOG section written in this
+      # project's own voice (which is full of `code spans` and ``` fences) gets executed instead of
+      # published. That is how 1.5.2 failed to release: the notes ran `make test-gui` and a `docker pull`.
       - name: Extract the release notes from the CHANGELOG
-        id: notes
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+          TAG: ${{ steps.v.outputs.tag }}
+          REPO: ${{ github.repository }}
         run: |
           chmod +x scripts/new-release.sh
+          # GHCR rejects an uppercase path, and the org name has capitals: the image is published under the
+          # lowercased name by docker/metadata-action, so the pull command in the notes must match it or it
+          # is a copy-pasteable error.
+          image="ghcr.io/$(printf '%s' "$REPO" | tr '[:upper:]' '[:lower:]')"
           {
-            echo 'body<<CROWDSIM_NOTES_EOF'
-            scripts/new-release.sh notes "${{ steps.v.outputs.version }}"
-            echo
-            echo "---"
-            echo
-            echo "**Container image**"
-            echo '```'
-            echo "docker pull ghcr.io/${{ github.repository }}:${{ steps.v.outputs.version }}"
-            echo '```'
-            echo
-            echo "Install and usage: [docs/docker.md](https://github.com/${{ github.repository }}/blob/${{ steps.v.outputs.tag }}/docs/docker.md)"
-            echo 'CROWDSIM_NOTES_EOF'
-          } >> "$GITHUB_OUTPUT"
+            scripts/new-release.sh notes "$VERSION"
+            printf '\n---\n\n**Container image**\n\n'
+            printf '```\ndocker pull %s:%s\n```\n\n' "$image" "$VERSION"
+            printf 'Install and usage: [docs/docker.md](https://github.com/%s/blob/%s/docs/docker.md)\n' \
+              "$REPO" "$TAG"
+          } > "$RUNNER_TEMP/notes.md"
+          echo "Release notes: $(wc -l < "$RUNNER_TEMP/notes.md") lines" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Publish the release
         env:
           GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.v.outputs.version }}
+          TAG: ${{ steps.v.outputs.tag }}
         run: |
-          if gh release view "${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
-            gh release edit "${{ steps.v.outputs.tag }}" \
-              --title "crowdsim ${{ steps.v.outputs.version }}" \
-              --notes "${{ steps.notes.outputs.body }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" \
+              --title "crowdsim $VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md"
             echo "Updated the existing release." >> "$GITHUB_STEP_SUMMARY"
           else
-            gh release create "${{ steps.v.outputs.tag }}" \
-              --title "crowdsim ${{ steps.v.outputs.version }}" \
-              --notes "${{ steps.notes.outputs.body }}" \
+            gh release create "$TAG" \
+              --title "crowdsim $VERSION" \
+              --notes-file "$RUNNER_TEMP/notes.md" \
               --verify-tag
-            echo "Published crowdsim ${{ steps.v.outputs.version }}." >> "$GITHUB_STEP_SUMMARY"
+            echo "Published crowdsim $VERSION." >> "$GITHUB_STEP_SUMMARY"
           fi
