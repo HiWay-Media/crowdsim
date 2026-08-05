@@ -233,7 +233,8 @@ dropped — which is the only version of "verify the URLs first" that actually h
 "journey": { "file": "journey.json" }
 ```
 
-Only for `--shape journey`: a recorded fan-out of `{path, rsc[], static[]}` per page, relative to the
+Only for `--shape journey`: a recorded fan-out of `{path, rsc[], static[]}` per page, written by
+`crowdsim record <file.har>` from a browser HAR export (see [CLI reference](cli.md#record)), relative to the
 profile. One iteration is one visitor session — a document plus its fan-out, then 2–4 in-app navigations
 with think time between them. Record it with a real browser against your own site.
 

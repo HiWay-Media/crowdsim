@@ -23,6 +23,8 @@
 #   cache-ab    A/B a candidate cache config: two local nginx legs against the same origin, one with
 #               the tweak under evaluation and one as-is → measured hit ratio and offload
 #   history     one line per run, to see whether the knee moves over time
+#   compare     the delta between two runs, and a refusal when they are not comparable
+#   record      turn a browser HAR export into a journey file for --shape journey (needs node)
 #   validate    check a profile against every rule at once, without generating anything (needs node)
 #   serve       the GUI: same gates, same output directory, on http://127.0.0.1:8787 (needs node)
 #
@@ -35,6 +37,8 @@
 #                     [--rsc-mode repeat|random] [--max-5xx 0.05] [--max-p95 5000]
 #                     [--safe-peak 150] [--i-know-this-breaks-production] [--touch-and-go] [--dry-run]
 #   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10]
+#   crowdsim compare  <run-a> <run-b>
+#   crowdsim record   <file.har> [--out <journey.json>] [--origin <url>] [--rsc-query _rsc] [--force]
 #   crowdsim validate <f.json>
 #   crowdsim serve    [--port 8787] [--bind 127.0.0.1]
 #
@@ -64,6 +68,7 @@ PROFILE_F=""; TARGET=""; SHAPE="mix"; PEAK=60; START=15; STEPS=4; STEP_DUR="60s"
 RSC_MODE="repeat"; MAX_5XX=""; MAX_P95=""; SAFE_PEAK=""; ABORT_DELAY="30s"; TOUCH_AND_GO=0
 BASE_URL_OVERRIDE=""; SLACK=0; DRY=0; FORCE=0; LIMIT=400; TTL=10; INSECURE=0; SKIP_CLASSES=""
 VERIFY=0
+POSITIONAL=()
 GUI_PORT=""; GUI_BIND=""
 
 usage() { sed -n '1,60p' "$0" | grep -E '^#' | sed 's/^# \{0,1\}//'; }
@@ -102,6 +107,10 @@ while [ $# -gt 0 ]; do
     --abort-delay) ABORT_DELAY="$2"; shift 2;;
     --port) GUI_PORT="$2"; shift 2;;
     --bind) GUI_BIND="$2"; shift 2;;
+    --out) JOURNEY_OUT="$2"; shift 2;;
+    --origin) RECORD_ORIGIN="$2"; shift 2;;
+    --rsc-query) RSC_QUERY_OVERRIDE="$2"; shift 2;;
+    --force) FORCE_OVERWRITE=1; shift;;
     --verify) VERIFY=1; shift;;
     --touch-and-go) TOUCH_AND_GO=1; shift;;
     --insecure) INSECURE=1; shift;;
@@ -110,8 +119,10 @@ while [ $# -gt 0 ]; do
     --i-know-this-breaks-production) FORCE=1; shift;;
     -h|--help) usage; exit 0;;
     # `crowdsim validate my-site.json` reads better than requiring --profile for a command whose only
-    # argument IS the profile. Everywhere else a bare word is still a mistake worth stopping for.
+    # argument IS the profile, and the same goes for the two run ids `compare` works on. Everywhere else a
+    # bare word is still a mistake worth stopping for.
     *) if [ "$CMD" = "validate" ] && [ -z "$PROFILE_F" ]; then PROFILE_F="$1"; shift
+       elif [ "$CMD" = "compare" ] || [ "$CMD" = "record" ]; then POSITIONAL+=("$1"); shift
        else die "unknown option: $1" 2; fi;;
   esac
 done
@@ -776,6 +787,237 @@ cmd_history() {
   if [ -f "$HISTORY_F" ]; then column -t -s $'\t' "$HISTORY_F"; else say "no runs yet ($HISTORY_F)"; fi
 }
 
+# ─────────────────────────────── compare: the only honest number ─────────────────────────────────────
+# This tool measures DELTAS honestly and absolutes optimistically: a synthetic pool of cold URLs is more
+# severe than real traffic, so "p95 was 240 ms" travels badly and "p95 fell 38% after the cache change" is
+# the claim worth making. Until now that comparison was done by opening two summary files side by side.
+#
+# The value is entirely in what it REFUSES. Two runs at different URL pools are two different experiments,
+# and a run with generator_ok: false has no numbers at all — comparing either quietly produces a confident
+# figure with nothing behind it, which is worse than no comparison. So mismatches stop the command (exit 2)
+# instead of appearing as a footnote nobody reads.
+cmd_compare() {
+  local a="${POSITIONAL[0]:-}" b="${POSITIONAL[1]:-}"
+  if [ -z "$a" ] || [ -z "$b" ]; then
+    die "compare needs two run ids: crowdsim compare <run-a> <run-b> (see crowdsim history)" 2
+  fi
+  local rc=0
+  python3 - "$OUT_DIR" "$a" "$b" <<'PY' || rc=$?
+import json, os, sys
+
+out_dir, a_id, b_id = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def load(run_id, what):
+    path = os.path.join(out_dir, f'{what}-{run_id}.json')
+    try:
+        return json.load(open(path, encoding='utf-8'))
+    except FileNotFoundError:
+        return None
+    except Exception as e:
+        print(f'  ❌ {path} does not parse: {e}')
+        raise SystemExit(2)
+
+def refuse(*lines):
+    print('  ⛔ refusing to compare these two runs:')
+    for l in lines:
+        print(f'     {l}')
+    print('     A comparison that is not like-for-like is a confident number with nothing behind it.')
+    raise SystemExit(2)
+
+runs = {}
+for run_id in (a_id, b_id):
+    s = load(run_id, 'summary')
+    if s is None:
+        print(f'  ❌ no summary for {run_id} in {out_dir} — is that a run id? (crowdsim history)')
+        raise SystemExit(2)
+    runs[run_id] = s
+
+A, B = runs[a_id], runs[b_id]
+
+# 1. A run the generator could not deliver has no numbers to compare. This is first because it is the one
+#    that looks most like a valid result.
+invalid = [r for r in (a_id, b_id) if runs[r].get('generator_ok') is False]
+if invalid:
+    refuse(*[f'{r} has generator_ok: false — the generator, not the target, was the bottleneck'
+             for r in invalid],
+           'Move the generator closer to the target and run it again; nothing in that run is measurable.')
+
+if any(runs[r].get('target_unreachable') for r in (a_id, b_id)):
+    refuse(*[f'{r} never reached its target' for r in (a_id, b_id) if runs[r].get('target_unreachable')])
+
+# 2. Different pools mean two different experiments. The resolved profile of each run has the pools inlined,
+#    which is exactly why it is archived.
+pa, pb = load(a_id, 'profile'), load(b_id, 'profile')
+if pa is None or pb is None:
+    print('  ⚠️  one of the runs has no resolved profile archived, so the URL pools cannot be compared.')
+    print('     Runs from 1.0.0 onwards write profile-<run>.json; older ones do not.')
+else:
+    ka, kb = pa.get('pools') or {}, pb.get('pools') or {}
+    if set(ka) != set(kb):
+        refuse(f'different pool names: {sorted(set(ka))} vs {sorted(set(kb))}')
+    differing = [k for k in ka if ka[k] != kb.get(k)]
+    if differing:
+        refuse(*[f'pool "{k}" is not the same list of URLs in both runs '
+                 f'({len(ka[k])} vs {len(kb.get(k) or [])} entries)' for k in differing],
+               'Numbers are comparable only between runs at an identical pool: a colder pool is a harder '
+               'test.')
+
+if A.get('shape') != B.get('shape'):
+    refuse(f'different shapes: {A.get("shape")} vs {B.get("shape")} — a journey and a mix are not the '
+           'same load')
+
+# 3. Same pool, different target or different peak is a legitimate question — but it changes what the delta
+#    MEANS, so it is stated rather than assumed.
+notes = []
+if A.get('base_url') != B.get('base_url'):
+    notes.append(f'different targets ({A.get("base_url")} → {B.get("base_url")}): this is a comparison '
+                 'BETWEEN TWO TARGETS, not a before/after of one')
+if A.get('profile') != B.get('profile'):
+    notes.append(f'different profiles ({A.get("profile")} → {B.get("profile")})')
+if A.get('peak_rps_user_target') != B.get('peak_rps_user_target'):
+    notes.append(f'different peaks ({A.get("peak_rps_user_target")} → {B.get("peak_rps_user_target")} '
+                 'req/s): latency at different rates is a different question')
+for r in (a_id, b_id):
+    if runs[r].get('aborted'):
+        notes.append(f'{r} was aborted by the brake: its numbers describe the moment the SLO was crossed')
+
+# ── the report ─────────────────────────────────────────────────────────────────────────────────────
+def ms(v):
+    # A tenth of a millisecond matters on a loopback target and is noise on a real one, so the precision
+    # follows the number: "0 ms → 0 ms (+67%)" reads like a broken calculation.
+    if v is None:
+        return '—'
+    return f'{v:.2f} ms' if abs(v) < 10 else f'{v:.0f} ms'
+
+def pct(v):
+    return '—' if v is None else f'{v * 100:.2f}%'
+
+def delta(before, after, unit='ms', lower_is_better=True):
+    """Signed change, plus a marker. No marker when there is nothing to compare."""
+    if before is None or after is None:
+        return '—'
+    diff = after - before
+    if unit == 'ms':
+        shown = f'{diff:+.2f} ms' if abs(diff) < 10 else f'{diff:+.0f} ms'
+    elif unit == 'pp':
+        shown = f'{diff * 100:+.2f} pp'
+    else:
+        shown = f'{diff:+.0f}'
+    rel = ''
+    if before:
+        rel = f' ({diff / before * 100:+.0f}%)'
+    if abs(diff) < 1e-9:
+        mark = '  ='
+    elif (diff < 0) == lower_is_better:
+        mark = ' ✅'
+    else:
+        mark = ' ⚠️'
+    return f'{shown}{rel}{mark}'
+
+print()
+print(f'  A  {a_id}   profile {A.get("profile")}  {A.get("base_url")}  '
+      f'shape {A.get("shape")}  peak {A.get("peak_rps_user_target")}')
+print(f'  B  {b_id}   profile {B.get("profile")}  {B.get("base_url")}  '
+      f'shape {B.get("shape")}  peak {B.get("peak_rps_user_target")}')
+if notes:
+    print()
+    for n in notes:
+        print(f'  ℹ️  {n}')
+
+print()
+print('  ── overall ─────────────────────────────────────────────────────────────────────')
+print(f'  {"":<18}{"A":>12}{"B":>12}   change')
+rows = [
+    ('p50', A['dur'].get('p50'), B['dur'].get('p50'), 'ms', True),
+    ('p95', A['dur'].get('p95'), B['dur'].get('p95'), 'ms', True),
+    ('p99', A['dur'].get('p99'), B['dur'].get('p99'), 'ms', True),
+    ('failed rate', A.get('failed_rate'), B.get('failed_rate'), 'pp', True),
+    (f'over {A.get("guillotine_ms")} ms', A.get('over_guillotine_rate'), B.get('over_guillotine_rate'),
+     'pp', True),
+]
+for label, av, bv, unit, lower in rows:
+    fmt = ms if unit == 'ms' else pct
+    print(f'  {label:<18}{fmt(av):>12}{fmt(bv):>12}   {delta(av, bv, unit, lower)}')
+print(f'  {"504s":<18}{A.get("e504", 0):>12}{B.get("e504", 0):>12}   '
+      f'{delta(A.get("e504", 0), B.get("e504", 0), "n", True)}')
+print(f'  {"requests":<18}{A.get("requests", 0):>12}{B.get("requests", 0):>12}')
+
+# Cache hit ratio per layer. None means the header never appeared: reported as n/a, never as 0%.
+layers = [k for k in (A.get('cache') or {})] + [k for k in (B.get('cache') or {})
+                                                if k not in (A.get('cache') or {})]
+if layers:
+    print()
+    print('  ── cache hit ratio per layer ───────────────────────────────────────────────────')
+    print(f'  {"":<18}{"A":>12}{"B":>12}   change')
+    for layer in layers:
+        av = (A.get('cache') or {}).get(layer)
+        bv = (B.get('cache') or {}).get(layer)
+        if av is None and bv is None:
+            print(f'  {layer:<18}{"n/a":>12}{"n/a":>12}   header never appeared in either run')
+            continue
+        print(f'  {layer:<18}{pct(av):>12}{pct(bv):>12}   '
+              f'{delta(av, bv, "pp", False)}')
+
+# Per class: the same numbers, where a regression actually lives.
+classes = [c for c in (A.get('per_class') or {})]
+for c in (B.get('per_class') or {}):
+    if c not in classes:
+        classes.append(c)
+if classes:
+    print()
+    print('  ── per class ───────────────────────────────────────────────────────────────────')
+    print(f'  {"class":<14}{"p95 A":>10}{"p95 B":>10}{"change":>18}{"failed A":>10}{"failed B":>10}')
+    for c in classes:
+        ca = (A.get('per_class') or {}).get(c) or {}
+        cb = (B.get('per_class') or {}).get(c) or {}
+        if not ca or not cb:
+            only = 'A' if ca else 'B'
+            print(f'  {c:<14}  present only in run {only} (a class was skipped, or the profile changed)')
+            continue
+        print(f'  {c:<14}{ms(ca.get("p95")):>10}{ms(cb.get("p95")):>10}'
+              f'{delta(ca.get("p95"), cb.get("p95")):>18}'
+              f'{pct(ca.get("failed")):>10}{pct(cb.get("failed")):>10}')
+
+print()
+print('  Deltas are the honest part. The absolutes above describe this pool, which is colder than real')
+print('  traffic — quote the change, not the number.')
+PY
+  if [ "$rc" != "0" ]; then exit "$rc"; fi
+}
+
+# ─────────────────────────────── record: a journey from a browser recording ──────────────────────────
+# `--shape journey` reproduces a visitor session — one document plus the fan-out the browser performs — and
+# it needs a file of {path, rsc[], static[]} per page. The instruction used to be "record it with a real
+# browser", with no way to turn that recording into the file, so the mode went unused and the mix shape
+# carried load nobody clicks.
+#
+# A HAR export is that recording. The judgements it takes (drop third-party hosts, strip per-request cache
+# busters but keep build hashes, do not record failures) live in lib/har.mjs with unit tests, because each of
+# them is a way to end up measuring something other than your site.
+cmd_record() {
+  local har="${POSITIONAL[0]:-}"
+  if [ -z "$har" ]; then
+    die "record needs a HAR file: crowdsim record <file.har> [--out <journey.json>]" 2
+  fi
+  if [ ! -f "$har" ]; then die "no such file: $har" 2; fi
+  if ! command -v node >/dev/null 2>&1; then
+    die "crowdsim record needs node (18+): the HAR rules live in lib/har.mjs, where they are tested" 5
+  fi
+  local recorder="$ROOT/lib/record-cli.mjs"
+  if [ ! -f "$recorder" ]; then die "missing $recorder (is CROWDSIM_ROOT right?)" 5; fi
+
+  # Default destination: next to the run output, which is gitignored. A journey names real routes on a real
+  # site — the same category as a URL pool — so it must not land in profiles/ by default or by accident.
+  local out="${JOURNEY_OUT:-$OUT_DIR/journey-$RUN_ID.json}"
+  mkdir -p "$OUT_DIR"
+  say "▶ reading $har"
+  local -a args=("$recorder" "$har" --out "$out" --profiles-dir "${CROWDSIM_PROFILES:-$ROOT/profiles}")
+  if [ -n "${RECORD_ORIGIN:-}" ]; then args+=(--origin "$RECORD_ORIGIN"); fi
+  if [ -n "${RSC_QUERY_OVERRIDE:-}" ]; then args+=(--rsc-query "$RSC_QUERY_OVERRIDE"); fi
+  if [ "${FORCE_OVERWRITE:-0}" = "1" ]; then args+=(--force); fi
+  exec node "${args[@]}"
+}
+
 notify_slack() {
   local hook="${CROWDSIM_SLACK_WEBHOOK:-}"
   if [ -z "$hook" ]; then warn "--slack given but CROWDSIM_SLACK_WEBHOOK is unset"; return 0; fi
@@ -849,6 +1091,8 @@ case "$CMD" in
   load)     cmd_load;;
   cache-ab) cmd_cache_ab;;
   history)  cmd_history;;
+  compare)  cmd_compare;;
+  record)   cmd_record;;
   validate) cmd_validate;;
   serve)    cmd_serve;;
   *)        die "unknown subcommand: $CMD (try --help)" 2;;

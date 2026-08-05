@@ -328,8 +328,9 @@ the profile directory — a profile path is user input, and a profile is a map o
 - **No user accounts.** One token, or loopback. This is a console, not a portal.
 - **No results of its own.** Everything shown comes from the driver's files. A second version of the truth is
   always the wrong one.
-- **No `crowdsim compare` yet.** History compares runs; a first-class delta between two named runs is
-  [issue #13](https://github.com/HiWay-Media/crowdsim/issues/13).
+- **No comparison of arbitrary runs in the page.** History compares a selected run against previous runs at
+  the same profile, target and shape. Two runs by name, with the refusals, is `crowdsim compare` in a
+  terminal — see [CLI reference](cli.md#compare).
 
 ## See also
 

@@ -4,6 +4,57 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] — 2026-08-05
+
+The last two items of milestone v1.3.0: the comparison that carries the meaning, and a way to produce the
+journey file the journey shape has always needed.
+
+### Added
+- **`crowdsim compare <run-a> <run-b>`** ([#13](https://github.com/HiWay-Media/crowdsim/issues/13)) — overall
+  and per-class p50/p95/p99, failed rate, share past the read timeout, 504s and the cache hit ratio per
+  layer, with an improvement and a regression marked differently.
+
+  **What it refuses is the feature**, because this tool measures deltas honestly and absolutes optimistically,
+  so a comparison is the claim people actually make out loud. Exit 2, with the reason, when either run has
+  `generator_ok: false` (that run has no numbers at all), when either never reached its target, when the URL
+  pools differ (two different experiments — compared from the archived `profile-<run>.json`, which is why it
+  is archived), or when the shapes differ. A different **target** or **peak** is a legitimate question, so it
+  is allowed and *stated*: the report says this is a comparison between two targets, not a before/after of
+  one. A cache header that never appeared stays `n/a` in the delta and is never called 0%.
+- **`crowdsim record <file.har>`** ([#21](https://github.com/HiWay-Media/crowdsim/issues/21)) — a browser HAR
+  export becomes the `{path, rsc[], static[]}` journey file `--shape journey` needs. The instruction used to
+  be "record it with a real browser" with no way to turn the recording into the file, so the mode went unused
+  and the mix shape carried load nobody clicks.
+
+  Four judgements, each of them a way to end up measuring something other than your own site, and each unit
+  tested in `tests/unit/har.test.js`:
+  - **Third-party hosts are dropped.** Analytics and fonts are not your capacity problem, and generating them
+    would aim load at somebody else's infrastructure — from a tool whose premise is that you only hit hosts
+    you explicitly allowed. The output names whose they were.
+  - **Per-request cache-busters are stripped; per-build ones are kept.** Measured, not guessed from a list of
+    parameter names: if a value *varies* between requests to the same path it is noise, and keeping it turns
+    the recording into a pool of unique cold URLs — the pool that makes any cache look useless. A constant
+    value is a build hash, part of the URL the cache sees, and dropping it would measure a URL that does not
+    exist. `?build=9f2c1` survives, `?_=1754400000123` does not.
+  - **The navigation parameter is stripped entirely**, because the generator adds it back itself and whether
+    it repeats or is randomised is the experiment (`rsc.mode`).
+  - **Failures and non-GET requests are not recorded.** A 404 in a journey is a load test of your error page.
+  - The origin travels inside the file — a journey recorded against staging says nothing about production's
+    fan-out — and `record` **refuses to write into the profile directory**: a journey names real routes, the
+    same category as a URL pool, and the profile directory is the one that gets committed. It also refuses to
+    overwrite an existing recording without `--force`. Exit 4 when nothing usable was recorded, saying what to
+    record instead ("Preserve log" on, and a page *load*, not just the XHRs after it).
+  - Verified end to end, not just parsed: a HAR built from the requests a real Chrome made, then
+    `--shape journey` against a local target — 4 sessions/s produced 24 documents, 162 navigation requests
+    and 96 assets, in the ratio the recording described.
+
+### Changed
+- `docs/cli.md` documents both, with the refusal table for `compare` and the four judgements for `record`;
+  `docs/running-a-test.md` puts them in the sequence (record before a journey run, compare after two runs);
+  `docs/profile.md` points `journey.file` at the command that writes it.
+- The CLI suite is now 118 tests: 11 for `compare` (mostly refusals) and 11 for `record` (mostly the two
+  guards that protect a repository rather than a measurement).
+
 ## [1.7.0] — 2026-08-05
 
 The three GUI items of milestone v1.3.0, and a documented walkthrough with real screenshots. Writing that

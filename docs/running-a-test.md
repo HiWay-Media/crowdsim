@@ -128,12 +128,19 @@ crowdsim load --profile my-site.json --target edge --peak 400 \
 ### 7. Compare
 
 ```bash
-crowdsim history
+crowdsim history                                        # one line per run: did the knee move?
+crowdsim compare 20260805T090000Z 20260805T093000Z      # the delta, per class and per cache layer
 ```
 
-One line per run. The question this answers is whether the knee **moved** after a change — which is the
-question the tool can answer honestly. Absolute numbers from a synthetic pool are harsher than real
-traffic; deltas at an identical pool are the defensible part.
+The question these answer is whether the knee **moved** after a change — which is the question the tool can
+answer honestly. Absolute numbers from a synthetic pool are harsher than real traffic; deltas at an identical
+pool are the defensible part.
+
+`compare` earns its keep by **refusing**: two runs at different URL pools are two different experiments, and a
+run with `generator_ok: false` has no numbers at all. Either one gets exit 2 and an explanation instead of a
+plausible percentage. A different target or peak is allowed and labelled, because "what does the CDN add" is a
+real question — it is just not a before/after of one target. Details in the
+[CLI reference](cli.md#compare).
 
 ## Choosing what to point at
 
@@ -149,7 +156,17 @@ traffic; deltas at an identical pool are the defensible part.
 - **`mix`** (default) — one k6 scenario per class, each at its share of `--peak`. Reproduces a measured
   traffic mix. This is what you want for capacity numbers.
 - **`journey`** — one iteration is one visitor session: a document plus its fan-out, then 2–4 in-app
-  navigations with think time. Reproduces the *shape* of real browsing, and needs a recorded journey file.
+  navigations with think time. Reproduces the *shape* of real browsing, and needs a recorded journey file:
+
+  ```bash
+  # DevTools → Network → Preserve log → load the page, click around → Export HAR
+  crowdsim record session.har                     # → out/journey-<run>.json
+  crowdsim load --profile my-site.json --shape journey --peak 40
+  ```
+
+  `record` drops third-party hosts, strips per-request cache-busters while keeping build hashes, and does not
+  record failures or writes — each of those is a way to end up measuring something other than your own site.
+  See [CLI reference](cli.md#record).
 
 ## Measuring what a cache would buy
 

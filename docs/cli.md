@@ -217,6 +217,88 @@ They are an API: the Nomad job, CI and the GUI all branch on them.
 | `4` | Target unreachable | `probe` got ≥400 or no answer |
 | `5` | Missing prerequisite | k6 absent, docker absent for `cache-ab`, node absent for `serve` |
 
+### `compare`
+
+```bash
+crowdsim compare 20260805T090000Z 20260805T093000Z
+```
+
+The delta between two runs from `out/`: overall p50/p95/p99, failed rate, the share past the read timeout,
+504s, the cache hit ratio per layer, and the same per class. An improvement and a regression are marked
+differently, and the footer says what the numbers are worth:
+
+```
+  A  20260805T090000Z   profile live-event  https://www.example.test  shape mix  peak 60
+  B  20260805T093000Z   profile live-event  https://www.example.test  shape mix  peak 60
+
+  ── overall ─────────────────────────────────────────────────────────────────────
+                               A           B   change
+  p95                     200 ms      140 ms   -60 ms (-30%) ✅
+  failed rate              0.00%       0.00%   +0.00 pp  =
+
+  ── cache hit ratio per layer ───────────────────────────────────────────────────
+  proxy                   61.00%      94.00%   +33.00 pp (+54%) ✅
+  cdn                        n/a         n/a   header never appeared in either run
+```
+
+**The value is in what it refuses** (exit 2), because a comparison between two runs that were not the same
+experiment is a confident number with nothing behind it:
+
+| It refuses when | Because |
+|---|---|
+| either run has `generator_ok: false` | that run has no numbers at all — the generator was the bottleneck |
+| either run never reached its target | connectivity, not capacity |
+| the URL pools differ | two different experiments; a colder pool is a harder test. Compared from the archived `profile-<run>.json`, which is why it is archived |
+| a pool exists in only one run | same reason |
+| the shapes differ | a journey and a mix are not the same load |
+
+A different **target** or a different **peak** is a legitimate question — what does the CDN add, where is the
+knee — so those are allowed and *stated*: the report says this is a comparison between two targets, not a
+before/after of one.
+
+### `record`
+
+```bash
+crowdsim record session.har                        # → out/journey-<run>.json
+crowdsim record session.har --out ~/private/journey.json --force
+```
+
+Turns a browser HAR export into the journey file `--shape journey` needs. In DevTools: **Network → Preserve
+log on → reload the page → click around → the ⬇ Export HAR button**. Then:
+
+```
+  ✅ 2 pages · 1 navigation requests · 4 assets
+     origin https://www.example.test  →  out/journey-20260805T174432Z.json
+     from 12 recorded requests
+     dropped 2 third-party (fonts.gstatic.com, www.google-analytics.com) — not your capacity problem,
+             and not yours to generate load against
+     dropped 1 that did not answer 2xx/3xx
+     dropped 1 non-GET (this tool does not send writes)
+     stripped per-request query params: _, _rsc
+```
+
+Four judgements it makes, all of them ways to end up measuring something other than your site:
+
+- **Third-party hosts are dropped.** Analytics and fonts are not your capacity problem, and generating them
+  would aim load at somebody else's infrastructure — from a tool whose premise is that you only hit hosts you
+  explicitly allowed.
+- **Per-request cache-busters are stripped; per-build ones are kept.** Measured, not guessed from a list of
+  names: if a parameter's value *varies* between requests to the same path it is noise, and keeping it turns
+  the recording into a pool of unique cold URLs — the pool that makes any cache look useless. A constant value
+  is a build hash, part of the URL the cache sees, and dropping it would measure a URL that does not exist.
+- **The navigation parameter (`_rsc`) is stripped entirely**, because the generator adds it back itself, and
+  whether it repeats or is randomised is the experiment (`rsc.mode`).
+- **Failures and non-GET requests are not recorded.** A 404 in a journey is a load test of your error page,
+  and this tool does not send writes at a production system.
+
+The origin travels inside the file: a journey recorded against staging tells you nothing about production's
+fan-out. `record` **refuses to write into the profile directory** — a journey names real routes, the same
+category as a URL pool — and refuses to overwrite an existing file without `--force`. Needs node; the rules
+live in `lib/har.mjs` with unit tests. Exit 4 when nothing usable was recorded, with what to record instead.
+
+Re-record after a redesign or a deploy that changes the fan-out: a journey is a snapshot of what one build
+made the browser fetch.
+
 ## Output files
 
 ```
@@ -228,6 +310,7 @@ out/
   pool-<run_id>.json       what discover found
   pool-<run_id>.report.txt what --verify dropped, and why
   discover-<run_id>.json   the same as data: offered, kept, dropped, and whether it was verified
+  journey-<run_id>.json    what record extracted from a HAR (data about your site: keep it private)
   profile-<run_id>.json    the profile as resolved for that run (pools inlined)
   history.tsv              one appended line per run
   gui-run.json             written by `serve` only: the run in flight, so a restart can find it

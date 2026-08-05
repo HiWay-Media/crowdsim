@@ -130,7 +130,9 @@ crowdsim discover --profile p.json --limit 400 --verify    # a URL pool, minus w
 crowdsim probe    --profile p.json --target edge          # reachability + cache headers hop by hop
 crowdsim load     --profile p.json --target edge --peak 60
 crowdsim validate p.json                                  # every rule at once, before anything runs
+crowdsim record  session.har                              # a browser HAR export → a journey file
 crowdsim history                                          # one line per run: does the knee move?
+crowdsim compare <run-a> <run-b>                          # the delta, or a refusal if they differ
 crowdsim serve                                            # the same thing with a GUI, on loopback
 ```
 
