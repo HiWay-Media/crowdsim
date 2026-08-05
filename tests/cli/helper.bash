@@ -1,0 +1,42 @@
+# Shared setup for the CLI suite.
+#
+# The suite must never generate load: `k6` is replaced by a stub on PATH and every load command runs with
+# --dry-run, so what is asserted is the DECISION (gate passed or refused, which env the generator would
+# get) and not a request. A CLI test that needs a real target is an e2e test — see tests/e2e/.
+
+crowdsim_setup() {
+  CROWDSIM_ROOT="$(cd "$BATS_TEST_DIRNAME/../.." && pwd)"
+  CROWDSIM="$CROWDSIM_ROOT/bin/crowdsim"
+  FIXTURES="$BATS_TEST_DIRNAME/fixtures"
+  export CROWDSIM_ROOT CROWDSIM FIXTURES
+  export CROWDSIM_OUT="$BATS_TEST_TMPDIR/out"
+
+  # The allowlist is an environment gate: a value leaking in from the developer's shell would make the
+  # gate tests pass for the wrong reason.
+  unset CROWDSIM_ALLOW_TARGETS
+  unset CROWDSIM_SLACK_WEBHOOK
+
+  mkdir -p "$BATS_TEST_TMPDIR/stub"
+  cat > "$BATS_TEST_TMPDIR/stub/k6" <<'STUB'
+#!/usr/bin/env bash
+# Stub generator: records the invocation instead of sending anything.
+printf 'STUB-K6 %s\n' "$*"
+exit 0
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/stub/k6"
+  export PATH="$BATS_TEST_TMPDIR/stub:$PATH"
+}
+
+# A PATH with the tools the driver needs and NO k6, to test the "k6 is not installed" path.
+# Built from symlinks rather than by filtering $PATH: on a developer machine k6 usually lives in the same
+# directory as python3 (both from brew), so filtering would remove python3 too and the test would pass
+# for the wrong reason — at the wrong exit code.
+path_without_k6() {
+  local dir="$BATS_TEST_TMPDIR/nok6" tool p
+  mkdir -p "$dir"
+  for tool in bash sh python3 curl sed tr date mkdir cat grep tee cut wc column rm env docker; do
+    p="$(command -v "$tool" 2>/dev/null)" && ln -sf "$p" "$dir/$tool"
+  done
+  rm -f "$dir/k6"
+  printf '%s' "$dir"
+}

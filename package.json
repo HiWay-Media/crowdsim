@@ -1,0 +1,25 @@
+{
+  "name": "crowdsim",
+  "version": "1.1.0",
+  "private": true,
+  "description": "Replay a live-event traffic mix against a web frontend — CLI, generator, tests and GUI",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "gui/server",
+    "gui/ui"
+  ],
+  "scripts": {
+    "test": "npm run test:unit && npm run test:gui && npm run test:cli",
+    "test:unit": "node --test \"tests/unit/*.test.js\"",
+    "test:gui": "node --test \"tests/gui/*.test.js\"",
+    "test:cli": "bats tests/cli",
+    "test:e2e": "tests/e2e/run.sh",
+    "gui": "node gui/server/index.js",
+    "gui:dev": "npm run dev --workspace gui/ui",
+    "gui:build": "npm run build --workspace gui/ui"
+  },
+  "devDependencies": {
+    "bats": "^1.11.0"
+  }
+}

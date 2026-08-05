@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# A stand-in for bin/crowdsim, so the GUI suite can assert on decisions without generating load.
+#
+#   FAKE_EXIT         exit code to return (default 0) — used to check exit codes are passed through
+#   FAKE_SLEEP        stay alive this long, to test concurrency and graceful stop
+#   FAKE_SUMMARY_SRC  copy this file into $CROWDSIM_OUT as the run summary
+set -eo pipefail
+
+trap 'echo "interrupted: winding down and keeping the summary"; exit 0' INT
+
+echo "ARGV: $*"
+echo "  run       20260805T101112Z"
+
+if [ -n "${FAKE_SUMMARY_SRC:-}" ]; then
+  mkdir -p "$CROWDSIM_OUT"
+  cp "$FAKE_SUMMARY_SRC" "$CROWDSIM_OUT/summary-20260805T101112Z.json"
+  echo "  ✅ summary: $CROWDSIM_OUT/summary-20260805T101112Z.json"
+fi
+
+if [ -n "${FAKE_SLEEP:-}" ]; then sleep "$FAKE_SLEEP"; fi
+exit "${FAKE_EXIT:-0}"

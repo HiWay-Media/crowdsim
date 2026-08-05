@@ -10,6 +10,10 @@
 #
 # The image ships NO profile: a profile contains your hostnames, URL pools and measured mix. Mount it,
 # or fetch it with a Nomad artifact stanza from your own private repo.
+#
+# It also ships no GUI: `crowdsim serve` needs node, and this image exists to put a generator next to a
+# target, not to host a page. Run the GUI on your workstation (`crowdsim serve`) and let it drive local
+# runs; for a remote generator, dispatch the Nomad job.
 FROM grafana/k6:0.52.0
 
 USER root
@@ -19,6 +23,8 @@ ENTRYPOINT []
 
 WORKDIR /crowdsim
 COPY bin/crowdsim /usr/local/bin/crowdsim
+# k6/ includes lib/: the generator imports its arithmetic and summary logic from there (and so do the
+# unit tests). Copying only live-event.js would produce an image that fails in the init context.
 COPY k6/ /crowdsim/k6/
 COPY cache-ab/ /crowdsim/cache-ab/
 COPY profiles/example.json /crowdsim/profiles/example.json

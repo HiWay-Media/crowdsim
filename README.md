@@ -54,6 +54,9 @@ git clone https://github.com/hiway-media/crowdsim && cd crowdsim
 ./bin/crowdsim doctor
 ```
 
+The CLI needs only `k6`, `curl` and `python3`. `npm install` is optional and buys two things: the GUI
+(`crowdsim serve`) and the test suite.
+
 Docker, for running it on a host near the target:
 
 ```bash
@@ -79,6 +82,7 @@ crowdsim discover --profile p.json --limit 400            # build a URL pool fro
 crowdsim probe    --profile p.json --target edge          # reachability + cache headers hop by hop
 crowdsim load     --profile p.json --target edge --peak 60
 crowdsim history                                          # one line per run: does the knee move?
+crowdsim serve                                            # the same thing with a GUI, on loopback
 ```
 
 “How far are we from the knee, without breaking anything”:
@@ -87,6 +91,67 @@ crowdsim history                                          # one line per run: do
 crowdsim discover --profile p.json && crowdsim probe --profile p.json
 crowdsim load --profile p.json --peak 60          # stays under the profile's safe ceiling
 ```
+
+## The GUI
+
+`crowdsim serve` puts a page in front of the same CLI: pick a profile and a target, see the mix the peak
+implies, launch, watch the log stream, read the result, compare it with previous runs.
+
+```bash
+npm install && npm run gui:build      # once
+crowdsim serve                        # http://127.0.0.1:8787
+```
+
+```
+ ▮▮ crowdsim            k6 v0.52.0   allowlist www.example.test   output ./out
+ ┌────────────┬──────────────────────────────────────────────────────────────────┐
+ │ New run  ◀ │  TARGET                          RATE                            │
+ │ Profiles   │  profile  my-site.json           peak  [ 60] req/s               │
+ │ History    │  target   edge ▾                 steps [  4] × [60s]  hold [120s]│
+ │            │  base url https://www.example…   shape mix ▾   rsc repeat ▾      │
+ │ ● running  │  bypass   CDN skipped            ─────────────────────────────── │
+ │            │  allowlist ✅ authorised          rsc_page ████████ 25.9 req/s    │
+ │            │                                  html     ████     13.9 req/s    │
+ │            │  [ Run ] [Dry run] [Probe]       static   ██        5.9 req/s    │
+ └────────────┴──────────────────────────────────────────────────────────────────┘
+   ramping 15 → 60 … p95 780 ms … 0 dropped
+```
+
+It is a form over `bin/crowdsim`, not a second implementation. Every run is a child process of the CLI
+with the same gates, writing the same `out/` directory — so a run launched from a terminal and a run
+launched from the page are the same kind of object, and appear in the same history. Concretely:
+
+- **The gates are not re-implemented, and cannot be bypassed.** An unlisted host is refused with exit 3
+  and the page says so. Above the profile's safe peak the override needs the checkbox *and* the profile
+  name typed by hand, for that run: nothing about it is remembered.
+- **One run at a time.** A second Run is a 409 that names the run already in flight. Two generators
+  against one target produce twice the load nobody agreed to and two results that are both invalid.
+- **Loopback by default.** A page that can generate 500 req/s at your production has no business on a
+  shared network. Another bind address is allowed, but only with `CROWDSIM_GUI_TOKEN` set.
+- **Stop is a SIGINT**, so k6 winds down and still writes the summary. A killed run is a burned window.
+- **The result is read in the right order**: is the run valid at all, did the brake trip, and only then
+  the numbers. `generator_ok: false` is a banner telling you to discard it, not a footnote.
+
+## Tests
+
+```bash
+make test         # unit + GUI + CLI — generates no load whatsoever
+make test-e2e     # a real 12 req/s run against an nginx container on loopback (needs docker + k6)
+```
+
+| Suite | What it covers |
+|---|---|
+| `tests/unit/` (`node --test`) | the generator's arithmetic and verdicts, extracted into `k6/lib/`: mix renormalisation, the ramp, VU provisioning, cache classification, `generator_ok`, `target_unreachable`. The tested code is the code k6 imports. |
+| `tests/cli/` (`bats`) | `bin/crowdsim` end to end against a stub k6: both safety gates, exit-code contract, profile and target resolution, empty-pool handling, history, and that the brake tripping still exits 0. |
+| `tests/gui/` (`node --test`) | the API over a real socket: path traversal out of the profile directory, the override confirmation, one-run-at-a-time, gate refusals passed through with their exit code, no webhook leakage. |
+| `tests/e2e/` | the whole chain against a real target: probe, load, mix proportions, cache classification, the history row, and the GUI reading them back. |
+
+Two things the suites are built around, because they are how a load test lies to you:
+
+- **Nothing in `make test` sends a request.** k6 is a stub on `PATH` and every load path runs `--dry-run`,
+  so what is asserted is the decision — refused or allowed, and with which arguments.
+- **The unhappy summaries are fixtures.** A run with dropped iterations, and a run that failed instantly
+  at ~0 ms, are asserted to be reported as *invalid* and as *unreachable* — never as a capacity number.
 
 ## The profile is the whole configuration
 
@@ -114,7 +179,7 @@ co-tenant sharing that infrastructure. Two gates, neither of which can be satisf
 | Gate | What it does |
 |---|---|
 | **Target allowlist** | The target's host must match `CROWDSIM_ALLOW_TARGETS` or `safety.allow_hosts`. There is no default. A load test aimed at the wrong hostname is indistinguishable from an attack. |
-| **Safe peak** | Above `safety.safe_peak_rps`, the run refuses to start without `--i-know-this-breaks-production` on the command line. Never store that override in a config or a job file. |
+| **Safe peak** | Above `safety.safe_peak_rps`, the run refuses to start without `--i-know-this-breaks-production` on the command line. Never store that override in a config or a job file. In the GUI it additionally requires typing the profile name, per run. |
 
 There is deliberately **no interactive “are you sure?”** — this runs unattended on schedulers, where a
 prompt either hangs or gets auto-answered. The gates are explicit arguments instead.
@@ -152,9 +217,14 @@ the origin can no longer correct you. See the warning at the top of that file.
 
 ## Not included
 
-Reading your edge's access log to produce a per-URL breakdown, and watching a run live from a second
-terminal, both need privileged access to your own load balancers. That is deliberately outside this tool:
-it would mean shipping a container that wants an SSH key for a production edge.
+Reading your edge's access log to produce a per-URL breakdown needs privileged access to your own load
+balancers. That is deliberately outside this tool: it would mean shipping a container that wants an SSH
+key for a production edge.
+
+The GUI has no scheduler and no user accounts, also deliberately. Recurring load against your own
+production is a decision that belongs in something auditable — the Nomad job is dispatched with the
+target, the rate and the override in the dispatch call, which is logged and attributable to whoever made
+it. A cron button on a web page is not.
 
 ## License
 

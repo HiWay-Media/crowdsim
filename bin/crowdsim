@@ -23,6 +23,7 @@
 #   cache-ab    A/B a candidate cache config: two local nginx legs against the same origin, one with
 #               the tweak under evaluation and one as-is → measured hit ratio and offload
 #   history     one line per run, to see whether the knee moves over time
+#   serve       the GUI: same gates, same output directory, on http://127.0.0.1:8787 (needs node)
 #
 # Usage:
 #   crowdsim doctor
@@ -33,16 +34,19 @@
 #                     [--rsc-mode repeat|random] [--max-5xx 0.05] [--max-p95 5000]
 #                     [--safe-peak 150] [--i-know-this-breaks-production] [--touch-and-go] [--dry-run]
 #   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10]
+#   crowdsim serve    [--port 8787] [--bind 127.0.0.1]
 #
 # Environment:
 #   CROWDSIM_ALLOW_TARGETS   comma-separated host globs the tool is allowed to hit. REQUIRED unless the
 #                            profile declares safety.allow_hosts. No default, by design.
 #   CROWDSIM_OUT             output directory for logs and summaries (default: ./out)
 #   CROWDSIM_SLACK_WEBHOOK   if set, --slack posts the run recap there. Never hardcode a webhook here.
+#   CROWDSIM_PROFILES        profile directory the GUI reads and writes (default: ./profiles)
+#   CROWDSIM_GUI_TOKEN       bearer token for the GUI; REQUIRED to bind anything but loopback
 #
 # Exit: 0 = executed (a run stopped by the brake is an OUTCOME, not an error) · 2 = usage
 #       3 = safety gate · 4 = target unreachable · 5 = k6 missing
-# Requires: k6, curl, python3.
+# Requires: k6, curl, python3 (and node, only for `serve`).
 
 set -eo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -53,6 +57,7 @@ OUT_DIR="${CROWDSIM_OUT:-$PWD/out}"
 PROFILE_F=""; TARGET=""; SHAPE="mix"; PEAK=60; START=15; STEPS=4; STEP_DUR="60s"; HOLD="120s"
 RSC_MODE="repeat"; MAX_5XX=""; MAX_P95=""; SAFE_PEAK=""; ABORT_DELAY="30s"; TOUCH_AND_GO=0
 BASE_URL_OVERRIDE=""; SLACK=0; DRY=0; FORCE=0; LIMIT=400; TTL=10; INSECURE=0; SKIP_CLASSES=""
+GUI_PORT=""; GUI_BIND=""
 
 usage() { sed -n '1,60p' "$0" | grep -E '^#' | sed 's/^# \{0,1\}//'; }
 say()   { printf '%s\n' "$*"; }
@@ -88,6 +93,8 @@ while [ $# -gt 0 ]; do
     --limit) LIMIT="$2"; shift 2;;
     --ttl) TTL="$2"; shift 2;;
     --abort-delay) ABORT_DELAY="$2"; shift 2;;
+    --port) GUI_PORT="$2"; shift 2;;
+    --bind) GUI_BIND="$2"; shift 2;;
     --touch-and-go) TOUCH_AND_GO=1; shift;;
     --insecure) INSECURE=1; shift;;
     --slack) SLACK=1; shift;;
@@ -272,6 +279,12 @@ cmd_doctor() {
   if command -v curl >/dev/null 2>&1; then ok "curl"; else warn "curl missing"; fi
   if command -v python3 >/dev/null 2>&1; then ok "python3"; else warn "python3 missing"; fi
   if command -v docker >/dev/null 2>&1; then ok "docker (needed only for cache-ab)"; else warn "docker missing (cache-ab unavailable)"; fi
+  if command -v node >/dev/null 2>&1; then
+    ok "node $(node -v 2>/dev/null) (needed only for the GUI)"
+    if [ -d "$ROOT/gui/ui/dist" ]; then ok "GUI built (crowdsim serve)"; else warn "GUI not built (npm install && npm run gui:build)"; fi
+  else
+    warn "node missing (crowdsim serve unavailable)"
+  fi
   if [ -n "${CROWDSIM_ALLOW_TARGETS:-}" ]; then ok "CROWDSIM_ALLOW_TARGETS=$CROWDSIM_ALLOW_TARGETS"; else warn "CROWDSIM_ALLOW_TARGETS unset (the profile must declare safety.allow_hosts)"; fi
   ok "output directory: $OUT_DIR"
   if [ -n "$PROFILE_F" ]; then
@@ -488,6 +501,30 @@ cmd_cache_ab() {
   say "  then:  cd $ROOT/cache-ab && docker compose down"
 }
 
+# ─────────────────────────────── serve (GUI) ────────────────────────────────────────────────────────
+# The GUI is a form over this script: every run it starts is a child process of `crowdsim load`, with the
+# same gates and the same output directory. It adds no way to bypass anything — and it deliberately binds
+# loopback only, because a page that can generate 500 req/s at your production is not a page to leave
+# open on a shared network (the server refuses another bind address without CROWDSIM_GUI_TOKEN).
+cmd_serve() {
+  if ! command -v node >/dev/null 2>&1; then
+    die "the GUI needs node (18+). The CLI does not: everything the GUI can do is available as a
+  subcommand here. Install node, or keep using 'crowdsim load'." 5
+  fi
+  if [ ! -f "$ROOT/gui/server/node_modules/express/package.json" ] \
+     && [ ! -f "$ROOT/node_modules/express/package.json" ]; then
+    die "GUI dependencies are missing: run 'npm install' in $ROOT" 5
+  fi
+  if [ ! -d "$ROOT/gui/ui/dist" ]; then
+    warn "the UI is not built — the API will answer, the page will not. Run: npm run gui:build"
+  fi
+  export CROWDSIM_OUT="$OUT_DIR"
+  export CROWDSIM_PROFILES="${CROWDSIM_PROFILES:-$ROOT/profiles}"
+  if [ -n "$GUI_PORT" ]; then export CROWDSIM_GUI_PORT="$GUI_PORT"; fi
+  if [ -n "$GUI_BIND" ]; then export CROWDSIM_GUI_BIND="$GUI_BIND"; fi
+  exec node "$ROOT/gui/server/index.js"
+}
+
 case "$CMD" in
   doctor)   cmd_doctor;;
   discover) cmd_discover;;
@@ -495,5 +532,6 @@ case "$CMD" in
   load)     cmd_load;;
   cache-ab) cmd_cache_ab;;
   history)  cmd_history;;
+  serve)    cmd_serve;;
   *)        die "unknown subcommand: $CMD (try --help)" 2;;
 esac

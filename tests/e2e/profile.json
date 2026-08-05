@@ -1,0 +1,41 @@
+{
+  "name": "e2e-local",
+  "description": "Profile for the end-to-end suite. Points at the nginx container from docker-compose.yml on loopback, with a safe peak low enough that nothing can be hurt by running it.",
+
+  "targets": {
+    "default": "local",
+    "list": {
+      "local": { "base_url": "http://127.0.0.1:18080" }
+    }
+  },
+
+  "classes": [
+    { "name": "rsc_page", "label": "RSC navigation", "weight": 50, "kind": "rsc", "pool": "pages" },
+    { "name": "html", "label": "HTML document", "weight": 30, "kind": "plain", "pool": "pages" },
+    { "name": "static", "label": "static asset", "weight": 20, "kind": "plain", "pool": "static" }
+  ],
+
+  "pools": {
+    "pages": ["/", "/news", "/news/latest", "/teams/first-team"],
+    "static": ["/assets/app.js", "/assets/app.css"]
+  },
+
+  "rsc": { "param": "_rsc", "hashes": ["aa11b", "cc22d", "ee33f"] },
+
+  "cache_headers": [
+    { "label": "proxy", "header": "X-Proxy-Cache", "hit": "HIT|STALE" },
+    { "label": "cdn", "header": "X-Cache", "hit": "Hit" }
+  ],
+
+  "slo": {
+    "max_failed_rate": 0.05,
+    "max_p95_ms": 2000,
+    "guillotine_ms": 3000,
+    "brake_class": "rsc_page"
+  },
+
+  "safety": {
+    "safe_peak_rps": 30,
+    "allow_hosts": ["127.0.0.1"]
+  }
+}

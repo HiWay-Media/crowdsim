@@ -1,0 +1,62 @@
+{
+  "name": "test-minimal",
+  "targets": {
+    "default": "local",
+    "list": {
+      "local": {
+        "base_url": "http://127.0.0.1:8099"
+      },
+      "elsewhere": {
+        "base_url": "https://not-allowed.test"
+      },
+      "hostheader": {
+        "base_url": "http://10.0.0.11:8092",
+        "host_header": "www.example.test",
+        "bypass": "www.example.test=10.0.0.11",
+        "skip_classes": "proxy_only"
+      },
+      "nourl": {
+        "host_header": "www.example.test"
+      }
+    }
+  },
+  "classes": [
+    {
+      "name": "html",
+      "label": "HTML document",
+      "weight": 70,
+      "kind": "plain",
+      "pool": "pages"
+    },
+    {
+      "name": "proxy_only",
+      "label": "proxy-only",
+      "weight": 30,
+      "kind": "plain",
+      "pool": "pages"
+    }
+  ],
+  "pools": {
+    "pages": [
+      "/",
+      "/news"
+    ],
+    "_comment": "documentation key, must be stripped"
+  },
+  "slo": {
+    "max_failed_rate": 0.05,
+    "max_p95_ms": 5000,
+    "guillotine_ms": 7000,
+    "brake_class": "html"
+  },
+  "safety": {
+    "safe_peak_rps": 50,
+    "allow_hosts": [
+      "127.0.0.1",
+      "10.0.0.*"
+    ]
+  },
+  "discover": {
+    "sitemap": "http://127.0.0.1:8099/sitemap.xml"
+  }
+}
