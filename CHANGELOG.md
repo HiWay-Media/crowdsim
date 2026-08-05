@@ -4,6 +4,16 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.1] — 2026-08-05
+
+Housekeeping after the documentation site landed.
+
+### Fixed
+- **`scripts/__pycache__/mkdocs_hooks.cpython-313.pyc` had been committed.** MkDocs imports
+  `scripts/mkdocs_hooks.py` as a module, so every local `make docs` leaves bytecode next to it — versioned
+  build output that changes with the interpreter and belongs to nobody's checkout but the one that produced
+  it. It is untracked now, and `__pycache__/` is ignored by both git and the Docker build context.
+
 ## [1.6.0] — 2026-08-05
 
 Two of the three ways a run quietly measures the wrong thing now get answered before the run, not after.

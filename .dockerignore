@@ -18,6 +18,7 @@ docs/
 site/
 .venv-docs/
 mkdocs.yml
+__pycache__/
 
 .git/
 .github/

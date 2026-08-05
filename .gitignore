@@ -31,3 +31,8 @@ tests/e2e/.out/
 # Documentation site built by mkdocs (published by .github/workflows/pages.yml)
 site/
 .venv-docs/
+
+# Python bytecode: the docs build imports scripts/mkdocs_hooks.py, which leaves a
+# __pycache__ next to it.
+__pycache__/
+*.pyc
