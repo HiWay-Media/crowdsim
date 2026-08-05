@@ -1,0 +1,41 @@
+{
+  "name": "e2e-unreachable",
+  "description": "Profile for the leg that proves a target which never answers is reported as CONNECTIVITY, not as capacity. Uses an example domain — and resolves it, via bypass, to a loopback port where nothing listens.",
+
+  "_why_bypass_comment": "www.example.test cannot resolve (RFC 6761 reserves .test and guarantees it is not in the global DNS), but a resolver that hijacks NXDOMAIN would hand us somebody else's address — and then this test would generate load against a stranger. The bypass removes DNS from the question entirely: the host stays www.example.test for SNI, Host and the allowlist, while the connection goes to 127.0.0.1:9, where nothing listens. Refused instantly, every time, on infrastructure that is ours.",
+
+  "targets": {
+    "default": "example",
+    "list": {
+      "example": {
+        "base_url": "http://www.example.test:9",
+        "bypass": "www.example.test=127.0.0.1"
+      }
+    }
+  },
+
+  "classes": [
+    { "name": "html", "label": "HTML document", "weight": 100, "kind": "plain", "pool": "pages" }
+  ],
+
+  "pools": {
+    "pages": ["/", "/news"]
+  },
+
+  "cache_headers": [
+    { "label": "proxy", "header": "X-Proxy-Cache", "hit": "HIT" }
+  ],
+
+  "_slo_comment": "The brake DOES fire here, and that is the point. A failed rate of exactly 1.0 is not < 1.0, so the threshold crosses — and the report must still say TARGET NEVER ANSWERED rather than presenting the abort as a knee. That precedence is what this leg proves end to end: two flags set, one honest conclusion.",
+  "slo": {
+    "max_failed_rate": 1.0,
+    "max_p95_ms": 5000,
+    "guillotine_ms": 7000,
+    "brake_class": "html"
+  },
+
+  "safety": {
+    "safe_peak_rps": 20,
+    "allow_hosts": ["www.example.test"]
+  }
+}

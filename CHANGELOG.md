@@ -4,6 +4,28 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] — 2026-08-05
+
+### Added
+- **A third e2e leg: a target that never answers.** It covers the other honest failure mode, and it exists
+  for a precedence that is easy to lose — a 100% failed rate crosses any threshold, so the brake trips there
+  too, and the report must *still* lead with "TARGET NEVER ANSWERED" instead of presenting the abort as a
+  knee. Both flags set, one honest conclusion; the leg asserts the words "ABORTED by the brake" never appear,
+  that the wrapper says what to do next (`crowdsim probe`), and that the driver still exits 0.
+  - It uses an example domain, as you would — `www.example.test`, reserved by RFC 6761 — and deliberately
+    **does not resolve it**. A resolver that hijacks NXDOMAIN would hand back a stranger's address, and the
+    test would then generate load against them. The profile's `bypass` removes DNS from the question: the
+    host stays `www.example.test` for SNI, Host and the allowlist, while the connection goes to a loopback
+    port where nothing listens. `example.com` is somebody's real infrastructure and is never a target.
+- **`.github/workflows/e2e.yml`** — the suite that actually generates load, on a runner, against targets the
+  runner owns. k6 natively (not through Docker: the container network layer would sit between the generator
+  and the target, which is the one thing this suite must not measure), a 10-minute cap for the same reason
+  the Kubernetes Job has `activeDeadlineSeconds`, and the run archive uploaded as an artifact so a failure
+  can be told apart from a runner having a bad day.
+  - It asserts k6 and docker are really present before starting: without them the suite SKIPs with exit 0,
+    which is correct on a laptop and useless in CI — a runner image change must not turn this into a green
+    no-op.
+
 ## [1.5.0] — 2026-08-05
 
 Kubernetes gets the same treatment Nomad already had: manifests whose defaults are the safe ones, with the

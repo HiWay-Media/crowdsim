@@ -18,7 +18,7 @@ make image-smoke     # the built image: still the tool, gates intact
 | `tests/unit/` | `node --test` | `k6/lib/`: mix renormalisation, ramp, VU provisioning, RSC modes, cache classification, the three verdicts | no |
 | `tests/cli/` | `bats` | `bin/crowdsim` against a stub k6: both gates, exit codes, profile and target resolution, empty pools, `--touch-and-go`, history, and `scripts/new-release.sh` | no |
 | `tests/gui/` | `node --test` | the API over a real socket: traversal, the override confirmation, one-run-at-a-time, refusals passed through, read-only mounts | no |
-| `tests/e2e/` | shell + docker | two legs: a fast nginx (chain works, healthy target does *not* abort) and a slow single-worker origin (**the brake does abort**, early, generator still holding). Skips (exit 0) without docker or k6 | **yes**, on loopback |
+| `tests/e2e/` | shell + docker | three legs, one per conclusion the tool produces: a fast nginx (chain works, healthy target does *not* abort), a slow single-worker origin (**the brake does abort**, early, generator still holding), and an unreachable target (**connectivity, not capacity**). Skips (exit 0) without docker or k6 | **yes**, on loopback |
 | `tests/image/` | shell + docker | the published artefact: driver finds generator, GUI starts, gates survived the build, no allowlist default | no |
 | `tests/k8s/` | shell + kubectl | `ci/kubernetes` rendered client-side (no cluster): never-retried Job, cluster-enforced deadline, one GUI replica, ClusterIP only, no CronJob, no committed override, pinned image | no |
 
@@ -37,7 +37,7 @@ workflow owns the second.
 `summary-unreachable.json` are asserted to be reported as *invalid* and as *unreachable* — never as capacity
 numbers. A load test's failure mode is a plausible wrong answer, so the tests aim at exactly that.
 
-### Why the e2e suite has two legs
+### Why the e2e suite has three legs
 
 A brake is only worth having if it fires. `brakeTripped()` is unit-tested against synthetic metric trees,
 and the fast leg asserts the *opposite* case — that a healthy target does not abort a run. Neither would
@@ -52,6 +52,18 @@ equally mean "the generator collapsed" or "the target stopped talking to us", an
 One thing it does **not** assert is a non-zero share past the read timeout: at the moment the brake fires
 that share is stochastic (0% and 6.7% on two consecutive runs). The condition that actually stopped the run
 is the brake class's p95 against its SLO, and that is what is checked.
+
+The third leg covers the other honest failure mode: a target that never answers. It is worth its own leg
+because of a precedence that is easy to lose — a 100% failed rate crosses any threshold, so the brake trips
+there too, and the report must *still* lead with "TARGET NEVER ANSWERED" rather than presenting the abort as
+a knee. Both flags set, one honest conclusion; the leg asserts the words "ABORTED by the brake" do not
+appear.
+
+It uses an example domain, as you would, and deliberately does not resolve it: `.test` is reserved and
+absent from the global DNS (RFC 6761), but a resolver that hijacks NXDOMAIN would hand back a stranger's
+address — and the test would then generate load against them. The profile's `bypass` removes DNS from the
+question and sends the connection to a loopback port where nothing listens. `example.com` is somebody's real
+infrastructure and is never a target.
 
 ### Writing a test
 
@@ -144,7 +156,8 @@ What the tag triggers once pushed:
 | `release.yml` | Publishes a GitHub Release whose notes are that CHANGELOG section (`new-release.sh notes`). Fails if the section is missing — a release tagged without being described is the thing to prevent. |
 | `image.yml` | Builds for the runner's arch → smoke-tests → builds `linux/amd64,linux/arm64` → pushes `{version}`, `{major}.{minor}` and `latest`. Nothing reaches the registry before the smoke test passes. |
 | `roadmap-sync.yml` | Only on roadmap changes: replays `.github/roadmap.json` onto labels, milestones and issues. |
-| `ci.yml` | On every push and pull request: lint plus the three suites that generate no load. |
+| `ci.yml` | On every push and pull request: lint, the three fake-backed suites, the Kubernetes manifests, the doc links. |
+| `e2e.yml` | On changes to the driver, the generator or the suite: the real k6 run, on the runner's own loopback. |
 
 Version numbers and milestone names are **independent**. Milestone `v1.2.0` (the GUI) shipped inside release
 1.1.0; release 1.2.0 was the container image. Read the CHANGELOG for what a version contains, and the

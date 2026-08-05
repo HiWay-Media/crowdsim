@@ -1,0 +1,88 @@
+# The suite that actually generates load, on a runner, against targets the runner owns.
+#
+# Everything else in CI asserts decisions against fakes. This one starts a real k6 process against real
+# HTTP servers and checks the three conclusions the tool exists to produce:
+#
+#   leg 1  a healthy target does NOT trip the brake, and the mix, the cache classification and the
+#          archive all come out right
+#   leg 2  a target past its capacity DOES trip it — early, with the generator still holding the rate
+#   leg 3  a target that never answers is reported as CONNECTIVITY, not as capacity
+#
+# ⚠️ On what it generates load AGAINST: two containers on the runner's own loopback, plus a refused
+#    connection to 127.0.0.1:9. Nothing leaves the runner. Leg 3 uses `www.example.test` — reserved by
+#    RFC 6761 and absent from the global DNS — and does not even resolve it: the profile's bypass sends the
+#    connection to loopback, so a resolver that hijacks NXDOMAIN cannot turn this into load against a
+#    stranger. `example.com` would be somebody's real infrastructure and is never a target here.
+name: e2e
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - bin/**
+      - k6/**
+      - lib/**
+      - gui/server/**
+      - tests/e2e/**
+      - profiles/example.json
+      - Makefile
+      - .github/workflows/e2e.yml
+  pull_request:
+    paths:
+      - bin/**
+      - k6/**
+      - lib/**
+      - gui/server/**
+      - tests/e2e/**
+      - .github/workflows/e2e.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    # A hard cap, for the same reason the Kubernetes Job has activeDeadlineSeconds: the whole suite is
+    # under two minutes of traffic, so anything approaching this means something is hung.
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # The suite ends by starting the GUI server and asserting it reads the same archive, so express has
+      # to be installed. It never installs k6 through npm: see below.
+      - run: npm ci
+
+      # k6 natively, from Grafana. Not through Docker: the container network layer would sit between the
+      # generator and the target, which is the one thing this suite must not measure.
+      - uses: grafana/setup-k6-action@v1
+
+      - name: Prerequisites are really present
+        run: |
+          k6 version
+          docker version --format '{{.Server.Version}}'
+          # If either were missing the suite would SKIP with exit 0 — correct on a laptop, useless here.
+          # Fail loudly instead, so a runner image change cannot turn this job into a green no-op.
+
+      - name: End-to-end suite
+        run: make test-e2e
+
+      # The summaries and logs of all three runs. On a failure they are the only way to tell a real
+      # regression from a runner having a bad day.
+      - name: Keep the run archive
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-out
+          path: tests/e2e/.out/
+          retention-days: 7
+          if-no-files-found: warn

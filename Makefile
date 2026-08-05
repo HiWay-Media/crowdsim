@@ -20,14 +20,16 @@ install: ## install dev + GUI dependencies (bats, express, vite, react)
 
 test: test-unit test-gui test-cli ## everything that does not generate load
 
+# The glob is expanded by the shell, not by node: `node --test` only learned to glob in v22, and CI runs
+# the LTS. A quoted pattern reaches node verbatim there and it fails with "Could not find".
 test-unit: ## pure generator logic (mix, cache classification, summary) — node:test
-	node --test "tests/unit/*.test.js"
+	node --test tests/unit/*.test.js
 
 test-cli: ## bin/crowdsim behaviour: safety gates, args, profile resolution — bats
 	npx bats tests/cli
 
 test-gui: ## GUI API: profiles, run launching, path traversal, gate propagation — node:test
-	node --test "tests/gui/*.test.js"
+	node --test tests/gui/*.test.js
 
 test-e2e: ## REAL run against a local nginx (needs docker + k6) — the only suite that loads anything
 	tests/e2e/run.sh

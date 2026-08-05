@@ -14,9 +14,10 @@ its target measures the two fighting over a CPU. `make test-k8s` asserts those p
 the Nomad job carries them in `restart`/`reschedule` stanzas.
 
 The GitHub Actions workflows are not here: they have to live in `.github/workflows/`, which GitHub owns.
-They are `ci.yml` (lint plus the suites that generate no load), `image.yml` (build → smoke test → publish to
-GHCR on a version tag) and `release.yml` (GitHub Release from the CHANGELOG section), with `roadmap-sync.yml`
-replaying `.github/roadmap.json`. See [docs/development.md](../docs/development.md#releasing).
+They are `ci.yml` (lint, the suites that generate no load, the manifests here, the doc links), `e2e.yml`
+(the real k6 run, against containers on the runner's own loopback), `image.yml` (build → smoke test →
+publish to GHCR on a version tag) and `release.yml` (GitHub Release from the CHANGELOG section), with
+`roadmap-sync.yml` replaying `.github/roadmap.json`. See [docs/development.md](../docs/development.md#releasing).
 
 ## Why the Nomad job is batch and not service
 

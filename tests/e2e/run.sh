@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# The only suite that generates load. Two containers on loopback, two legs, a few hundred requests total.
+# The only suite that generates load. Two containers on loopback, three legs, a few hundred requests total.
 #
 #   leg 1 — a fast static nginx: the whole chain works and a healthy target does NOT trip the brake.
 #           Profile resolution, the k6 scenarios, the mix proportions, the cache classification, the
@@ -9,8 +9,13 @@
 #           prove that. The brake is a k6 threshold with abortOnFail; a typo in a threshold expression, or
 #           a metric renamed by a k6 upgrade, produces a run that no longer stops — and the first person
 #           to notice would be whoever is watching the outage it existed to cut short.
+#   leg 3 — a target that never answers: reported as CONNECTIVITY, not as capacity. It uses an example
+#           domain (www.example.test, reserved by RFC 6761) and does not resolve it — the profile's bypass
+#           points the connection at a loopback port where nothing listens, so a resolver that hijacks
+#           NXDOMAIN cannot turn this test into load against a stranger.
 #
-# What it does not prove: that any number means anything. These targets are models, not systems.
+# The three legs are the three conclusions the tool exists to produce. What none of them proves is that any
+# number means anything: these targets are models, not systems.
 #
 # Needs docker and k6. Missing either is a SKIP (exit 0), not a failure: the suite is legitimately skipped
 # on most machines, and a red run that means "you don't have docker" teaches people to ignore red runs.
@@ -176,6 +181,60 @@ print(f"  ✅ aborted at p95 {round(brake['p95'])} ms against an SLO of {slo['ma
       "generator held, target reachable, history recorded")
 PY
 
+# ─────────────────────────────── leg 3: a target that never answers ─────────────────────────────────
+# The other honest failure mode. A run against something that does not answer must be reported as
+# CONNECTIVITY, never as capacity — near-total failure at near-zero latency is a refused connection, and a
+# saturated system is slow before it errors. Nothing else in the suite exercises that path.
+#
+# It uses an example domain, as one would, but it does not resolve it: `.test` is reserved and guaranteed
+# absent from the global DNS (RFC 6761), yet a resolver that hijacks NXDOMAIN would hand us a stranger's
+# address — and then this test would generate load against them. The profile's bypass removes DNS from the
+# question: the host stays www.example.test for SNI, Host and the allowlist, while the connection goes to
+# 127.0.0.1:9, where nothing listens.
+say ""
+say "▶ leg 3 — an unreachable target must read as connectivity, not capacity"
+set +e
+CROWDSIM_OUT="$OUT" "$ROOT/bin/crowdsim" load --profile "$HERE/profile-unreachable.json" \
+  --peak 4 --start 2 --steps 1 --step-dur 5s --hold 3s > "$OUT/unreachable.log" 2>&1
+RC=$?
+set -e
+[ "$RC" = "0" ] || die "the driver exited $RC on an unreachable target (see $OUT/unreachable.log)"
+ok "the driver exited 0"
+
+grep -q 'THE TARGET NEVER ANSWERED' "$OUT/unreachable.log" \
+  || die "the wrapper did not warn that the target never answered"
+grep -q "crowdsim probe" "$OUT/unreachable.log" \
+  || die "the warning does not say to probe the target first"
+ok "the wrapper says it is connectivity, and what to do next"
+
+UNREACH_SUMMARY="$(ls -1 "$OUT"/summary-*.json | tail -1)"
+python3 - "$UNREACH_SUMMARY" "$OUT/unreachable.log" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+log = open(sys.argv[2]).read()
+fail = []
+def check(cond, msg):
+    if not cond: fail.append(msg)
+
+check(d['target_unreachable'] is True, "a target that refused every connection was not flagged unreachable")
+check(d['failed_rate'] > 0.9, f"failed rate {d['failed_rate']}: the target apparently answered something")
+check(d['dur']['p95'] is not None and d['dur']['p95'] < 50,
+      f"p95 {d['dur']['p95']} ms: refused connections should return instantly")
+check(d['requests'] > 0, "no requests were attempted at all")
+check(d['generator_ok'] is True, "the generator did not hold the rate against a refusing target")
+
+# The precedence that matters. A failed rate of exactly 1.0 is not < 1.0, so the brake DOES trip here —
+# and the report must still refuse to call it a knee. Both flags set, one honest conclusion.
+check(d['aborted'] is True, "expected the brake to trip at a 100% failed rate")
+check('TARGET NEVER ANSWERED' in log, "the report does not lead with the unreachable verdict")
+check('ABORTED by the brake' not in log,
+      "the report presents an unreachable target as a knee — the one thing it must never do")
+
+if fail:
+    print('\n'.join('  ❌ ' + f for f in fail)); sys.exit(1)
+print('  ✅ unreachable, not a knee: flagged, explained, and never dressed up as capacity')
+PY
+
 # ─────────────────────────────── the GUI reads the same archive ─────────────────────────────────────
 say ""
 say "▶ the GUI reads the same archive"
@@ -192,10 +251,10 @@ done
 curl -fsS http://127.0.0.1:18787/api/history | python3 -c '
 import json, sys
 runs = json.load(sys.stdin)["runs"]
-assert len(runs) == 2, f"the GUI lists {len(runs)} runs, expected 2"
+assert len(runs) == 3, f"the GUI lists {len(runs)} runs, expected 3"
 aborted = [r for r in runs if r["aborted"]]
-assert len(aborted) == 1, "the GUI does not distinguish the aborted run"
-print(f"  ✅ GUI lists {len(runs)} runs, one of them aborted")'
+assert len(aborted) == 2, "the GUI does not distinguish the aborted runs"
+print(f"  ✅ GUI lists {len(runs)} runs, {len(aborted)} of them aborted")'
 
 say ""
 ok "end-to-end suite passed"
