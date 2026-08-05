@@ -188,6 +188,26 @@ than plotted next to valid ones.
 Selecting a run shows the full result and a comparison against previous runs at the **same profile, target and
 shape**, labelled so nobody quotes the absolutes: *deltas are the honest part*.
 
+**Tick two runs and press Compare** for the delta between exactly those two — overall, per class, and per
+cache layer:
+
+![Two runs compared: overall, per cache layer and per class, with improvements and regressions marked
+differently](assets/screens/gui-compare.png)
+
+Nothing on that card is decided by the page. It calls `crowdsim compare --json`, which computes the verdict
+once for both interfaces — so what you read here is what a terminal would print, down to the wording. That
+matters most when the answer is **no**:
+
+![A refused comparison: one run has generator_ok false, so no delta is shown at
+all](assets/screens/gui-compare-refused.png)
+
+Two runs at different URL pools are two different experiments, and a run with `generator_ok: false` has no
+numbers at all. The page refuses both, as loudly as it would have shown a result — because a delta between
+two different experiments looks exactly like an answer.
+
+A comparison has an address: `#history=<run-a>,<run-b>`. Paste that link into the incident doc and whoever
+opens it sees the same two runs, with the same verdict.
+
 Each tab is a link — `#run`, `#profiles`, `#history` — so a reload keeps you where you were.
 
 ---
@@ -294,6 +314,7 @@ better interface: it is the thing the API calls anyway.
 | `POST` | `/api/runs/:id/stop` | Graceful stop |
 | `GET` | `/api/history` | `out/history.tsv`, newest first |
 | `GET` | `/api/history/:runId` | Summary, history row, comparable runs, run log |
+| `GET` | `/api/compare?a=&b=` | The delta between two runs, from `crowdsim compare --json`. `422` with `refused[]` when they are not comparable |
 
 ```bash
 # what would this run do?
@@ -328,9 +349,9 @@ the profile directory — a profile path is user input, and a profile is a map o
 - **No user accounts.** One token, or loopback. This is a console, not a portal.
 - **No results of its own.** Everything shown comes from the driver's files. A second version of the truth is
   always the wrong one.
-- **No comparison of arbitrary runs in the page.** History compares a selected run against previous runs at
-  the same profile, target and shape. Two runs by name, with the refusals, is `crowdsim compare` in a
-  terminal — see [CLI reference](cli.md#compare).
+- **No results of its own** — including the comparison: the page asks `crowdsim compare` and renders the
+  answer. Two copies of "are these two runs comparable" would eventually disagree, and the wrong one would be
+  the one on screen.
 
 ## See also
 

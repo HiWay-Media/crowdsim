@@ -227,6 +227,39 @@ export function createApp(opts) {
   // ── history (written by the driver, read-only here) ────────────────────────────────────────────────
   app.get('/api/history', wrap((req, res) => res.json({ runs: readHistory(outDir) })));
 
+  // Two runs compared, by asking the CLI rather than by re-deciding here.
+  //
+  // `crowdsim compare --json` computes the verdict and the refusals once, and this endpoint hands the
+  // result through. The alternative — a second copy of "are these two runs comparable" living in the
+  // server — would be the one on screen the day the two disagree, and it would be wrong exactly when it
+  // matters: a delta between two different experiments looks like an answer.
+  //
+  // A refusal keeps the CLI's exit code meaning: 422, with the reasons, not an empty 200.
+  app.get('/api/compare', wrap((req, res) => {
+    const RUN_ID = /^\d{8}T\d{6}Z$/;
+    const a = String(req.query.a || '');
+    const b = String(req.query.b || '');
+    if (!RUN_ID.test(a) || !RUN_ID.test(b)) {
+      throw new InvalidRun('run', 'a and b must both be run ids, as printed by crowdsim history');
+    }
+    const r = spawnSync(o.crowdsimBin, ['compare', a, b, '--json'], {
+      encoding: 'utf8',
+      timeout: 15000,
+      env: Object.assign({}, process.env, o.env || {}, { CROWDSIM_OUT: outDir }),
+    });
+    if (r.error) throw Object.assign(new Error(`could not run the comparison: ${r.error.message}`), { status: 500 });
+    let body;
+    try {
+      body = JSON.parse(r.stdout);
+    } catch (e) {
+      throw Object.assign(new Error(`the comparison produced no usable output: ${(r.stderr || '').trim() || r.stdout}`),
+        { status: 500 });
+    }
+    if (body.error) return res.status(404).json(body);
+    // Exit 2 with a `refused` list is the CLI saying these two runs are not the same experiment.
+    return res.status(body.refused && body.refused.length ? 422 : 200).json(body);
+  }));
+
   app.get('/api/history/:runId', wrap((req, res) => {
     const summary = readSummary(outDir, req.params.runId);
     if (!summary) return res.status(404).json({ error: 'no summary for that run id' });

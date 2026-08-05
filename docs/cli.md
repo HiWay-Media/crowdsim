@@ -11,6 +11,8 @@ crowdsim load     --profile p.json --target edge --peak 60
 crowdsim cache-ab --profile p.json --ttl 10               # two proxy legs, one origin
 crowdsim validate p.json                                  # every rule at once, before anything runs
 crowdsim history                                          # one line per run: does the knee move?
+crowdsim compare <run-a> <run-b>                          # the delta, or a refusal if they differ
+crowdsim record  session.har                              # a browser HAR export → a journey file
 crowdsim serve                                            # the GUI, on loopback
 ```
 
@@ -22,6 +24,44 @@ Checks prerequisites and prints what is missing. With `--profile`, also resolves
 referenced files checked) **and runs the full validation** — the cheapest way to find out a profile is
 broken. Always exits 0, even when it found errors: it is a report, not a gate, and a report that exits
 non-zero gets wrapped in `|| true` by the first person who scripts it. Use `validate` when you want a gate.
+
+#### `doctor --bench` — measure the generator instead of declaring it
+
+```bash
+crowdsim doctor --bench          # ~10s, loopback only, nothing is sent to any target
+```
+
+`load` warns you before a run the generator cannot sustain by comparing the bandwidth a peak implies against
+`safety.generator_mbps` — a number typed into a profile by hand, usually once, usually copied to the next
+profile. So the check that exists to stop you burning a window on an unmeasurable run rested on a guess.
+
+`--bench` measures it: a throwaway HTTP server on loopback, k6 against it in a closed model, and the result
+in `out/bench-<run>.json`, which the estimate reads when the profile declares nothing.
+
+```
+▶ measuring what this machine can generate (loopback, 10s, 40 VUs)
+  nothing is sent to any target: the server below is started here and thrown away.
+  ✅ this generator: 45068 req/s of 45 KB → 2080.0 MB/s (16640 Mbit/s)
+     ⚠️  loopback: this is the CEILING of this machine, not a prediction. Every real path is
+         narrower — a declared safety.generator_mbps you trust still wins over this number.
+```
+
+Read that caveat as part of the number. Loopback is the best network this generator will ever see; the path
+to a real target is narrower, always. What the measurement is genuinely good for is the **req/s ceiling** —
+the limit that produces dropped iterations and `generator_ok: false` — and for telling a laptop apart from a
+runner without anybody guessing.
+
+Three properties, deliberate:
+
+- **A declared `safety.generator_mbps` always wins.** Somebody who knows the uplink is 100 Mbit/s is right,
+  and this measurement is not evidence about their network. When the fallback is used, every line says so.
+- **Plain `doctor` never benchmarks.** A report that quietly starts generating traffic is not a report.
+- **It stays a warning, never a gate**, like the estimate it feeds. A wrong number must not be able to stop a
+  run somebody needs.
+
+It needs k6 (exit 5 without it) and node, which serves the local endpoint: Python's `http.server` folds at a
+few hundred req/s on loopback, so it would have reported the toy server's ceiling while calling it the
+generator's.
 
 ### `discover`
 
@@ -269,6 +309,13 @@ A different **target** or a different **peak** is a legitimate question — what
 knee — so those are allowed and *stated*: the report says this is a comparison between two targets, not a
 before/after of one.
 
+`--json` prints the same thing as data — the same verdicts, the same refusals, the same exit code — which is
+how the GUI shows a comparison without owning a second copy of these rules:
+
+```bash
+crowdsim compare 20260805T090000Z 20260805T093000Z --json
+```
+
 ### `record`
 
 ```bash
@@ -326,6 +373,7 @@ out/
   journey-<run_id>.json    what record extracted from a HAR (data about your site: keep it private)
   profile-<run_id>.json    the profile as resolved for that run (pools inlined)
   history.tsv              one appended line per run
+  bench-<run_id>.json      what doctor --bench measured this machine doing (loopback: a ceiling)
   gui-run.json             written by `serve` only: the run in flight, so a restart can find it
 ```
 

@@ -15,18 +15,21 @@ const TAB_IDS = TABS.map((t) => t.id);
 export default function App() {
   // The tab lives in the URL fragment, so a reload keeps you where you were and a link can point at
   // "#history" — which is also how the documentation screenshots are taken.
+  // `#history=<a>,<b>` selects the History tab AND the comparison in it, so a delta can be sent to
+  // somebody as a link. The tab id is the part before the '='.
+  const tabOf = (hash) => String(hash || '').replace('#', '').split('=')[0];
   const [tab, setTab] = useState(() => {
-    const fromHash = String(window.location.hash || '').replace('#', '');
+    const fromHash = tabOf(window.location.hash);
     return TAB_IDS.indexOf(fromHash) === -1 ? 'run' : fromHash;
   });
 
   useEffect(() => {
-    if (window.location.hash !== `#${tab}`) window.location.hash = tab;
+    if (tabOf(window.location.hash) !== tab) window.location.hash = tab;
   }, [tab]);
 
   useEffect(() => {
     const onHash = () => {
-      const id = String(window.location.hash || '').replace('#', '');
+      const id = tabOf(window.location.hash);
       if (TAB_IDS.indexOf(id) !== -1) setTab(id);
     };
     window.addEventListener('hashchange', onHash);

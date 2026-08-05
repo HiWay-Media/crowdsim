@@ -126,6 +126,7 @@ duration go in the dispatch call, and the profile is fetched at dispatch time fr
 
 ```bash
 crowdsim doctor                                          # what is missing on this machine
+crowdsim doctor --bench                                   # what this machine can generate (loopback)
 crowdsim discover --profile p.json --limit 400 --verify    # a URL pool, minus what does not render
 crowdsim probe    --profile p.json --target edge          # reachability + cache headers hop by hop
 crowdsim load     --profile p.json --target edge --peak 60

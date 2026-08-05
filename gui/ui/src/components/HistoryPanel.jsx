@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { api } from '../api.js';
+import { api, ApiError } from '../api.js';
 import SummaryCard from './SummaryCard.jsx';
+import CompareCard from './CompareCard.jsx';
 
 /*
  * The archive, read from out/history.tsv and out/summary-*.json — the files the driver writes. Runs
@@ -14,6 +15,40 @@ export default function HistoryPanel() {
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
+  // Two runs picked for a comparison, oldest-first as A and B. Kept separate from `selected`, which is the
+  // row whose full result is on screen: reading one run and comparing two are different questions.
+  const [picked, setPicked] = useState([]);
+  const [comparison, setComparison] = useState(null);
+
+  // A comparison is a thing people quote to each other, so it has an address: #history=<a>,<b>.
+  useEffect(() => {
+    const pair = String(window.location.hash || '').split('=')[1];
+    const ids = (pair ? pair.split(',') : []).filter((x) => /^\d{8}T\d{6}Z$/.test(x));
+    if (ids.length !== 2) return;
+    setPicked(ids);
+    api.compare(ids[0], ids[1])
+      .then(setComparison)
+      .catch((e) => (e instanceof ApiError && e.body && e.body.refused
+        ? setComparison(e.body)
+        : setError(e.message)));
+  }, []);
+
+  const togglePick = (runId) => setPicked((p) => (
+    p.indexOf(runId) !== -1 ? p.filter((x) => x !== runId) : p.concat([runId]).slice(-2)
+  ));
+
+  async function compareNow() {
+    setError(null);
+    const [a, b] = order(picked, rows);
+    window.location.hash = `history=${a},${b}`;
+    try {
+      setComparison(await api.compare(a, b));
+    } catch (e) {
+      // A refusal is not an error to hide in a banner: it IS the answer, and the card renders it.
+      if (e instanceof ApiError && e.body && e.body.refused) setComparison(e.body);
+      else setError(e.message);
+    }
+  }
 
   useEffect(() => {
     api.history().then((h) => setRows(h.runs)).catch((e) => setError(e.message));
@@ -31,9 +66,25 @@ export default function HistoryPanel() {
         {error ? <div className="banner bad">{error}</div> : null}
         {!rows.length ? <p className="note">No runs recorded yet. The archive is written by the driver, in the output directory.</p> : null}
         {rows.length ? <KneePlot rows={rows} onPick={setSelected} selected={selected} /> : null}
+
+        {rows.length ? (
+          <div className="actions">
+            <button className="primary" disabled={picked.length !== 2} onClick={compareNow}>
+              Compare the two ticked runs
+            </button>
+            <span className="note">
+              {picked.length === 2
+                ? `A ${order(picked, rows)[0]} → B ${order(picked, rows)[1]} (oldest first)`
+                : `tick two runs (${picked.length}/2). The comparison, and every refusal, comes from crowdsim compare.`}
+            </span>
+            {picked.length ? <button onClick={() => { setPicked([]); setComparison(null); }}>clear</button> : null}
+          </div>
+        ) : null}
+
         <table className="data">
           <thead>
             <tr>
+              <th>cmp</th>
               <th>run</th><th>profile</th><th>target</th><th>shape</th><th>peak</th><th>achieved</th>
               <th>p95</th><th>failed</th><th>504</th><th>outcome</th>
             </tr>
@@ -45,6 +96,14 @@ export default function HistoryPanel() {
                 className={`${selected === r.run_id ? 'sel' : ''} ${r.generator_ok === false ? 'invalid' : ''}`}
                 onClick={() => setSelected(r.run_id)}
               >
+                <td onClick={(e) => e.stopPropagation()}>
+                  <input
+                    type="checkbox"
+                    checked={picked.indexOf(r.run_id) !== -1}
+                    onChange={() => togglePick(r.run_id)}
+                    aria-label={`compare ${r.run_id}`}
+                  />
+                </td>
                 <td className="mono">{r.run_id}</td>
                 <td>{r.profile}</td>
                 <td className="mono small">{r.base_url}</td>
@@ -65,11 +124,19 @@ export default function HistoryPanel() {
         </table>
       </section>
 
+      {comparison ? <CompareCard result={comparison} onClose={() => setComparison(null)} /> : null}
+
       {detail && detail.summary
         ? <SummaryCard summary={detail.summary} compare={detail.comparable} />
         : null}
     </div>
   );
+}
+
+/** A before/after reads in one direction: the older run is A. */
+function order(picked, rows) {
+  const at = (id) => rows.findIndex((r) => r.run_id === id);   // rows are newest first
+  return picked.slice().sort((x, y) => at(y) - at(x));
 }
 
 /** Inline SVG: no chart dependency for one scatter plot with 20 points. */

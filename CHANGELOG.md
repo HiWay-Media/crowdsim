@@ -4,6 +4,58 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.10.0] — 2026-08-05
+
+Milestone [v1.4.0](https://github.com/HiWay-Media/crowdsim/milestone/5), and one theme: a judgement that
+already exists should not depend on which interface you opened, or on a number nobody re-measured.
+
+### Added
+- **Two runs compared in the GUI** ([#27](https://github.com/HiWay-Media/crowdsim/issues/27)). Tick two runs
+  in History and press Compare: overall, per class and per cache layer, improvements and regressions marked
+  differently.
+
+  **The page decides nothing.** `crowdsim compare` grew a `--json` mode, the server spawns it, and the card
+  renders what came back — the same verdict, the same refusals, the same wording a terminal would print. A
+  second copy of "are these two runs comparable" living in the server would be the one on screen the day the
+  two disagreed, and a delta between two different experiments looks exactly like an answer. There is a test
+  that asserts the endpoint and the CLI return byte-identical structures.
+  - A refusal is rendered as prominently as a result: `422` from the API, a red card in the page, no numbers
+    at all. Not a 200 with an empty table.
+  - A comparison has an address — `#history=<run-a>,<run-b>` — so the delta can be pasted into an incident
+    doc and reopened by somebody else.
+  - The two run ids are matched against the run-id shape before they reach a spawn argv, for the same reason
+    profile names are checked before they become a path.
+- **`crowdsim doctor --bench`** ([#28](https://github.com/HiWay-Media/crowdsim/issues/28)) measures what this
+  machine can generate, instead of trusting a `safety.generator_mbps` typed by hand. A throwaway HTTP server
+  on loopback, k6 against it in a closed model, and the result in `out/bench-<run>.json`, which the bandwidth
+  estimate reads when the profile declares nothing.
+
+  ```
+  ✅ this generator: 45068 req/s of 45 KB → 2080.0 MB/s (16640 Mbit/s)
+     ⚠️  loopback: this is the CEILING of this machine, not a prediction.
+  ```
+
+  The caveat is part of the number, and it is stored inside the artefact so a value read back next month
+  carries it too. Loopback is the best network this generator will ever see.
+  - **A declared `safety.generator_mbps` still wins**, and when the fallback is used every line says so —
+    including the warning, which reads `WAS MEASURED DOING ON LOOPBACK` rather than `IS DECLARED TO SUSTAIN`.
+  - **Plain `doctor` never benchmarks**: a report that quietly starts generating traffic is not a report.
+  - It stays a warning, never a gate, like the estimate it feeds.
+
+### Changed
+- `crowdsim compare` computes its result once into a structure and then either prints prose or dumps JSON,
+  rather than printing as it goes. That is what makes one verdict serve both interfaces; the text output is
+  unchanged, and the eleven existing tests still pass against it unmodified.
+- The millisecond formatting in `compare` follows the size of the number (`0.87 ms`, `140 ms`): sub-millisecond
+  deltas on a loopback target used to print as `+0 ms (+67%)`, which reads like a broken calculation.
+
+### Fixed
+- The benchmark's local server is node, not python3, even though python3 is the driver's own dependency:
+  `http.server` is a thread per connection and folded at a few hundred req/s on loopback, with k6 reporting
+  connection resets. Measured, and caught before shipping — it would have made `--bench` report the toy
+  server's ceiling while calling it the generator's, which is the exact species of confidently wrong number
+  this tool exists to avoid.
+
 ## [1.9.1] — 2026-08-05
 
 ### Changed

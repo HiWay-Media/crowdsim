@@ -52,6 +52,9 @@ export const api = {
   run: (id) => call('GET', `/api/runs/${encodeURIComponent(id)}`),
   stopRun: (id) => call('POST', `/api/runs/${encodeURIComponent(id)}/stop`),
   history: () => call('GET', '/api/history'),
+  // The comparison is computed by `crowdsim compare --json`, spawned by the server. Never re-derive a
+  // verdict here: the refusals are the feature, and two copies of them would eventually disagree.
+  compare: (a, b) => call('GET', `/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`),
   historyRun: (runId) => call('GET', `/api/history/${encodeURIComponent(runId)}`),
 };
 

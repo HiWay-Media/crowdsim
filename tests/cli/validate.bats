@@ -198,3 +198,78 @@ PY2
   [ "$status" -eq 0 ]
   [[ "$output" == *"bandwidth: 50 req/s"* ]]        # the fixture's safe_peak_rps
 }
+
+@test "with no declared generator_mbps the estimate falls back to a measured ceiling, labelled as one" {
+  # #28: the warning that predicts generator_ok:false used to rest entirely on a number typed by hand. A
+  # measurement is better than silence — and worse than a value somebody chose knowing the uplink, which is
+  # why it is never presented as a declaration.
+  mkdir -p "$CROWDSIM_OUT"
+  python3 - "$CROWDSIM_OUT" <<'PY'
+import json, os, sys
+out = sys.argv[1]
+json.dump({'run_id': '20260805T120000Z', 'base_url': 'http://127.0.0.1:8099', 'path': '/', 'status': 200,
+           'ttfb_s': 0.18, 'bytes': 46231},
+          open(os.path.join(out, 'probe-20260805T120000Z.json'), 'w'))
+json.dump({'measured_at': '20260805T120500Z', 'req_per_second': 1000.0,
+           'mbytes_per_second': 12.5, 'mbits_per_second': 100.0, 'failed_rate': 0.0},
+          open(os.path.join(out, 'bench-20260805T120500Z.json'), 'w'))
+PY
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 380 --safe-peak 400 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"no safety.generator_mbps declared; using the loopback ceiling measured on this machine"* ]]
+  [[ "$output" == *"100 Mbit/s"* ]]
+  [[ "$output" == *"UPPER BOUND"* ]]
+  # 141 Mbit/s needed against a measured 100: loud, and it does not claim the number was declared.
+  [[ "$output" == *"WAS MEASURED DOING ON LOOPBACK"* ]]
+  [[ "$output" != *"IS DECLARED TO SUSTAIN"* ]]
+}
+
+@test "a declared generator_mbps still wins over a measurement" {
+  # Somebody who knows the uplink is 50 Mbit/s is right; loopback is not evidence about their network.
+  mkdir -p "$CROWDSIM_OUT"
+  python3 - "$CROWDSIM_OUT" <<'PY'
+import json, os, sys
+out = sys.argv[1]
+json.dump({'run_id': '20260805T120000Z', 'base_url': 'http://127.0.0.1:8099', 'path': '/', 'status': 200,
+           'ttfb_s': 0.18, 'bytes': 46231},
+          open(os.path.join(out, 'probe-20260805T120000Z.json'), 'w'))
+json.dump({'measured_at': '20260805T120500Z', 'mbits_per_second': 16000.0},
+          open(os.path.join(out, 'bench-20260805T120500Z.json'), 'w'))
+PY
+  python3 - "$FIXTURES/minimal.json" "$BATS_TEST_TMPDIR/slow.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d['safety']['generator_mbps'] = 50
+json.dump(d, open(sys.argv[2], 'w'))
+PY
+  run "$CROWDSIM" load --profile "$BATS_TEST_TMPDIR/slow.json" --peak 380 --safe-peak 400 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MORE THAN THE 50 Mbit/s THIS GENERATOR IS DECLARED TO SUSTAIN"* ]]
+  [[ "$output" != *"loopback ceiling"* ]]
+}
+
+@test "with neither a declaration nor a measurement, it says how to get one" {
+  mkdir -p "$CROWDSIM_OUT"
+  python3 - "$CROWDSIM_OUT/probe-20260805T120000Z.json" <<'PY'
+import json, sys
+json.dump({'run_id': '20260805T120000Z', 'base_url': 'http://127.0.0.1:8099', 'path': '/', 'status': 200,
+           'ttfb_s': 0.18, 'bytes': 46231}, open(sys.argv[1], 'w'))
+PY
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 380 --safe-peak 400 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"crowdsim doctor --bench"* ]]
+}
+
+@test "doctor --bench without k6 exits 5 and says what it is for" {
+  PATH="$(path_without_k6)" run "$CROWDSIM" doctor --bench
+  [ "$status" -eq 5 ]
+  [[ "$output" == *"needs k6"* ]]
+  [[ "$output" == *"what k6 can push on this machine"* ]]
+}
+
+@test "plain doctor does not benchmark: a report must not become a load generator" {
+  run "$CROWDSIM" doctor
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"measuring what this machine can generate"* ]]
+  [ -z "$(ls "$CROWDSIM_OUT"/bench-*.json 2>/dev/null)" ]
+}

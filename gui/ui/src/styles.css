@@ -198,3 +198,9 @@ table { width: 100%; border-collapse: collapse; }
 .data tbody tr.static:hover { background: transparent; cursor: default; }
 h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--dim);
      margin: 18px 0 6px; font-weight: 600; }
+
+/* ── comparison ──────────────────────────────────────────────────────────────────────────────────── */
+button.linkish { background: none; border: none; color: var(--dim); font-size: 12px; padding: 0 4px;
+                 text-decoration: underline; cursor: pointer; }
+.data td input[type="checkbox"] { cursor: pointer; }
+.banner.bad ul { margin: 6px 0 0; padding-left: 18px; }

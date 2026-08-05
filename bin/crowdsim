@@ -38,7 +38,7 @@
 #                     [--safe-peak 150] [--i-know-this-breaks-production] [--touch-and-go] [--dry-run]
 #   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10] [--third <leg.conf.template>]
 #   crowdsim cache-ab --new-leg <leg.conf.template>
-#   crowdsim compare  <run-a> <run-b>
+#   crowdsim compare  <run-a> <run-b> [--json]
 #   crowdsim record   <file.har> [--out <journey.json>] [--origin <url>] [--rsc-query _rsc] [--force]
 #   crowdsim validate <f.json>
 #   crowdsim serve    [--port 8787] [--bind 127.0.0.1]
@@ -108,6 +108,8 @@ while [ $# -gt 0 ]; do
     --abort-delay) ABORT_DELAY="$2"; shift 2;;
     --port) GUI_PORT="$2"; shift 2;;
     --bind) GUI_BIND="$2"; shift 2;;
+    --json) COMPARE_JSON=1; shift;;
+    --bench) BENCH=1; shift;;
     --third) THIRD_LEG="$2"; shift 2;;
     --new-leg) NEW_LEG="$2"; shift 2;;
     --out) JOURNEY_OUT="$2"; shift 2;;
@@ -335,7 +337,103 @@ k6_bin() {
   and the Nomad job are for." 5
 }
 
+# ─────────────────────────────── bench: what can THIS machine generate? ─────────────────────────────
+# `safety.generator_mbps` is the number the "you will get generator_ok: false" warning rests on, and it is
+# typed into a profile by hand — usually once, usually copied to the next profile. So the check that exists
+# to stop you burning a window on an unmeasurable run depends on a guess about a laptop.
+#
+# The machine can answer this itself, and without touching anybody's target: a throwaway HTTP server on
+# loopback, k6 against it in a closed model, and the result written where the estimate can read it.
+#
+# The number is an UPPER BOUND, and the artefact says so in its own body. Loopback is the best network this
+# generator will ever see; the path to a real target is narrower, always. A declared generator_mbps still
+# wins, because somebody who knows the uplink is 100 Mbit/s is right and this measurement is not.
+BENCH_PAGE_BYTES="${CROWDSIM_BENCH_BYTES:-46000}"
+BENCH_DUR="${CROWDSIM_BENCH_DUR:-10s}"
+BENCH_VUS="${CROWDSIM_BENCH_VUS:-40}"
+
+run_bench() {
+  local k6; k6="$(command -v k6 || true)"
+  if [ -z "$k6" ]; then die "doctor --bench needs k6: it measures what k6 can push on this machine" 5; fi
+  if ! command -v node >/dev/null 2>&1; then
+    die "doctor --bench needs node (18+) for the local server it measures against — see docs/cli.md" 5
+  fi
+  local script="${CROWDSIM_BENCH_SCRIPT:-$ROOT/k6/bench.js}"
+  if [ ! -f "$script" ]; then die "missing $script (is CROWDSIM_ROOT right?)" 5; fi
+
+  mkdir -p "$OUT_DIR"
+  local out="$OUT_DIR/bench-$RUN_ID.json"
+  local srv_log="$OUT_DIR/.bench-$RUN_ID.log"
+
+  say ""
+  say "▶ measuring what this machine can generate (loopback, ${BENCH_DUR}, ${BENCH_VUS} VUs)"
+  say "  nothing is sent to any target: the server below is started here and thrown away."
+
+  # A local server that answers a fixed body. Port 0 lets the kernel pick a free one, which it then prints:
+  # hardcoding a port would collide with whatever else the developer is running.
+  # node, not python3, even though python3 is the driver's own dependency: python's http.server is a thread
+  # per connection and folds at a few hundred req/s on loopback — measured, with k6 reporting resets rather
+  # than a ceiling. It would have made this command report the toy server's limit while calling it the
+  # generator's, which is the exact species of confident wrong number the tool exists to avoid.
+  node -e '
+    const http = require("http");
+    const body = Buffer.alloc(Number(process.argv[1]), 0x78);
+    const srv = http.createServer((req, res) => {
+      res.writeHead(200, { "Content-Type": "text/html", "Content-Length": body.length });
+      res.end(body);
+    });
+    srv.keepAliveTimeout = 60000;
+    srv.listen(0, "127.0.0.1", () => console.log(srv.address().port));
+  ' "$BENCH_PAGE_BYTES" > "$srv_log" 2>&1 &
+  local srv_pid=$!
+  # Without this the shell prints "Terminated: 15" plus the whole node source when the server is killed,
+  # which reads like a crash at the end of a successful measurement.
+  disown "$srv_pid" 2>/dev/null || true
+  # shellcheck disable=SC2064
+  trap "kill $srv_pid 2>/dev/null || true" EXIT
+
+  local port=""
+  local i=0
+  while [ -z "$port" ] && [ "$i" -lt 50 ]; do
+    port="$(head -1 "$srv_log" 2>/dev/null | tr -dc '0-9')"
+    [ -n "$port" ] && break
+    sleep 0.1; i=$((i + 1))
+  done
+  if [ -z "$port" ]; then
+    kill "$srv_pid" 2>/dev/null || true
+    die "the local benchmark server did not start (see $srv_log)" 5
+  fi
+
+  set +e
+  BENCH_URL="http://127.0.0.1:$port/" BENCH_OUT="$out" BENCH_DUR="$BENCH_DUR" BENCH_VUS="$BENCH_VUS" \
+    BENCH_RUN_ID="$RUN_ID" "$k6" run --quiet "$script" 2>&1 | grep -vE '^\s*(execution:|script:|output:|scenarios:|default|running|\s*$)' | tail -20
+  local rc="${PIPESTATUS[0]}"
+  set -e
+  kill "$srv_pid" 2>/dev/null || true
+  trap - EXIT
+  rm -f "$srv_log"
+
+  if [ ! -f "$out" ]; then
+    warn "the benchmark produced no result (k6 exit $rc)"
+    return 0
+  fi
+  python3 - "$out" "$BENCH_PAGE_BYTES" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+page = int(sys.argv[2])
+print(f"  ✅ this generator: {d['req_per_second']:.0f} req/s of {page/1024:.0f} KB "
+      f"→ {d['mbytes_per_second']:.1f} MB/s ({d['mbits_per_second']:.0f} Mbit/s)")
+print(f"     written to {sys.argv[1]} — `load` reads it when the profile declares no safety.generator_mbps")
+print( "     ⚠️  loopback: this is the CEILING of this machine, not a prediction. Every real path is")
+print( "         narrower — a declared safety.generator_mbps you trust still wins over this number.")
+if d.get('failed_rate'):
+    print(f"     ⚠️  {d['failed_rate']*100:.1f}% of the benchmark's own requests failed: the ceiling above is")
+    print( "         soft, and this machine is probably busy with something else.")
+PY
+}
+
 cmd_doctor() {
+  if [ "${BENCH:-0}" = "1" ]; then run_bench; fi
   say "▶ crowdsim prerequisites"
   if command -v k6 >/dev/null 2>&1; then ok "k6 $(k6 version 2>/dev/null | head -1)"; else warn "k6 MISSING (see: crowdsim load)"; fi
   if command -v curl >/dev/null 2>&1; then ok "curl"; else warn "curl missing"; fi
@@ -673,20 +771,45 @@ size = f"{weight/1024:.0f} KB" if weight >= 1024 else f"{weight} B"
 rate = f"{mbytes:.1f} MB/s" if mbytes >= 1 else f"{peak * weight / 1000:.1f} KB/s"
 link = f"{mbits:.0f} Mbit/s" if mbits >= 1 else f"{mbits:.3g} Mbit/s"
 print(f"  ℹ️  bandwidth: {peak:g} req/s × {size} ≈ {rate} ({link}) sustained, from probe {d['run_id']}")
+
+source = 'declared'
 if not declared:
-    print("     A generator that cannot sustain that will report generator_ok: false — an invalid run, not")
-    print("     a slow one. Declare safety.generator_mbps to have this checked.")
-    raise SystemExit
+    # Nothing declared: fall back to what this machine was measured doing, if anybody measured it.
+    # A measured ceiling is better than silence and worse than a value somebody chose knowing the uplink —
+    # which is why a declared number wins, and why this one is labelled every time it is used.
+    bench = []
+    for f in sorted(glob.glob(os.path.join(out_dir, 'bench-*.json'))):
+        try:
+            b = json.load(open(f))
+        except Exception:
+            continue
+        if b.get('mbits_per_second'):
+            bench.append(b)
+    if not bench:
+        print("     A generator that cannot sustain that will report generator_ok: false — an invalid run,")
+        print("     not a slow one. Declare safety.generator_mbps, or measure it: crowdsim doctor --bench")
+        raise SystemExit
+    declared = bench[-1]['mbits_per_second']
+    source = 'measured'
+    print(f"     no safety.generator_mbps declared; using the loopback ceiling measured on this machine "
+          f"({declared:.0f} Mbit/s, {bench[-1].get('measured_at')}).")
+    print("     That is an UPPER BOUND: the path to a real target is narrower, always. Declaring the real")
+    print("     uplink in the profile gives a warning worth acting on.")
 try:
     have = float(declared)
 except ValueError:
     raise SystemExit
+if source == 'measured' and mbits <= have:
+    # Under a ceiling that flatters you is not reassurance worth printing as a verdict.
+    raise SystemExit
+said = 'IS DECLARED TO SUSTAIN' if source == 'declared' else 'WAS MEASURED DOING ON LOOPBACK'
 if mbits > have:
-    print(f"  ⚠️  THAT IS MORE THAN THE {have:g} Mbit/s THIS GENERATOR IS DECLARED TO SUSTAIN.")
+    print(f"  ⚠️  THAT IS MORE THAN THE {have:g} Mbit/s THIS GENERATOR {said}.")
     print("     Expect generator_ok: false. Move the generator closer to the target, or lower the peak —")
     print("     do not lower the SLO.")
 elif mbits > 0.8 * have:
-    print(f"  ⚠️  that is within 20% of the declared {have:g} Mbit/s: watch generator_ok on this run")
+    word = 'declared' if source == 'declared' else 'measured'
+    print(f"  ⚠️  that is within 20% of the {word} {have:g} Mbit/s: watch generator_ok on this run")
 PY
 }
 
@@ -805,10 +928,24 @@ cmd_compare() {
     die "compare needs two run ids: crowdsim compare <run-a> <run-b> (see crowdsim history)" 2
   fi
   local rc=0
-  python3 - "$OUT_DIR" "$a" "$b" <<'PY' || rc=$?
+  python3 - "$OUT_DIR" "$a" "$b" "${COMPARE_JSON:-0}" <<'PY' || rc=$?
 import json, os, sys
 
-out_dir, a_id, b_id = sys.argv[1], sys.argv[2], sys.argv[3]
+out_dir, a_id, b_id, as_json = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4] == '1'
+
+# The comparison is COMPUTED once into a structure, and then either printed as prose or dumped as JSON.
+# That split is the whole reason --json exists: the GUI shows the same verdict as this command because it
+# asks this command, instead of carrying a second copy of the rules — which would drift, and then disagree
+# on screen, while somebody is deciding something.
+
+def fail(msg):
+    """A usage-level problem: not a refusal to compare, but nothing to compare."""
+    if as_json:
+        json.dump({'error': msg}, sys.stdout, indent=1)
+        print()
+    else:
+        print(f'  ❌ {msg}')
+    raise SystemExit(2)
 
 def load(run_id, what):
     path = os.path.join(out_dir, f'{what}-{run_id}.json')
@@ -817,61 +954,55 @@ def load(run_id, what):
     except FileNotFoundError:
         return None
     except Exception as e:
-        print(f'  ❌ {path} does not parse: {e}')
-        raise SystemExit(2)
-
-def refuse(*lines):
-    print('  ⛔ refusing to compare these two runs:')
-    for l in lines:
-        print(f'     {l}')
-    print('     A comparison that is not like-for-like is a confident number with nothing behind it.')
-    raise SystemExit(2)
+        fail(f'{path} does not parse: {e}')
 
 runs = {}
 for run_id in (a_id, b_id):
     s = load(run_id, 'summary')
     if s is None:
-        print(f'  ❌ no summary for {run_id} in {out_dir} — is that a run id? (crowdsim history)')
-        raise SystemExit(2)
+        fail(f'no summary for {run_id} in {out_dir} — is that a run id? (crowdsim history)')
     runs[run_id] = s
 
 A, B = runs[a_id], runs[b_id]
+refusals = []
+notes = []
+warnings = []
 
-# 1. A run the generator could not deliver has no numbers to compare. This is first because it is the one
+# 1. A run the generator could not deliver has no numbers to compare. Checked first because it is the one
 #    that looks most like a valid result.
-invalid = [r for r in (a_id, b_id) if runs[r].get('generator_ok') is False]
-if invalid:
-    refuse(*[f'{r} has generator_ok: false — the generator, not the target, was the bottleneck'
-             for r in invalid],
-           'Move the generator closer to the target and run it again; nothing in that run is measurable.')
-
-if any(runs[r].get('target_unreachable') for r in (a_id, b_id)):
-    refuse(*[f'{r} never reached its target' for r in (a_id, b_id) if runs[r].get('target_unreachable')])
+for r in (a_id, b_id):
+    if runs[r].get('generator_ok') is False:
+        refusals.append((f'{r} has generator_ok: false — the generator, not the target, was the bottleneck',
+                         ['Move the generator closer to the target and run it again; nothing in that run '
+                          'is measurable.']))
+    if runs[r].get('target_unreachable'):
+        refusals.append((f'{r} never reached its target', ['That is connectivity, not capacity.']))
 
 # 2. Different pools mean two different experiments. The resolved profile of each run has the pools inlined,
 #    which is exactly why it is archived.
 pa, pb = load(a_id, 'profile'), load(b_id, 'profile')
 if pa is None or pb is None:
-    print('  ⚠️  one of the runs has no resolved profile archived, so the URL pools cannot be compared.')
-    print('     Runs from 1.0.0 onwards write profile-<run>.json; older ones do not.')
+    warnings.append('one of the runs has no resolved profile archived, so the URL pools could not be '
+                    'compared. Runs from 1.0.0 onwards write profile-<run>.json; older ones do not.')
 else:
     ka, kb = pa.get('pools') or {}, pb.get('pools') or {}
     if set(ka) != set(kb):
-        refuse(f'different pool names: {sorted(set(ka))} vs {sorted(set(kb))}')
-    differing = [k for k in ka if ka[k] != kb.get(k)]
-    if differing:
-        refuse(*[f'pool "{k}" is not the same list of URLs in both runs '
-                 f'({len(ka[k])} vs {len(kb.get(k) or [])} entries)' for k in differing],
-               'Numbers are comparable only between runs at an identical pool: a colder pool is a harder '
-               'test.')
+        refusals.append((f'different pool names: {sorted(set(ka))} vs {sorted(set(kb))}', []))
+    else:
+        differing = [k for k in ka if ka[k] != kb.get(k)]
+        if differing:
+            refusals.append((
+                '; '.join(f'pool "{k}" is not the same list of URLs in both runs '
+                          f'({len(ka[k])} vs {len(kb.get(k) or [])} entries)' for k in differing),
+                ['Numbers are comparable only between runs at an identical pool: a colder pool is a harder '
+                 'test.']))
 
 if A.get('shape') != B.get('shape'):
-    refuse(f'different shapes: {A.get("shape")} vs {B.get("shape")} — a journey and a mix are not the '
-           'same load')
+    refusals.append((f'different shapes: {A.get("shape")} vs {B.get("shape")} — a journey and a mix are not '
+                     'the same load', []))
 
 # 3. Same pool, different target or different peak is a legitimate question — but it changes what the delta
 #    MEANS, so it is stated rather than assumed.
-notes = []
 if A.get('base_url') != B.get('base_url'):
     notes.append(f'different targets ({A.get("base_url")} → {B.get("base_url")}): this is a comparison '
                  'BETWEEN TWO TARGETS, not a before/after of one')
@@ -884,44 +1015,117 @@ for r in (a_id, b_id):
     if runs[r].get('aborted'):
         notes.append(f'{r} was aborted by the brake: its numbers describe the moment the SLO was crossed')
 
-# ── the report ─────────────────────────────────────────────────────────────────────────────────────
-def ms(v):
-    # A tenth of a millisecond matters on a loopback target and is noise on a real one, so the precision
-    # follows the number: "0 ms → 0 ms (+67%)" reads like a broken calculation.
+def head(s, run_id):
+    return {'run_id': run_id, 'profile': s.get('profile'), 'base_url': s.get('base_url'),
+            'shape': s.get('shape'), 'peak': s.get('peak_rps_user_target'),
+            'aborted': bool(s.get('aborted')), 'generator_ok': s.get('generator_ok'),
+            'requests': s.get('requests')}
+
+def row(label, av, bv, unit, lower_is_better=True):
+    """One comparable pair. `change` is None when either side has nothing to compare."""
+    d = None if av is None or bv is None else bv - av
+    rel = None if not d or not av else d / av
+    if d is None:
+        verdict = 'unknown'
+    elif abs(d) < 1e-9:
+        verdict = 'same'
+    else:
+        verdict = 'better' if (d < 0) == lower_is_better else 'worse'
+    return {'label': label, 'unit': unit, 'a': av, 'b': bv, 'change': d, 'relative': rel,
+            'verdict': verdict}
+
+result = {
+    'a': head(A, a_id),
+    'b': head(B, b_id),
+    'refused': [{'reason': r, 'detail': d} for r, d in refusals],
+    'notes': notes,
+    'warnings': warnings,
+}
+
+if not refusals:
+    result['overall'] = [
+        row('p50', A['dur'].get('p50'), B['dur'].get('p50'), 'ms'),
+        row('p95', A['dur'].get('p95'), B['dur'].get('p95'), 'ms'),
+        row('p99', A['dur'].get('p99'), B['dur'].get('p99'), 'ms'),
+        row('failed rate', A.get('failed_rate'), B.get('failed_rate'), 'ratio'),
+        row(f'over {A.get("guillotine_ms")} ms', A.get('over_guillotine_rate'),
+            B.get('over_guillotine_rate'), 'ratio'),
+        row('504s', A.get('e504', 0), B.get('e504', 0), 'count'),
+        row('requests', A.get('requests', 0), B.get('requests', 0), 'count', lower_is_better=False),
+    ]
+    # Cache hit ratio per layer. None means the header never appeared: n/a, never 0%.
+    layers = list(A.get('cache') or {})
+    for k in (B.get('cache') or {}):
+        if k not in layers:
+            layers.append(k)
+    result['layers'] = [row(layer, (A.get('cache') or {}).get(layer), (B.get('cache') or {}).get(layer),
+                            'ratio', lower_is_better=False) for layer in layers]
+
+    classes = list(A.get('per_class') or {})
+    for c in (B.get('per_class') or {}):
+        if c not in classes:
+            classes.append(c)
+    per_class = []
+    for c in classes:
+        ca = (A.get('per_class') or {}).get(c) or {}
+        cb = (B.get('per_class') or {}).get(c) or {}
+        if not ca or not cb:
+            per_class.append({'class': c, 'only_in': 'a' if ca else 'b'})
+            continue
+        per_class.append({
+            'class': c, 'only_in': None,
+            'p95': row('p95', ca.get('p95'), cb.get('p95'), 'ms'),
+            'failed': row('failed', ca.get('failed'), cb.get('failed'), 'ratio'),
+        })
+    result['per_class'] = per_class
+
+if as_json:
+    json.dump(result, sys.stdout, indent=1)
+    print()
+    raise SystemExit(2 if refusals else 0)
+
+# ── prose, rendered from exactly that structure ─────────────────────────────────────────────────────
+if refusals:
+    print('  ⛔ refusing to compare these two runs:')
+    for r, detail in refusals:
+        print(f'     {r}')
+        for line in detail:
+            print(f'     {line}')
+    print('     A comparison that is not like-for-like is a confident number with nothing behind it.')
+    raise SystemExit(2)
+
+def fmt(v, unit):
     if v is None:
         return '—'
-    return f'{v:.2f} ms' if abs(v) < 10 else f'{v:.0f} ms'
-
-def pct(v):
-    return '—' if v is None else f'{v * 100:.2f}%'
-
-def delta(before, after, unit='ms', lower_is_better=True):
-    """Signed change, plus a marker. No marker when there is nothing to compare."""
-    if before is None or after is None:
-        return '—'
-    diff = after - before
     if unit == 'ms':
-        shown = f'{diff:+.2f} ms' if abs(diff) < 10 else f'{diff:+.0f} ms'
-    elif unit == 'pp':
-        shown = f'{diff * 100:+.2f} pp'
+        # A tenth of a millisecond matters on a loopback target and is noise on a real one, so the precision
+        # follows the number: "0 ms → 0 ms (+67%)" reads like a broken calculation.
+        return f'{v:.2f} ms' if abs(v) < 10 else f'{v:.0f} ms'
+    if unit == 'ratio':
+        return f'{v * 100:.2f}%'
+    return f'{v:g}'
+
+def change(r):
+    if r['change'] is None:
+        return '—'
+    d, unit = r['change'], r['unit']
+    if unit == 'ms':
+        shown = f'{d:+.2f} ms' if abs(d) < 10 else f'{d:+.0f} ms'
+    elif unit == 'ratio':
+        shown = f'{d * 100:+.2f} pp'
     else:
-        shown = f'{diff:+.0f}'
-    rel = ''
-    if before:
-        rel = f' ({diff / before * 100:+.0f}%)'
-    if abs(diff) < 1e-9:
-        mark = '  ='
-    elif (diff < 0) == lower_is_better:
-        mark = ' ✅'
-    else:
-        mark = ' ⚠️'
+        shown = f'{d:+.0f}'
+    rel = f' ({r["relative"] * 100:+.0f}%)' if r['relative'] else ''
+    mark = {'better': ' ✅', 'worse': ' ⚠️', 'same': '  =', 'unknown': ''}[r['verdict']]
     return f'{shown}{rel}{mark}'
 
+for w in warnings:
+    print(f'  ⚠️  {w}')
 print()
-print(f'  A  {a_id}   profile {A.get("profile")}  {A.get("base_url")}  '
-      f'shape {A.get("shape")}  peak {A.get("peak_rps_user_target")}')
-print(f'  B  {b_id}   profile {B.get("profile")}  {B.get("base_url")}  '
-      f'shape {B.get("shape")}  peak {B.get("peak_rps_user_target")}')
+for k in ('a', 'b'):
+    h = result[k]
+    print(f'  {k.upper()}  {h["run_id"]}   profile {h["profile"]}  {h["base_url"]}  '
+          f'shape {h["shape"]}  peak {h["peak"]}')
 if notes:
     print()
     for n in notes:
@@ -930,56 +1134,34 @@ if notes:
 print()
 print('  ── overall ─────────────────────────────────────────────────────────────────────')
 print(f'  {"":<18}{"A":>12}{"B":>12}   change')
-rows = [
-    ('p50', A['dur'].get('p50'), B['dur'].get('p50'), 'ms', True),
-    ('p95', A['dur'].get('p95'), B['dur'].get('p95'), 'ms', True),
-    ('p99', A['dur'].get('p99'), B['dur'].get('p99'), 'ms', True),
-    ('failed rate', A.get('failed_rate'), B.get('failed_rate'), 'pp', True),
-    (f'over {A.get("guillotine_ms")} ms', A.get('over_guillotine_rate'), B.get('over_guillotine_rate'),
-     'pp', True),
-]
-for label, av, bv, unit, lower in rows:
-    fmt = ms if unit == 'ms' else pct
-    print(f'  {label:<18}{fmt(av):>12}{fmt(bv):>12}   {delta(av, bv, unit, lower)}')
-print(f'  {"504s":<18}{A.get("e504", 0):>12}{B.get("e504", 0):>12}   '
-      f'{delta(A.get("e504", 0), B.get("e504", 0), "n", True)}')
-print(f'  {"requests":<18}{A.get("requests", 0):>12}{B.get("requests", 0):>12}')
+for r in result['overall']:
+    if r['label'] == 'requests':
+        print(f'  {r["label"]:<18}{fmt(r["a"], r["unit"]):>12}{fmt(r["b"], r["unit"]):>12}')
+        continue
+    print(f'  {r["label"]:<18}{fmt(r["a"], r["unit"]):>12}{fmt(r["b"], r["unit"]):>12}   {change(r)}')
 
-# Cache hit ratio per layer. None means the header never appeared: reported as n/a, never as 0%.
-layers = [k for k in (A.get('cache') or {})] + [k for k in (B.get('cache') or {})
-                                                if k not in (A.get('cache') or {})]
-if layers:
+if result['layers']:
     print()
     print('  ── cache hit ratio per layer ───────────────────────────────────────────────────')
     print(f'  {"":<18}{"A":>12}{"B":>12}   change')
-    for layer in layers:
-        av = (A.get('cache') or {}).get(layer)
-        bv = (B.get('cache') or {}).get(layer)
-        if av is None and bv is None:
-            print(f'  {layer:<18}{"n/a":>12}{"n/a":>12}   header never appeared in either run')
+    for r in result['layers']:
+        if r['a'] is None and r['b'] is None:
+            print(f'  {r["label"]:<18}{"n/a":>12}{"n/a":>12}   header never appeared in either run')
             continue
-        print(f'  {layer:<18}{pct(av):>12}{pct(bv):>12}   '
-              f'{delta(av, bv, "pp", False)}')
+        print(f'  {r["label"]:<18}{fmt(r["a"], r["unit"]):>12}{fmt(r["b"], r["unit"]):>12}   {change(r)}')
 
-# Per class: the same numbers, where a regression actually lives.
-classes = [c for c in (A.get('per_class') or {})]
-for c in (B.get('per_class') or {}):
-    if c not in classes:
-        classes.append(c)
-if classes:
+if result['per_class']:
     print()
     print('  ── per class ───────────────────────────────────────────────────────────────────')
     print(f'  {"class":<14}{"p95 A":>10}{"p95 B":>10}{"change":>18}{"failed A":>10}{"failed B":>10}')
-    for c in classes:
-        ca = (A.get('per_class') or {}).get(c) or {}
-        cb = (B.get('per_class') or {}).get(c) or {}
-        if not ca or not cb:
-            only = 'A' if ca else 'B'
-            print(f'  {c:<14}  present only in run {only} (a class was skipped, or the profile changed)')
+    for c in result['per_class']:
+        if c['only_in']:
+            print(f'  {c["class"]:<14}  present only in run {c["only_in"].upper()} '
+                  '(a class was skipped, or the profile changed)')
             continue
-        print(f'  {c:<14}{ms(ca.get("p95")):>10}{ms(cb.get("p95")):>10}'
-              f'{delta(ca.get("p95"), cb.get("p95")):>18}'
-              f'{pct(ca.get("failed")):>10}{pct(cb.get("failed")):>10}')
+        p95, failed = c['p95'], c['failed']
+        print(f'  {c["class"]:<14}{fmt(p95["a"], "ms"):>10}{fmt(p95["b"], "ms"):>10}'
+              f'{change(p95):>18}{fmt(failed["a"], "ratio"):>10}{fmt(failed["b"], "ratio"):>10}')
 
 print()
 print('  Deltas are the honest part. The absolutes above describe this pool, which is colder than real')

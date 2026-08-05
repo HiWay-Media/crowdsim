@@ -210,7 +210,7 @@ already getting 504s.
 |---|---|
 | `allow_hosts` | Hostname globs the tool may generate load against. Hostnames only — no scheme, no port, no path. `CROWDSIM_ALLOW_TARGETS` overrides it. **No default anywhere**: a load test aimed at the wrong hostname is indistinguishable from an attack. `"*"` is rejected — it is not an allowlist. |
 | `safe_peak_rps` | The ceiling above which a run needs `--i-know-this-breaks-production` on the command line. Falls back to 150 if absent, which is a guess about *your* system. Set it to a level you have already proven harmless — not to what you hope is harmless. |
-| `generator_mbps` | Optional: what the **generator's** link can sustain, in Mbit/s. With it, `load` and `doctor` compare the bandwidth the requested peak implies (page weight × peak, from the newest `probe`) and warn before a run comes back `generator_ok: false`. A warning, never a gate. |
+| `generator_mbps` | Optional: what the **generator's** link can sustain, in Mbit/s. With it, `load` and `doctor` compare the bandwidth the requested peak implies (page weight × peak, from the newest `probe`) and warn before a run comes back `generator_ok: false`. A warning, never a gate. Leave it out and the estimate falls back to whatever `crowdsim doctor --bench` measured on this machine — a loopback ceiling, labelled as one. Declaring the real uplink is better: it is the only one of the two that knows about your network. |
 
 ---
 
