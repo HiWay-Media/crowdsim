@@ -9,10 +9,14 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
 
 ## Regole di lavoro (SEMPRE)
 
-- **Ogni commit = release taggata `vX.Y.Z`**: nuova sezione in `CHANGELOG.md` (Keep a Changelog, **in
-  inglese** — il repo è pubblico) + `git tag -a vX.Y.Z -m "Release X.Y.Z"`. Bump `minor` per novità
-  sostanziali (nuovi subcomandi/flag/feature, rimozioni), `patch` per fix/aggiornamenti doc. Senza
-  chiederlo. **Esenti** (niente tag/CHANGELOG): commit `chore(roadmap):` che toccano solo
+- **Ogni modifica = una release**, e si fa con lo script, non a mano:
+  `scripts/new-release.sh prepare <minor|patch|major|X.Y.Z>` → scrivi la sezione di CHANGELOG (in
+  **inglese**: repo pubblico) → commit → `scripts/new-release.sh tag`. Lo script bumpa root + workspaces +
+  lock, rifiuta placeholder/tree sporco/versione non allineata, e **non pusha**. Al push del tag partono
+  `release.yml` (GitHub Release con quelle note) e `image.yml` (build → smoke → GHCR). Bump `minor` per
+  novità sostanziali (nuovi subcomandi/flag/feature, rimozioni), `patch` per fix/doc. Senza chiederlo.
+  ⚠️ `package.json` (root + i due workspace) deve **sempre** combaciare col tag: `release.yml` fallisce se
+  no — è già capitato che restasse a 1.1.0 fino alla 1.2.1. **Esenti** (niente tag/CHANGELOG): commit `chore(roadmap):` che toccano solo
   `.github/roadmap.json`, `scripts/sync-roadmap.sh` o `.github/workflows/` — sono pianificazione e
   plumbing, non prodotto.
 - **MAI `git push`** — lo fa sempre l'utente. MAI `Co-Authored-By` nei commit.
@@ -35,10 +39,14 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
 - **I gate di sicurezza non si toccano** (vedi sotto): non indebolirli, non aggiungere default, non
   aggiungere prompt interattivi.
 - **Documentare SEMPRE, senza chiederlo.** Ogni cosa user-facing esce con: comandi copia-incollabili
-  (**provati**, non plausibili), reference di env/volumi/porte/exit code, e una tabella di troubleshooting
-  con sintomi reali. La doc serve all'utente per far capire ad altri come si installa e si usa: se manca,
-  la feature non è finita. Guida Docker: `docs/docker.md` (install, GUI, run singole, permessi,
-  troubleshooting). Ogni doc nuova va nell'**indice in README** (§Documentation), altrimenti non esiste.
+  (**provati** davvero, non plausibili), reference di env/volumi/porte/exit code, e troubleshooting con
+  sintomi reali. La doc serve all'utente per far capire ad altri come si installa e si usa: se manca, la
+  feature non è finita. Le pagine stanno in `docs/` (indice `docs/index.md`, più `install`, `docker`,
+  `running-a-test`, `reading-results`, `profile`, `cli`, `gui`, `architecture`, `development`): pagina nuova
+  → va in **`docs/index.md` e nell'indice del README**, altrimenti non esiste. Struttura pensata per
+  GitHub Pages (markdown puro, link relativi): quando si farà, è un passo piccolo.
+  Scrivere la doc **provando i comandi** ha già trovato due bug reali (500 invece di 409 su mount
+  read-only, `insecure` per-target ignorato dal driver): è il motivo per cui l'ordine è provare → scrivere.
 - **Il tono della documentazione è parte del prodotto**: spiega *perché* (incluse le trappole misurate),
   non elenca feature. Mantenerlo su ogni nuova sezione; niente marketing, niente numeri inventati.
 
@@ -136,7 +144,10 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
   + `.env.example` avviano la GUI · indice doc in README §Documentation
 - Immagine: `Dockerfile` (3 stage) · `make image|image-smoke|image-run` · CI `.github/workflows/image.yml`
   (pubblica su tag `v*`; push su main costruisce e testa senza pubblicare)
-- Test: `make test` · `make test-e2e` · perimetro e razionale nel §Tests del README
+- **Doc completa: `docs/` (indice `docs/index.md`)** — install, docker, running-a-test,
+  reading-results, profile, cli, gui, architecture, development
+- Release: `scripts/new-release.sh prepare|tag|notes` · workflow `release.yml` + `image.yml`
+- Test: `make test` · `make test-e2e` · `make image-smoke` · perimetro in `docs/development.md`
 - GUI: `gui/server/lib/{args,validate,profiles,runner,history,app}.js` + `gui/ui/src/`; avvio da
   `crowdsim serve` (build UI: `npm run gui:build`)
 - Anatomia del profilo: `profiles/example.json` (commentato inline via chiavi `_comment`)

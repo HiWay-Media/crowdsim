@@ -386,7 +386,9 @@ Published tags: `{version}`, `{major}.{minor}`, and `latest` (version tags only)
 
 ## See also
 
-- [README](../README.md) — what crowdsim measures and why the profile is the whole configuration
-- [`profiles/example.json`](../profiles/example.json) — every field, documented inline
+- [Documentation index](index.md) — every page
+- [Install](install.md) — the native and Nomad paths
+- [Running a test](running-a-test.md) — the sequence from `probe` to a defensible number
+- [Reading results](reading-results.md) — the summary, field by field
+- [GUI](gui.md) · [CLI reference](cli.md) · [Profile reference](profile.md) · [Architecture](architecture.md)
 - [`cache-ab/README.md`](../cache-ab/README.md) — measuring what a cache change actually buys
-- [`nomad/crowdsim.nomad.hcl`](../nomad/crowdsim.nomad.hcl) — the parameterized batch job

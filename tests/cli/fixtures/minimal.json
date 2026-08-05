@@ -17,6 +17,11 @@
       },
       "nourl": {
         "host_header": "www.example.test"
+      },
+      "insecure-node": {
+        "base_url": "https://10.0.0.11:8092",
+        "host_header": "www.example.test",
+        "insecure": true
       }
     }
   },

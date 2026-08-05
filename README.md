@@ -76,15 +76,8 @@ that. [docs/docker.md](docs/docker.md) explains what that failure looks like so 
 ### The container
 
 One image, published on every release, containing the driver, the generator and the GUI. The complete
-guide — install, mounts, environment, permissions, exit codes, troubleshooting — is
-**[docs/docker.md](docs/docker.md)**. The short version:
-
-```bash
-cp .env.example .env      # put a token in it: openssl rand -hex 16
-docker compose up         # the GUI on http://127.0.0.1:8787
-```
-
-and the pieces that command is made of:
+guide — mounts, environment, permissions, exit codes, troubleshooting — is
+**[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
 docker pull ghcr.io/hiway-media/crowdsim:1.2.0        # or :1.2, or :latest
@@ -285,15 +278,25 @@ it. A cron button on a web page is not.
 
 ## Documentation
 
-| Where | What |
+Full documentation lives in **[docs/](docs/index.md)**:
+
+| Page | What |
 |---|---|
-| this README | what crowdsim measures, why the profile is the whole configuration, how to read a result |
-| [docs/docker.md](docs/docker.md) | install and use from the container image: GUI, single runs, mounts, environment, permissions, exit codes, troubleshooting |
-| [`profiles/example.json`](profiles/example.json) | every profile field, documented inline |
-| [`cache-ab/README.md`](cache-ab/README.md) | measuring what a cache change actually buys |
-| [`nomad/crowdsim.nomad.hcl`](nomad/crowdsim.nomad.hcl) | the parameterized batch job, and why it is batch |
-| `crowdsim --help` | the subcommands and every flag |
-| [CHANGELOG.md](CHANGELOG.md) | what changed in each release |
+| [docs/index.md](docs/index.md) | the map, and the three things worth knowing before you start |
+| [Install](docs/install.md) | Docker, native, Nomad — and which is right for what |
+| [Docker](docs/docker.md) | the container in detail: GUI, runs, mounts, environment, permissions, troubleshooting |
+| [Running a test](docs/running-a-test.md) | the sequence from `doctor` to a defensible number, and the choreography around it |
+| [Reading results](docs/reading-results.md) | the summary field by field, in the order that keeps you honest |
+| [Profile reference](docs/profile.md) | every profile key, and what it costs to get wrong |
+| [CLI reference](docs/cli.md) | subcommands, flags, environment, exit codes, output files |
+| [GUI](docs/gui.md) | the browser interface, its safety properties and its deliberate limits |
+| [Architecture](docs/architecture.md) | why bash + k6, where the gates live, why `k6/lib` exists |
+| [Development](docs/development.md) | the five test suites, how to change things safely, how to cut a release |
+
+Alongside them: [`profiles/example.json`](profiles/example.json) documents every field inline,
+[`cache-ab/README.md`](cache-ab/README.md) covers the A/B harness,
+[`nomad/crowdsim.nomad.hcl`](nomad/crowdsim.nomad.hcl) the batch job, `crowdsim --help` every flag, and
+[CHANGELOG.md](CHANGELOG.md) what changed in each release.
 
 ## License
 

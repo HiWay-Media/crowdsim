@@ -13,10 +13,14 @@ in questo repository.
 
 ## Regole di lavoro (SEMPRE)
 
-- **Ogni commit = release taggata `vX.Y.Z`**: nuova sezione in `CHANGELOG.md` (Keep a Changelog, **in
-  inglese**: il repo e pubblico) + `git tag -a vX.Y.Z -m "Release X.Y.Z"`. Bump `minor` per novita
-  sostanziali (nuovi subcomandi/flag/feature, rimozioni), `patch` per fix/aggiornamenti doc. Senza
-  chiederlo. **Esenti** (niente tag/CHANGELOG): commit `chore(roadmap):` che toccano solo
+- **Ogni modifica = una release**, e si fa con lo script, non a mano:
+  `scripts/new-release.sh prepare <minor|patch|major|X.Y.Z>` -> scrivi la sezione di CHANGELOG (in
+  **inglese**: repo pubblico) -> commit -> `scripts/new-release.sh tag`. Lo script bumpa root + workspaces +
+  lock, rifiuta placeholder / tree sporco / versione non allineata, e **non pusha**. Al push del tag partono
+  `release.yml` (GitHub Release con quelle note) e `image.yml` (build -> smoke -> GHCR). Bump `minor` per
+  novita sostanziali (nuovi subcomandi/flag/feature, rimozioni), `patch` per fix/doc. Senza chiederlo.
+  ATTENZIONE: `package.json` (root + i due workspace) deve sempre combaciare col tag, altrimenti
+  `release.yml` fallisce; e gia capitato che restasse a 1.1.0 fino alla 1.2.1. **Esenti** (niente tag/CHANGELOG): commit `chore(roadmap):` che toccano solo
   `.github/roadmap.json`, `scripts/sync-roadmap.sh` o `.github/workflows/`: sono pianificazione e
   plumbing, non prodotto.
 - **MAI `git push`**: lo fa sempre l'utente. MAI `Co-Authored-By` nei commit.
@@ -39,10 +43,14 @@ in questo repository.
 - **I gate di sicurezza non si toccano** (vedi sotto): non indebolirli, non aggiungere default, non
   aggiungere prompt interattivi.
 - **Documentare SEMPRE, senza chiederlo.** Ogni cosa user-facing esce con: comandi copia-incollabili
-  (**provati**, non plausibili), reference di env/volumi/porte/exit code, e una tabella di troubleshooting
-  con sintomi reali. La doc serve all'utente per far capire ad altri come si installa e si usa: se manca,
-  la feature non e finita. Guida Docker: `docs/docker.md`. Ogni doc nuova va nell'**indice in README**
-  (sezione Documentation), altrimenti non esiste.
+  (**provati** davvero, non plausibili), reference di env/volumi/porte/exit code, e troubleshooting con
+  sintomi reali. La doc serve all'utente per far capire ad altri come si installa e si usa: se manca, la
+  feature non e finita. Le pagine stanno in `docs/` (indice `docs/index.md`, piu `install`, `docker`,
+  `running-a-test`, `reading-results`, `profile`, `cli`, `gui`, `architecture`, `development`): pagina nuova
+  -> va in **`docs/index.md` e nell'indice del README**, altrimenti non esiste. Struttura pensata per
+  GitHub Pages (markdown puro, link relativi). Scrivere la doc provando i comandi ha gia trovato due bug
+  reali (500 invece di 409 su mount read-only, `insecure` per-target ignorato dal driver): l'ordine e
+  provare -> scrivere.
 - **Il tono della documentazione e parte del prodotto**: spiega il perche (incluse le trappole
   misurate), non elenca feature. Niente marketing, niente numeri inventati.
 
@@ -141,7 +149,10 @@ in questo repository.
   `.env.example` avviano la GUI; indice doc in README sezione Documentation
 - Immagine: `Dockerfile` (3 stage), `make image|image-smoke|image-run`, CI `.github/workflows/image.yml`
   (pubblica sui tag `v*`; un push su main costruisce e testa senza pubblicare)
-- Test: `make test` e `make test-e2e`; perimetro e razionale nella sezione Tests del README
+- **Doc completa: `docs/` (indice `docs/index.md`)**: install, docker, running-a-test,
+  reading-results, profile, cli, gui, architecture, development
+- Release: `scripts/new-release.sh prepare|tag|notes`; workflow `release.yml` + `image.yml`
+- Test: `make test`, `make test-e2e`, `make image-smoke`; perimetro in `docs/development.md`
 - GUI: `gui/server/lib/{args,validate,profiles,runner,history,app}.js` + `gui/ui/src/`; avvio con
   `crowdsim serve` (build UI: `npm run gui:build`)
 - Anatomia del profilo: `profiles/example.json` (commentato inline con chiavi `_comment`)

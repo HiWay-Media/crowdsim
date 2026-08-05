@@ -204,12 +204,16 @@ t=(d.get("targets") or {}).get("list") or {}
 if sys.argv[2] not in t: sys.exit("unknown target: "+sys.argv[2]+" (have: "+", ".join(t)+")")
 t=t[sys.argv[2]]
 print(t.get("base_url",""));print(t.get("host_header",""));print(t.get("bypass",""))
-print(t.get("skip_classes",""))' "$PROFILE_F" "$name")" || die "$spec" 2
+print(t.get("skip_classes",""));print("1" if t.get("insecure") else "")' "$PROFILE_F" "$name")" || die "$spec" 2
   BASE_URL="$(printf '%s' "$spec"  | sed -n 1p)"
   HOST_HEADER="$(printf '%s' "$spec" | sed -n 2p)"
   BYPASS="$(printf '%s' "$spec"    | sed -n 3p)"
   local sk; sk="$(printf '%s' "$spec" | sed -n 4p)"
   if [ -z "$SKIP_CLASSES" ] && [ -n "$sk" ]; then SKIP_CLASSES="$sk"; fi
+  # A target reached by address rather than by name (a single proxy node, an app instance) presents a
+  # certificate for a name it is not being called by. Declaring that once in the profile beats
+  # remembering --insecure on every run against that target — and forgetting it looks like an outage.
+  if [ "$(printf '%s' "$spec" | sed -n 5p)" = "1" ]; then INSECURE=1; fi
   if [ -z "$BASE_URL" ]; then die "target '$name' has no base_url" 2; fi
   say "  target '$name' → $BASE_URL${HOST_HEADER:+  Host: $HOST_HEADER}${BYPASS:+  bypass: $BYPASS}"
 }

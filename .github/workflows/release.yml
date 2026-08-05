@@ -1,0 +1,91 @@
+# Publish a GitHub Release when a version tag is pushed.
+#
+# The notes are the CHANGELOG section for that version, extracted by scripts/new-release.sh — the same
+# text a human wrote and reviewed. Notes generated from commit subjects are notes nobody reads, and this
+# project's rule is that every change ships as a version with its reasoning written down.
+#
+# It refuses rather than improvises: a tag with no CHANGELOG section fails the job. That failure is the
+# point — it means the release was tagged without being described, and the fix is to describe it.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing tag to (re)publish a release for
+        required: true
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0            # the script reads tags
+
+      - name: Work out the version
+        id: v
+        run: |
+          ref="${{ inputs.tag || github.ref_name }}"
+          version="${ref#v}"
+          case "$version" in
+            [0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "::error::'$ref' is not a vX.Y.Z tag"; exit 1 ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "tag=$ref" >> "$GITHUB_OUTPUT"
+
+      - name: Check the version bump landed with the tag
+        run: |
+          in_pkg=$(python3 -c 'import json;print(json.load(open("package.json"))["version"])')
+          if [ "$in_pkg" != "${{ steps.v.outputs.version }}" ]; then
+            echo "::error::package.json says $in_pkg but the tag says ${{ steps.v.outputs.version }} —" \
+                 "the tag does not point at the release commit"
+            exit 1
+          fi
+
+      - name: Extract the release notes from the CHANGELOG
+        id: notes
+        run: |
+          chmod +x scripts/new-release.sh
+          {
+            echo 'body<<CROWDSIM_NOTES_EOF'
+            scripts/new-release.sh notes "${{ steps.v.outputs.version }}"
+            echo
+            echo "---"
+            echo
+            echo "**Container image**"
+            echo '```'
+            echo "docker pull ghcr.io/${{ github.repository }}:${{ steps.v.outputs.version }}"
+            echo '```'
+            echo
+            echo "Install and usage: [docs/docker.md](https://github.com/${{ github.repository }}/blob/${{ steps.v.outputs.tag }}/docs/docker.md)"
+            echo 'CROWDSIM_NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "${{ steps.v.outputs.tag }}" >/dev/null 2>&1; then
+            gh release edit "${{ steps.v.outputs.tag }}" \
+              --title "crowdsim ${{ steps.v.outputs.version }}" \
+              --notes "${{ steps.notes.outputs.body }}"
+            echo "Updated the existing release." >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh release create "${{ steps.v.outputs.tag }}" \
+              --title "crowdsim ${{ steps.v.outputs.version }}" \
+              --notes "${{ steps.notes.outputs.body }}" \
+              --verify-tag
+            echo "Published crowdsim ${{ steps.v.outputs.version }}." >> "$GITHUB_STEP_SUMMARY"
+          fi

@@ -132,3 +132,17 @@ resolved() { cat "$CROWDSIM_OUT"/profile-*.json; }
   [ "$status" -eq 0 ]
   [[ "$output" != *"STUB-K6"* ]]
 }
+
+@test "a target can declare insecure, instead of remembering --insecure on every run" {
+  # A node reached by address presents a certificate for a name it is not being called by. Forgetting the
+  # flag on such a target produces a wall of TLS failures that reads exactly like an outage.
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --target insecure-node --peak 10 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INSECURE=1"* ]]
+}
+
+@test "a target that does not declare it keeps TLS verification on" {
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 10 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"INSECURE=0"* ]]
+}

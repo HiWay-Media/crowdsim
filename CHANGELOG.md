@@ -4,6 +4,42 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.2] — 2026-08-05
+
+The versioning rule and the documentation both stop depending on somebody remembering. Writing the docs
+found two things the code was getting wrong, which is the argument for writing them.
+
+### Added
+- **`scripts/new-release.sh`** — the one-commit-one-release rule, mechanised. `prepare` bumps the version
+  across the root and both workspaces plus the lock file and inserts a dated CHANGELOG skeleton; `tag`
+  verifies and creates the annotated tag; `notes` prints one version's section. It never pushes.
+  `tag` refuses in the three cases that produce a release nobody can trust: the placeholder is still in the
+  CHANGELOG, the tree is dirty (the tag would point at something that is not the release), or the top
+  CHANGELOG section does not match `package.json`. 12 CLI tests, each in a throwaway git repo.
+- **`.github/workflows/release.yml`** — on a pushed `v*` tag, publishes a GitHub Release whose notes are
+  that CHANGELOG section. It fails rather than improvising when the section is missing: a release tagged
+  without being described is exactly what this is meant to prevent. It also checks that `package.json`
+  matches the tag, so a tag that does not point at the release commit cannot publish.
+- **A documentation set** in `docs/`, structured so GitHub Pages is a small next step: an index plus
+  [install](docs/install.md), [Docker](docs/docker.md), [running a test](docs/running-a-test.md),
+  [reading results](docs/reading-results.md), [profile reference](docs/profile.md),
+  [CLI reference](docs/cli.md), [GUI](docs/gui.md), [architecture](docs/architecture.md) and
+  [development](docs/development.md). ~1800 lines covering every flag, every profile key, every summary
+  field, every exit code, and what each of them costs to get wrong.
+
+### Changed
+- `package.json` and both workspaces are back in sync with the released version. They had been left at
+  1.1.0 while the CHANGELOG and the tags moved on to 1.2.1 — the new script's first act was to refuse to
+  work until that was fixed, and `release.yml` would have failed on the v1.2.1 tag because of it.
+- Documenting is now a standing rule in `CLAUDE.md` / `AGENTS.md`: runnable commands, a reference for
+  whatever was added, and troubleshooting for how it realistically fails.
+
+### Fixed
+- A target can declare `insecure: true` and have it honoured. `profiles/example.json` documented it on the
+  `proxy-node` target, but the driver never read it — so a node addressed by IP, presenting a certificate
+  for a name, produced a wall of TLS failures that reads exactly like an outage unless you remembered
+  `--insecure` on every run. Two CLI tests, including that a target without it keeps verification on.
+
 ## [1.2.1] — 2026-08-05
 
 ### Added
