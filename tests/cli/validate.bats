@@ -140,7 +140,10 @@ PY2
   [ "$status" -eq 0 ]
   [[ "$output" == *"bandwidth: 380 req/s × 45 KB"* ]]
   [[ "$output" == *"17.6 MB/s"* ]]
-  [[ "$output" == *"140 Mbit/s"* ]]
+  # 380 × 46231 B = 17.57 MB/s = 140.54 Mbit/s, which prints as 141. The expectation said 140 — written by
+  # hand rather than read off a run, and macOS bash 3.2 could not fail a [[ ]] to say so. See
+  # tests/cli/00-environment.bats.
+  [[ "$output" == *"141 Mbit/s"* ]]
   [[ "$output" == *"safety.generator_mbps"* ]]      # not declared: says how to have it checked
 
   # declared, and not enough: loud, and it names the two honest fixes

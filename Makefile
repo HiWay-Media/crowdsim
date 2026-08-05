@@ -16,6 +16,19 @@ DOCS_VENV ?= .venv-docs
 
 IMAGE ?= crowdsim:dev
 
+# bats reports a failing assertion through errexit, and under bash 3.2 — still the /bin/bash on every
+# macOS — a failing `[[ ... ]]` does not trip it. tests/cli is written in `[[ ]]`, so on 3.2 the suite
+# cannot fail: it printed 92 ok while CI failed on a wrong expectation. Find a bash that can fail, and
+# refuse to run rather than produce a green result that means nothing. The tool itself still runs on 3.2.
+#
+# No parentheses anywhere in here: an unbalanced `)` — a `case` pattern, a subshell — terminates
+# $(shell ...) early and make hands the remainder to the recipe as garbage.
+BATS_BASH := $(shell for b in /opt/homebrew/bin/bash /usr/local/bin/bash $$(command -v bash); do \
+	  [ -x "$$b" ] || continue; \
+	  v=`"$$b" -c 'echo $${BASH_VERSINFO[0]}' 2>/dev/null`; \
+	  [ "$$v" -ge 4 ] 2>/dev/null && { echo "$$b"; break; }; \
+	done)
+
 help: ## show this help
 	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s $$'\t'
 
@@ -30,7 +43,14 @@ test-unit: ## pure generator logic (mix, cache classification, summary) — node
 	node --test tests/unit/*.test.js
 
 test-cli: ## bin/crowdsim behaviour: safety gates, args, profile resolution — bats
-	npx bats tests/cli
+	@if [ -z "$(BATS_BASH)" ]; then \
+	  echo "tests/cli needs bash >= 4, and only $$(/bin/bash --version | head -1) was found."; \
+	  echo "Under bash 3.2 a failing [[ ]] assertion does not fail the test, so this suite would report"; \
+	  echo "every test as passing whatever the driver printed. Refusing to run it."; \
+	  echo "  macOS: brew install bash   (bin/crowdsim itself keeps working on 3.2)"; \
+	  exit 1; \
+	fi
+	PATH="$$(dirname $(BATS_BASH)):$$PATH" npx bats tests/cli
 
 test-gui: ## GUI API: profiles, run launching, path traversal, gate propagation — node:test
 	node --test tests/gui/*.test.js

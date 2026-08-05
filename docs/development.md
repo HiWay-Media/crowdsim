@@ -16,7 +16,7 @@ make image-smoke     # the built image: still the tool, gates intact
 | Suite | Runner | Covers | Generates load? |
 |---|---|---|---|
 | `tests/unit/` | `node --test` | `k6/lib/`: mix renormalisation, ramp, VU provisioning, RSC modes, cache classification, the three verdicts | no |
-| `tests/cli/` | `bats` | `bin/crowdsim` against a stub k6: both gates, exit codes, profile and target resolution, empty pools, `--touch-and-go`, history, and `scripts/new-release.sh` | no |
+| `tests/cli/` | `bats` (**bash ≥ 4**) | `bin/crowdsim` against a stub k6: both gates, exit codes, profile and target resolution, empty pools, `--touch-and-go`, history, and `scripts/new-release.sh` | no |
 | `tests/gui/` | `node --test` | the API over a real socket: traversal, the override confirmation, one-run-at-a-time, refusals passed through, read-only mounts | no |
 | `tests/e2e/` | shell + docker | three legs, one per conclusion the tool produces: a fast nginx (chain works, healthy target does *not* abort), a slow single-worker origin (**the brake does abort**, early, generator still holding), and an unreachable target (**connectivity, not capacity**). Skips (exit 0) without docker or k6 | **yes**, on loopback |
 | `tests/image/` | shell + docker | the published artefact: driver finds generator, GUI starts, gates survived the build, no allowlist default | no |
@@ -32,6 +32,15 @@ safe to run anywhere, at any time, including on a shared CI runner.
 the three suites, a documentation link check, and a guard that `make test` has not grown a dependency on a
 load-generating suite). It deliberately does not run `make test-e2e` or `make image-smoke` — the image
 workflow owns the second.
+
+**`tests/cli` needs bash ≥ 4, and `make test-cli` refuses to run without one.** bats reports a failing
+assertion through `errexit`, and under bash 3.2 — which is still `/bin/bash` on every macOS — a failing
+`[[ ... ]]` does **not** trip it. This suite is written in `[[ ]]`, so on 3.2 every content assertion is a
+no-op: it printed `92 ok` while CI failed on a wrong expectation (`140 Mbit/s` against a driver correctly
+printing `141`). A suite that cannot fail is worse than no suite, so `make test-cli` looks for a bash that
+can fail and stops with instructions if there is none — `brew install bash`; `bin/crowdsim` itself keeps
+working on 3.2. `tests/cli/00-environment.bats` is the canary for anyone invoking `npx bats` directly: it
+asserts with `[ ]` and proves, in a subshell, that a failing `[[ ]]` really does fail a test here.
 
 **The unhappy summaries are fixtures.** `tests/cli/fixtures/summary-invalid.json` and
 `summary-unreachable.json` are asserted to be reported as *invalid* and as *unreachable* — never as capacity

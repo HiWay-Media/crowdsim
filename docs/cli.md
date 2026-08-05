@@ -71,7 +71,7 @@ the intended outcome. Writes `out/summary-<run>.json`, `out/load-<run>.log`, and
 Before starting it states the bandwidth the requested peak implies, from the newest `probe` of that target:
 
 ```
-  ℹ️  bandwidth: 380 req/s × 45 KB ≈ 17.6 MB/s (140 Mbit/s) sustained, from probe 20260805T120000Z
+  ℹ️  bandwidth: 380 req/s × 45 KB ≈ 17.6 MB/s (141 Mbit/s) sustained, from probe 20260805T120000Z
   ⚠️  THAT IS MORE THAN THE 100 Mbit/s THIS GENERATOR IS DECLARED TO SUSTAIN.
      Expect generator_ok: false. Move the generator closer to the target, or lower the peak —
      do not lower the SLO.

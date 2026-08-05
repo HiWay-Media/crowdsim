@@ -509,8 +509,9 @@ PY
 
 # ─────────────────────────────── bandwidth: the run you cannot sustain ──────────────────────────────
 # generator_ok: false is diagnosed AFTER the window was agreed, the alerting silenced and the run burned —
-# and most of those runs were predictable beforehand. A page weight of ~45 KB at 380 req/s is ~17 MB/s
-# sustained, which a generator behind a slow link cannot deliver no matter how many VUs k6 provisions.
+# and most of those runs were predictable beforehand. A page weight of ~45 KB at 380 req/s is ~17.6 MB/s
+# (~141 Mbit/s) sustained, which a generator behind a slow link cannot deliver no matter how many VUs k6
+# provisions.
 #
 # `probe` already measures the weight of one page. The arithmetic was available before the run and nothing
 # was doing it. It is a WARNING and never a gate: the estimate assumes every request weighs what that one

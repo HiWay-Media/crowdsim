@@ -4,6 +4,29 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.2] — 2026-08-05
+
+CI failed on one wrong digit, and the interesting part is why no local run ever caught it: on macOS the CLI
+suite **could not fail at all**.
+
+### Fixed
+- **`tests/cli` was decorative on every macOS machine, and `make test-cli` now refuses to run there.** bats
+  reports a failing assertion through `errexit`, and under bash 3.2 — still `/bin/bash` on macOS — a failing
+  `[[ ... ]]` does not trip it. This suite is written in `[[ ]]`, so all ~300 content assertions were no-ops:
+  it printed `92 ok` on a driver that could have printed anything. `[ ]` and `false` do trip errexit; the
+  compound `[[ ]]` does not, which is why nobody noticed.
+  - `make test-cli` looks for a bash that can fail and stops with instructions if there is none
+    (`brew install bash`). `bin/crowdsim` itself is unaffected and still runs on 3.2.
+  - `tests/cli/00-environment.bats` sorts first and is the canary for anyone running `npx bats` directly. It
+    asserts with `[ ]`, and its second test *proves* the property rather than assuming it: a subshell running
+    `set -e; [[ "hello" == *"NOPE"* ]]` must exit non-zero. On bash 3.2 it exits 0, and the test says so.
+  - Verified both ways: 94/94 under bash 5, a clean refusal under 3.2.
+- **The bandwidth estimate: the expectation was wrong, not the driver.** 380 req/s × 46231 B is 140.54
+  Mbit/s, which prints as `141`; the test, `docs/cli.md`, `profiles/example.json` and the 1.6.0 note all said
+  `140`. Written by hand instead of read off a run — exactly what this project's documentation rule exists to
+  prevent — and the one place that would have objected was the suite that could not fail. All four now agree
+  with the arithmetic.
+
 ## [1.6.1] — 2026-08-05
 
 Housekeeping after the documentation site landed.
@@ -31,7 +54,7 @@ And writing the test for the first of them found that `discover` had been produc
     if every path is dropped it exits 4 rather than writing an empty pool.
 - **The bandwidth a peak implies, before the run.** `probe` now also writes `out/probe-<run>.json` with the
   page weight, and `load` and `doctor --profile` state what the requested rate needs:
-  `380 req/s × 45 KB ≈ 17.6 MB/s (140 Mbit/s) sustained`. Declare the optional
+  `380 req/s × 45 KB ≈ 17.6 MB/s (141 Mbit/s) sustained`. Declare the optional
   **`safety.generator_mbps`** and it is compared, loudly:
   *THAT IS MORE THAN THE 100 Mbit/s THIS GENERATOR IS DECLARED TO SUSTAIN. Expect generator_ok: false.*
   - `generator_ok: false` is otherwise diagnosed after the window was agreed and the run burned, and most
