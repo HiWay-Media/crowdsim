@@ -4,6 +4,48 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] — 2026-08-05
+
+The last open feature on the tracker: the cache A/B third leg stops costing a compose edit.
+
+### Added
+- **A third cache-ab leg without editing `docker-compose.yml`**
+  ([#14](https://github.com/HiWay-Media/crowdsim/issues/14)). The useful third leg is the **narrow subset** of
+  a fix — the version you can actually ship this week — measured in the same window as the full change, so
+  you learn what shipping the narrow one is worth. It used to require copying a service block by hand, which
+  is how a comparison quietly stops being made.
+
+  ```bash
+  crowdsim cache-ab --new-leg narrow-fix.conf.template          # a copy of the candidate, renamed
+  crowdsim cache-ab --profile p.json --third narrow-fix.conf.template
+  ```
+
+  The service is declared behind a compose profile, so a normal two-leg run is unchanged — `docker compose
+  config` still reports exactly `asis` and `candidate` until `--third` asks for more.
+
+  Two refusals (exit 2), both about the result being readable rather than about nginx starting:
+  - **A leg template that does not carry the candidate's warning** about ignoring the origin's
+    `Cache-Control`. A third leg is a copy of the candidate, and a copy is exactly where that paragraph goes
+    missing — it is the difference between a measurement and serving one visitor's response to another.
+    `--new-leg` carries it across by construction; a hand-written leg is checked before anything starts.
+  - **A leg still identifying itself as `candidate`** in `X-AB-Leg`: two legs answering with the same name
+    cannot be told apart in the results, which turns the exercise into one number with two sources.
+
+  `--new-leg` refuses to overwrite a leg somebody has already written, refuses the reserved names `asis` and
+  `candidate`, and builds the file in a temporary path so a leg that fails its own checks is never left on
+  disk. The whole thing goes through the allowlist gate like every other target.
+
+### Changed
+- `docs/development.md` no longer lists milestone v1.3.0 as planned work — it is delivered — and states the
+  two things this project has decided *not* to build (a scheduler in the GUI, edge-log parsing), so neither
+  is proposed again as an oversight.
+
+### Fixed
+- Two bugs in the scaffolding, both found by running it rather than reading it: the `X-AB-Leg` rename was
+  anchored at column 0 while the directive is indented inside the server block, so the copy silently kept the
+  name `candidate` — and the check that should have caught it used an invalid BRE, so it failed for the wrong
+  reason. The check is an ERE now, and it runs before the file is moved into place.
+
 ## [1.8.0] — 2026-08-05
 
 The last two items of milestone v1.3.0: the comparison that carries the meaning, and a way to produce the

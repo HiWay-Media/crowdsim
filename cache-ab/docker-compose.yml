@@ -49,5 +49,18 @@ services:
     volumes:
       - ./candidate.conf.template:/etc/nginx/templates/default.conf.template:ro
 
-  # Add further legs by copying the block above with a new template and port — useful when you want to
-  # compare a full fix against the narrower subset of it that you can actually ship this week.
+  # LEG C — the optional third leg, and the reason it is declared here rather than copied in by hand:
+  # the useful third leg is normally the NARROW SUBSET of your full fix, the version you can actually ship
+  # this week, measured in the same window as the full one so you know what the narrow one is worth. That
+  # is a comparison people skip when it costs a compose edit.
+  #
+  # It only starts when asked for (`--profile third`), and its template comes from THIRD_TEMPLATE, which
+  # must be an ABSOLUTE path — compose resolves a relative one against this directory, and the leg is
+  # usually somewhere else. `crowdsim cache-ab --third <file>` sets both.
+  third:
+    <<: *leg
+    profiles: ["third"]
+    container_name: crowdsim-ab-third
+    ports: ["8083:8080"]
+    volumes:
+      - ${THIRD_TEMPLATE:-./candidate.conf.template}:/etc/nginx/templates/default.conf.template:ro

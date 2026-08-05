@@ -116,6 +116,19 @@ load both with the same pool in the same window and get a hit ratio and offload 
 Needs docker (exit 5 without it), so it does not work from inside the container image. See
 [`cache-ab/README.md`](../cache-ab/README.md).
 
+A **third leg** — normally the narrow subset of the fix you can actually ship this week, measured in the same
+window as the full change — needs no compose editing:
+
+```bash
+crowdsim cache-ab --new-leg narrow-fix.conf.template            # a copy of the candidate, renamed
+crowdsim cache-ab --profile p.json --third narrow-fix.conf.template
+```
+
+It refuses (exit 2) a leg template that does not carry the candidate's warning about ignoring the origin's
+`Cache-Control` — a third leg is a copy, and a copy is where that paragraph goes missing — and a leg still
+identifying itself as `candidate` in `X-AB-Leg`, because two legs answering with the same name cannot be told
+apart in the results. `--new-leg` satisfies both by construction and never overwrites an existing file.
+
 ### `validate`
 
 ```bash

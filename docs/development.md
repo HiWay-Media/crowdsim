@@ -256,10 +256,18 @@ reworded without opening duplicates.
 
 ## Coming next
 
-Planned work lives in milestone [v1.3.0](https://github.com/HiWay-Media/crowdsim/milestone/4): CI running
-lint and tests, an e2e leg that proves the brake actually aborts a run, a bandwidth estimate that warns
-before an unsustainable run, `discover --verify`, `crowdsim record` from a HAR, one profile validator
-reachable from the CLI, `crowdsim compare`, and three GUI refinements.
+Milestone [v1.3.0](https://github.com/HiWay-Media/crowdsim/milestone/4) is delivered: CI running lint and
+tests, an e2e leg that proves the brake aborts a run, the bandwidth estimate, `discover --verify`,
+`crowdsim validate`, `crowdsim compare`, `crowdsim record` from a HAR, and the three GUI refinements
+(command preview, preflight tables, a restart that does not lose the run). These docs are published at
+[hiway-media.github.io/crowdsim](https://hiway-media.github.io/crowdsim/).
 
-GitHub Pages for these docs is a next step: the structure here (an `index.md` plus one page per topic, all
-plain Markdown with relative links) is what it will be built from.
+The backlog is whatever is
+[open on the tracker](https://github.com/HiWay-Media/crowdsim/issues), and it is deliberately short. Two
+things are decided *not* to build, so nobody proposes them again as an oversight:
+
+- **A scheduler in the GUI.** Recurring load against production belongs somewhere auditable, where the
+  target, the rate and the override are attributable to whoever asked. That is the Nomad or Kubernetes
+  dispatch.
+- **Edge-log parsing.** The mix in a profile has to be a decision somebody made and can defend, not a
+  number a tool derived from a log format it half-understood.

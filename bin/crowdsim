@@ -36,7 +36,8 @@
 #                     [--peak 120] [--start 30] [--steps 4] [--step-dur 60s] [--hold 120s]
 #                     [--rsc-mode repeat|random] [--max-5xx 0.05] [--max-p95 5000]
 #                     [--safe-peak 150] [--i-know-this-breaks-production] [--touch-and-go] [--dry-run]
-#   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10]
+#   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10] [--third <leg.conf.template>]
+#   crowdsim cache-ab --new-leg <leg.conf.template>
 #   crowdsim compare  <run-a> <run-b>
 #   crowdsim record   <file.har> [--out <journey.json>] [--origin <url>] [--rsc-query _rsc] [--force]
 #   crowdsim validate <f.json>
@@ -107,6 +108,8 @@ while [ $# -gt 0 ]; do
     --abort-delay) ABORT_DELAY="$2"; shift 2;;
     --port) GUI_PORT="$2"; shift 2;;
     --bind) GUI_BIND="$2"; shift 2;;
+    --third) THIRD_LEG="$2"; shift 2;;
+    --new-leg) NEW_LEG="$2"; shift 2;;
     --out) JOURNEY_OUT="$2"; shift 2;;
     --origin) RECORD_ORIGIN="$2"; shift 2;;
     --rsc-query) RSC_QUERY_OVERRIDE="$2"; shift 2;;
@@ -1042,22 +1045,92 @@ PY
 }
 
 # ─────────────────────────────── cache-ab ───────────────────────────────────────────────────────────
+# The warning every candidate-style template must carry. A third leg is normally a copy of the candidate,
+# and the copy is exactly where a warning gets dropped — so it is checked rather than trusted.
+AB_WARNING='READ THIS BEFORE COPYING IT TO PRODUCTION'
+
+# Scaffold a new leg from the candidate, so the warning travels by construction instead of by discipline.
+cache_ab_new_leg() {
+  local dest="$1"
+  local src="$ROOT/cache-ab/candidate.conf.template"
+  [ -f "$src" ] || die "missing $src (is CROWDSIM_ROOT right?)" 5
+  [ ! -e "$dest" ] || die "$dest already exists — a leg you have already written is not ours to replace" 2
+  local leg; leg="$(basename "$dest" | sed -E 's/\.conf\.template$//; s/\.template$//; s/\.conf$//')"
+  case "$leg" in
+    asis|candidate|'') die "pick a name that is not 'asis' or 'candidate': the leg name is how the two are
+  told apart in the results (X-AB-Leg)" 2;;
+  esac
+  mkdir -p "$(dirname "$dest")"
+  # Built in a temporary file and only then moved into place: a leg that fails its own checks must not be
+  # left on disk for somebody to find and use.
+  local tmp="$dest.tmp.$$"
+  # The directive is indented inside the server block, so the pattern must not anchor at column 0 — it did
+  # once, silently produced a leg still calling itself "candidate", and the check below caught it.
+  sed -E "s/^([[:space:]]*add_header[[:space:]]+X-AB-Leg[[:space:]]+)\"candidate\"/\1\"$leg\"/" "$src" > "$tmp"
+  if ! grep -q "$AB_WARNING" "$tmp"; then
+    rm -f "$tmp"; die "the scaffolded leg lost its warning — refusing to write it" 2
+  fi
+  if ! grep -qE "X-AB-Leg[[:space:]]+\"$leg\"" "$tmp"; then
+    rm -f "$tmp"
+    die "the scaffolded leg is still named \"candidate\" in X-AB-Leg — refusing to write a leg that
+  cannot be told apart from the one it was copied from" 2
+  fi
+  mv "$tmp" "$dest"
+  ok "wrote $dest (leg \"$leg\", copied from candidate.conf.template with its warning intact)"
+  say "  Edit it down to the narrow subset you can actually ship, then:"
+  say "      crowdsim cache-ab --profile <p.json> --third $dest"
+  exit 0
+}
+
 cmd_cache_ab() {
+  if [ -n "${NEW_LEG:-}" ]; then cache_ab_new_leg "$NEW_LEG"; fi
   need_profile; resolve_profile; resolve_target; gate_allowlist
   if ! command -v docker >/dev/null 2>&1; then die "cache-ab needs docker" 5; fi
+
+  # The third leg, if asked for. Two checks, both about the result being readable afterwards rather than
+  # about nginx starting: a template without the warning is a copy that lost the one paragraph explaining
+  # what ignoring Cache-Control costs, and a template still calling itself "candidate" makes two legs
+  # indistinguishable in the very header the comparison is read from.
+  local -a compose_profile=()
+  local third_abs=""
+  if [ -n "${THIRD_LEG:-}" ]; then
+    [ -f "$THIRD_LEG" ] || die "no such leg template: $THIRD_LEG (create one with: crowdsim cache-ab --new-leg <file>)" 2
+    third_abs="$(cd "$(dirname "$THIRD_LEG")" && pwd)/$(basename "$THIRD_LEG")"
+    if ! grep -q "$AB_WARNING" "$third_abs"; then
+      die "$THIRD_LEG does not carry the candidate template's warning about ignoring the origin's
+  Cache-Control. That paragraph is the difference between a measurement and an outage: copy it across
+  unchanged, or start from 'crowdsim cache-ab --new-leg <file>'" 2
+    fi
+    local leg_name; leg_name="$(sed -nE 's/^[[:space:]]*add_header X-AB-Leg[[:space:]]+"([^"]+)".*/\1/p' "$third_abs" | head -1)"
+    case "$leg_name" in
+      ''|asis|candidate)
+        die "the third leg still identifies itself as \"${leg_name:-unset}\" in X-AB-Leg. Give it its own
+  name, or its responses cannot be told from the other legs in the results" 2;;
+    esac
+    compose_profile=(--profile third)
+  fi
   local origin_host="${HOST_HEADER:-$(printf '%s' "$BASE_URL" | sed -E 's#^[a-z]+://##; s#[:/].*$##')}"
   local origin_addr; origin_addr="${BYPASS#*=}"
   if [ -z "$origin_addr" ]; then origin_addr="$origin_host"; fi
   say "▶ cache-ab: two nginx legs against $origin_host ($origin_addr), TTL ${TTL}s"
   say "  see cache-ab/README.md — the legs are yours to edit; the point is comparing YOUR candidate"
   say "  config against as-is on the same origin, at the same time, with the same pool."
+  if [ -n "$third_abs" ]; then say "  third leg: $third_abs"; fi
   ( cd "$ROOT/cache-ab" && ORIGIN_ADDR="$origin_addr" ORIGIN_HOST="$origin_host" CACHE_TTL="$TTL" \
-      docker compose up -d --force-recreate )
+      THIRD_TEMPLATE="$third_abs" docker compose "${compose_profile[@]}" up -d --force-recreate )
   say ""
   say "  legs up. Now run the load against each and compare:"
   say "      crowdsim load --profile $PROFILE_F --base-url http://127.0.0.1:8081 --peak $PEAK   # as-is"
   say "      crowdsim load --profile $PROFILE_F --base-url http://127.0.0.1:8082 --peak $PEAK   # candidate"
-  say "  then:  cd $ROOT/cache-ab && docker compose down"
+  if [ -n "$third_abs" ]; then
+    say "      crowdsim load --profile $PROFILE_F --base-url http://127.0.0.1:8083 --peak $PEAK   # third"
+  fi
+  say "  same pool, same window — then: crowdsim compare <run-a> <run-b>"
+  if [ -n "$third_abs" ]; then
+    say "  then:  cd $ROOT/cache-ab && docker compose --profile third down"
+  else
+    say "  then:  cd $ROOT/cache-ab && docker compose down"
+  fi
 }
 
 # ─────────────────────────────── serve (GUI) ────────────────────────────────────────────────────────

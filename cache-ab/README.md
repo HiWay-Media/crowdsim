@@ -59,6 +59,28 @@ profile's resolved target.
 
 ## Adding a third leg
 
-Copy a service block in `docker-compose.yml` with a new template and port. The useful third leg is
-normally the **narrow subset** of your full fix that you can actually ship this week — measured in the
-same run, so you know what shipping the narrow version is worth.
+The useful third leg is normally the **narrow subset** of your full fix — the version you can actually ship
+this week — measured in the same window as the full change, so you learn what shipping the narrow one is
+worth. That comparison used to cost a hand-edit of `docker-compose.yml`, which is how it stopped being made.
+
+```bash
+crowdsim cache-ab --new-leg narrow-fix.conf.template     # a copy of the candidate, renamed
+$EDITOR narrow-fix.conf.template                         # cut it down to what you can ship
+crowdsim cache-ab --profile p.json --third narrow-fix.conf.template
+```
+
+Three legs come up on `:8081` (as-is), `:8082` (candidate) and `:8083` (yours). Run the same pool against
+each in the same window, then `crowdsim compare <run-a> <run-b>`.
+
+Two things the harness refuses, both about the result being readable rather than about nginx starting:
+
+- **A leg template that does not carry the candidate's warning** about ignoring the origin's
+  `Cache-Control`. A third leg is a copy of the candidate, and a copy is exactly where that paragraph goes
+  missing — it is the difference between a measurement and serving one visitor's response to another.
+  `--new-leg` copies it across by construction; a hand-written leg is checked before anything starts.
+- **A leg still calling itself `candidate`** in `X-AB-Leg`. Two legs answering with the same name cannot be
+  told apart in the results, which turns the whole exercise into one number with two sources.
+
+The compose service is declared behind a compose profile, so nothing changes for a normal two-leg run:
+`THIRD_TEMPLATE` must be an absolute path (compose resolves a relative one against this directory), and the
+driver passes it for you.

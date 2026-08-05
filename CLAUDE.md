@@ -172,4 +172,11 @@ Rules:
 - For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
 - If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
 - Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
-- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
+- The graph rebuilds itself: a local `post-commit` hook (`graphify hook install`, once per clone) re-extracts
+  after every commit, detached, so the commit returns immediately. It is AST-only and costs nothing. Run
+  `graphify update .` by hand only when you need the graph current *before* committing.
+- The hook does not read prose. It re-extracts code, so README, CHANGELOG and `docs/` changes reach the graph
+  only through `/graphify --update`, and community names drift until `graphify label --missing-only` renames
+  them — that step needs an LLM, which is why it is not in the hook.
+- `graphify-out/` is gitignored and the hook is per-clone: on a fresh clone, and in CI, there is no graph at
+  all. Never make anything depend on one being there.
