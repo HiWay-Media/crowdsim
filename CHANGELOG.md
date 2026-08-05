@@ -4,6 +4,12 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] — 2026-08-05
+
+### Fixed
+- `npm run test:cli` now invokes bats the same way `make test-cli` does (`npx bats`), so the CLI suite runs
+  on a clean clone after `npm install` alone instead of requiring a globally installed bats.
+
 ## [1.1.0] — 2026-08-05
 
 Adds a test suite and a GUI. Neither changes what a run does: the generator's behaviour is unchanged, the

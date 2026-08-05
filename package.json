@@ -13,7 +13,7 @@
     "test": "npm run test:unit && npm run test:gui && npm run test:cli",
     "test:unit": "node --test \"tests/unit/*.test.js\"",
     "test:gui": "node --test \"tests/gui/*.test.js\"",
-    "test:cli": "bats tests/cli",
+    "test:cli": "npx bats tests/cli",
     "test:e2e": "tests/e2e/run.sh",
     "gui": "node gui/server/index.js",
     "gui:dev": "npm run dev --workspace gui/ui",
