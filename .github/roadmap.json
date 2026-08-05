@@ -386,7 +386,8 @@
         "**Done when**",
         "- A helper prepares the CHANGELOG section and the annotated tag for `minor`, `patch` or an explicit version, and does not push.",
         "- It refuses to tag a dirty tree, or a version that is already tagged.",
-        "- The commits exempt from the rule (roadmap, CI plumbing) are named in one place instead of being argued about per commit."
+        "- The commits exempt from the rule (roadmap, CI plumbing) are named in one place instead of being argued about per commit.",
+        "- A pushed tag publishes a GitHub Release whose notes are that CHANGELOG section, and fails rather than improvising when the section is missing."
       ]
     }
   ]
