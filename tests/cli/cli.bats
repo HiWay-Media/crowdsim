@@ -76,6 +76,21 @@ setup() { crowdsim_setup; }
   [[ "$output" == *"unknown pool"* ]]
 }
 
+@test "CROWDSIM_ROOT relocates the generator, so the image can split the script from the tool" {
+  # In the container the driver is in /usr/local/bin and everything else in /crowdsim: deriving the root
+  # from the script's own path would resolve to /usr/local and break `serve` and `cache-ab` silently.
+  CROWDSIM_ROOT=/opt/elsewhere run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 10 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/opt/elsewhere/k6/live-event.js"* ]]
+}
+
+@test "CROWDSIM_K6_SCRIPT still wins over the root, for a generator kept elsewhere" {
+  CROWDSIM_ROOT=/opt/elsewhere CROWDSIM_K6_SCRIPT=/tmp/custom.js \
+    run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 10 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"/tmp/custom.js"* ]]
+}
+
 @test "history says so when there are no runs yet" {
   run "$CROWDSIM" history
   [ "$status" -eq 0 ]

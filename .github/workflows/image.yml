@@ -1,0 +1,138 @@
+# Build the crowdsim image, smoke-test it, and publish it to GHCR.
+#
+# The order is deliberate: nothing is pushed before the smoke test passes on the runner's own
+# architecture. The test asserts, among other things, that the image ships no CROWDSIM_ALLOW_TARGETS
+# default — a published image with one would be a load generator that agrees to hit anything, and it
+# would be invisible to anybody pulling the tag.
+#
+# Tags are published only from an annotated `v*` tag, or from a manual dispatch that says so. A push to
+# main builds and tests, and publishes nothing: `latest` should mean "the last release", not "the last
+# commit somebody landed".
+name: image
+
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - bin/**
+      - k6/**
+      - gui/**
+      - cache-ab/**
+      - profiles/example.json
+      - package.json
+      - package-lock.json
+      - tests/image/**
+      - .github/workflows/image.yml
+  pull_request:
+    paths:
+      - Dockerfile
+      - .dockerignore
+      - bin/**
+      - k6/**
+      - gui/**
+      - tests/image/**
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Push the built image to GHCR (otherwise build and test only)
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # Single-arch first, loaded into the local docker: an image that has not been smoke-tested must not
+      # reach a registry, and a multi-arch manifest cannot be loaded locally to test.
+      - name: Build for this runner
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: crowdsim:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test
+        run: tests/image/smoke.sh crowdsim:ci
+
+      - name: Decide whether to publish
+        id: publish
+        run: |
+          if [ "${{ github.event_name }}" = "push" ] && [ "${{ startsWith(github.ref, 'refs/tags/v') }}" = "true" ]; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ inputs.publish }}" = "true" ]; then
+            echo "yes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "yes=false" >> "$GITHUB_OUTPUT"
+            echo "Built and smoke-tested; not publishing (no version tag, no explicit request)."
+          fi
+
+      - name: Log in to GHCR
+        if: steps.publish.outputs.yes == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `latest` moves only on a version tag. amd64 for the hosts that run the generator, arm64 so the
+      # image is usable on an Apple-silicon workstation — for the GUI and for functional checks, not for
+      # measurement: the Docker network layer on macOS saturates before the target does.
+      - name: Metadata
+        if: steps.publish.outputs.yes == 'true'
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+            type=sha,enable=${{ !startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push (multi-arch)
+        if: steps.publish.outputs.yes == 'true'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Summary
+        run: |
+          {
+            echo "### crowdsim image"
+            if [ "${{ steps.publish.outputs.yes }}" = "true" ]; then
+              echo "Published:"
+              echo '```'
+              echo "${{ steps.meta.outputs.tags }}"
+              echo '```'
+            else
+              echo "Built and smoke-tested. Not published."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

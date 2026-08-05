@@ -43,6 +43,7 @@
 #   CROWDSIM_SLACK_WEBHOOK   if set, --slack posts the run recap there. Never hardcode a webhook here.
 #   CROWDSIM_PROFILES        profile directory the GUI reads and writes (default: ./profiles)
 #   CROWDSIM_GUI_TOKEN       bearer token for the GUI; REQUIRED to bind anything but loopback
+#   CROWDSIM_ROOT            where k6/, gui/ and cache-ab/ live (default: the parent of this script)
 #
 # Exit: 0 = executed (a run stopped by the brake is an OUTCOME, not an error) · 2 = usage
 #       3 = safety gate · 4 = target unreachable · 5 = k6 missing
@@ -50,7 +51,10 @@
 
 set -eo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$SELF_DIR/.." && pwd)"
+# CROWDSIM_ROOT exists for the container image, where the script lives in /usr/local/bin and the rest of
+# the tool (k6/, gui/, cache-ab/) lives in /crowdsim: deriving the root from the script's own path would
+# resolve to /usr/local and quietly break `serve` and `cache-ab`.
+ROOT="${CROWDSIM_ROOT:-$(cd "$SELF_DIR/.." && pwd)}"
 K6_SCRIPT="${CROWDSIM_K6_SCRIPT:-$ROOT/k6/live-event.js}"
 OUT_DIR="${CROWDSIM_OUT:-$PWD/out}"
 

@@ -119,12 +119,21 @@ in questo repository.
 - bats arriva da `npm install` (devDependency, `npx bats`): non serve `brew install bats-core`. In
   `tests/cli/helper.bash` il PATH senza k6 e costruito con symlink, non filtrando `$PATH`: su macOS k6 e
   python3 stanno nella stessa dir di brew e il filtro romperebbe il test.
-- La GUI non e nell'immagine Docker (k6 alpine, niente node): `serve` e per la workstation.
+- **Immagine unica** `ghcr.io/hiway-media/crowdsim` (driver + generatore + GUI, ~189MB): non ne esistono
+  due. Nell'immagine il driver sta in `/usr/local/bin` e il resto in `/crowdsim`, quindi serve
+  `CROWDSIM_ROOT=/crowdsim`: altrimenti `ROOT` diventa `/usr/local` e `serve`/`cache-ab` si rompono senza
+  un errore utile. Dentro un container "bind loopback" = raggiungibile da nessuno: si binda `0.0.0.0` e si
+  pubblica con `-p 127.0.0.1:8787:8787`; il token resta obbligatorio.
+- **`make image-smoke` prima di ogni modifica a Dockerfile, `bin`, `k6` o `gui`** (la CI lo esegue prima
+  del push su GHCR). L'assert che conta: l'immagine **non** dichiara un default per
+  `CROWDSIM_ALLOW_TARGETS`. Non aggiungerlo mai, nemmeno "per comodita di test".
 
 ## Puntatori
 
-- Verita funzionale: `README.md` (sezioni Safety, The GUI, Tests, Reading a result) e header di
-  `bin/crowdsim`
+- Verita funzionale: `README.md` (sezioni Safety, The container, The GUI, Tests, Reading a result) e
+  header di `bin/crowdsim`
+- Immagine: `Dockerfile` (3 stage), `make image|image-smoke|image-run`, CI `.github/workflows/image.yml`
+  (pubblica sui tag `v*`; un push su main costruisce e testa senza pubblicare)
 - Test: `make test` e `make test-e2e`; perimetro e razionale nella sezione Tests del README
 - GUI: `gui/server/lib/{args,validate,profiles,runner,history,app}.js` + `gui/ui/src/`; avvio con
   `crowdsim serve` (build UI: `npm run gui:build`)

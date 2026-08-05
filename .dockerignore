@@ -1,0 +1,23 @@
+# Keep the build context small and, more importantly, keep local state out of a published image.
+#
+# `out/` and any profile other than the example are the two that matter: a run archive names your hosts,
+# and a profile is a map of your infrastructure. Neither belongs in something pushed to a registry.
+
+out/
+profiles/*
+!profiles/example.json
+pool-*.json
+journey*.json
+
+node_modules/
+gui/ui/dist/
+.git/
+.github/
+.claude/
+graphify-out/
+tests/
+scripts/
+Makefile
+*.md
+!cache-ab/README.md
+.DS_Store

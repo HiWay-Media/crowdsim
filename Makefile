@@ -7,7 +7,10 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help install test test-unit test-cli test-gui test-e2e lint gui gui-dev gui-build clean
+.PHONY: help install test test-unit test-cli test-gui test-e2e lint gui gui-dev gui-build \
+        image image-smoke image-run clean
+
+IMAGE ?= crowdsim:dev
 
 help: ## show this help
 	@grep -hE '^[a-z-]+:.*##' $(MAKEFILE_LIST) | sed 's/:.*##/\t/' | column -t -s $$'\t'
@@ -42,6 +45,21 @@ gui-dev: ## Vite dev server with API proxy (http://127.0.0.1:5173)
 
 gui-build: ## produce gui/ui/dist
 	npm run build --workspace gui/ui
+
+image: ## build the single image (driver + generator + GUI) as $(IMAGE)
+	docker build -t $(IMAGE) .
+
+image-smoke: ## assert the image is the tool and the gates survived the build
+	tests/image/smoke.sh $(IMAGE)
+
+image-run: ## run the GUI from the image on http://127.0.0.1:8787 (token printed below)
+	@token=$$(head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n'); \
+	echo "token: $$token"; \
+	echo "open:  http://127.0.0.1:8787  (paste the token when asked)"; \
+	docker run --rm -p 127.0.0.1:8787:8787 \
+	  -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$$token" \
+	  -v "$$PWD/profiles:/profiles" -v "$$PWD/out:/out" \
+	  $(IMAGE) crowdsim serve
 
 clean:
 	rm -rf out gui/ui/dist

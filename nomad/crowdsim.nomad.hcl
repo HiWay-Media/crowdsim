@@ -66,7 +66,9 @@ job "crowdsim" {
       driver = "docker"
 
       config {
-        image      = "ghcr.io/hiway-media/crowdsim:1.0.0"
+        # Pin a released tag, never `latest`: a load test you cannot reproduce is an anecdote. The same
+        # image also serves the GUI (`crowdsim serve`), which is not what this job is for.
+        image      = "ghcr.io/hiway-media/crowdsim:1.2.0"
         entrypoint = ["/bin/bash"]
         # absolute path: the image's workdir is /crowdsim, so a relative "local/run.sh" would not resolve
         command    = "/local/run.sh"

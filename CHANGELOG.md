@@ -4,6 +4,40 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] — 2026-08-05
+
+One container image, published to a registry, containing the driver, the generator and the GUI — so the
+tool can be tried without installing k6, node or anything else.
+
+### Added
+- **Single image** `ghcr.io/hiway-media/crowdsim`, built in three stages: the UI is compiled with vite,
+  runtime dependencies are installed separately (`--omit=dev`, so express only — no vite, no react, no
+  bats), and both land on the pinned `grafana/k6` base together with node. 189 MB, `linux/amd64` and
+  `linux/arm64`.
+  - One image and not two: two tags to keep straight is one drift away from a run whose driver does not
+    match the page that launched it.
+  - `crowdsim load` and `crowdsim serve` both work in it. Profiles mount at `/profiles`, output at `/out`.
+- `.github/workflows/image.yml`: build, smoke-test, and publish to GHCR — `{version}`, `{major}.{minor}`
+  and `latest` on an annotated `v*` tag only. A push to main builds and tests and publishes nothing;
+  nothing is ever pushed before the smoke test passes.
+- `tests/image/smoke.sh` (`make image-smoke`), the same script CI runs: `--help` and `doctor` inside the
+  image, the driver resolving the generator at its relocated path, an unlisted host and an over-ceiling
+  peak both refused with exit 3, an untokened off-loopback bind refused, and the GUI answering on the
+  published port with its UI present and unauthenticated requests rejected. It also asserts the image
+  declares **no** `CROWDSIM_ALLOW_TARGETS` default — a published image with one would be a generator that
+  agrees to hit anything, invisibly to whoever pulled the tag.
+- `make image`, `make image-run` (starts the GUI from the image with a freshly generated token).
+- `.dockerignore`: `out/` and every profile but the example stay out of the build context. A run archive
+  names your hosts and a profile maps your infrastructure; neither belongs in a registry.
+
+### Changed
+- `bin/crowdsim` honours `CROWDSIM_ROOT`. In the image the driver lives in `/usr/local/bin` and the rest
+  of the tool in `/crowdsim`; deriving the root from the script's own path resolved to `/usr/local` and
+  would have broken `serve` and `cache-ab` with no error worth reading. Covered by two CLI tests.
+- The Nomad job pins `:1.2.0` and says why it is a pinned tag and not `latest`.
+- `react` and `react-dom` moved to devDependencies: the build output is a static bundle, nothing imports
+  them at runtime, and this keeps them out of the image.
+
 ## [1.1.1] — 2026-08-05
 
 ### Fixed

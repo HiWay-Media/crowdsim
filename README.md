@@ -57,22 +57,46 @@ git clone https://github.com/hiway-media/crowdsim && cd crowdsim
 The CLI needs only `k6`, `curl` and `python3`. `npm install` is optional and buys two things: the GUI
 (`crowdsim serve`) and the test suite.
 
-Docker, for running it on a host near the target:
+### The container
+
+One image, published on every release, containing the driver, the generator and the GUI:
 
 ```bash
-docker build -t crowdsim .
+docker pull ghcr.io/hiway-media/crowdsim:1.2.0        # or :1.2, or :latest
+
+# a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  crowdsim crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.2.0 crowdsim load --profile /profile.json --target edge --peak 60
+
+# the GUI, on your own machine
+docker run --rm -p 127.0.0.1:8787:8787 \
+  -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
+  -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
+  -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
+  ghcr.io/hiway-media/crowdsim:1.2.0 crowdsim serve
 ```
+
+`make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
+`make image-run` starts the GUI from it with a freshly generated token.
+
+Two details that are not incidental:
+
+- **The image ships no allowlist**, and CI asserts that on every build. An image with a
+  `CROWDSIM_ALLOW_TARGETS` default would be a load generator that agrees to hit anything, and whoever
+  pulled the tag would have no way to see it.
+- **Inside a container, "bind loopback" means "reachable by nobody"**, so the GUI is bound to `0.0.0.0`
+  and the reachability decision moves to the port publication: `-p 127.0.0.1:8787:8787` keeps it on your
+  own loopback. The token stays mandatory — the server cannot tell how narrowly you published the port.
 
 > **Do not run the generator through Docker on a laptop to test a remote target.** On macOS and Windows
 > the Docker network layer saturates before the target does — the iterations get dropped, and the run is
-> invalid. Native k6 locally; the container on a Linux host near the target.
+> invalid. Native k6 locally; the container on a Linux host near the target. The *GUI* in the container is
+> fine anywhere: it is a page, not a generator.
 
-For Nomad, `nomad/crowdsim.nomad.hcl` is a parameterized batch job: the target, rate and duration go in
-the dispatch call, and the profile is fetched at dispatch time from your own private repo.
+For Nomad, `nomad/crowdsim.nomad.hcl` is a parameterized batch job on the same image: the target, rate and
+duration go in the dispatch call, and the profile is fetched at dispatch time from your own private repo.
 
 ## Use
 
@@ -100,6 +124,8 @@ implies, launch, watch the log stream, read the result, compare it with previous
 ```bash
 npm install && npm run gui:build      # once
 crowdsim serve                        # http://127.0.0.1:8787
+
+make image-run                        # or straight from the container image, no node needed
 ```
 
 ```
@@ -137,6 +163,7 @@ launched from the page are the same kind of object, and appear in the same histo
 ```bash
 make test         # unit + GUI + CLI — generates no load whatsoever
 make test-e2e     # a real 12 req/s run against an nginx container on loopback (needs docker + k6)
+make image-smoke  # the built image: still the tool, gates intact (needs docker + make image)
 ```
 
 | Suite | What it covers |
@@ -145,6 +172,7 @@ make test-e2e     # a real 12 req/s run against an nginx container on loopback (
 | `tests/cli/` (`bats`) | `bin/crowdsim` end to end against a stub k6: both safety gates, exit-code contract, profile and target resolution, empty-pool handling, history, and that the brake tripping still exits 0. |
 | `tests/gui/` (`node --test`) | the API over a real socket: path traversal out of the profile directory, the override confirmation, one-run-at-a-time, gate refusals passed through with their exit code, no webhook leakage. |
 | `tests/e2e/` | the whole chain against a real target: probe, load, mix proportions, cache classification, the history row, and the GUI reading them back. |
+| `tests/image/` | the published artefact: the driver finds the generator, the GUI starts, and the gates survived the build — including that no allowlist default was baked in. Runs in CI before anything is pushed. |
 
 Two things the suites are built around, because they are how a load test lies to you:
 
