@@ -1,0 +1,55 @@
+# LEG A — "AS IS": the baseline you have to beat.
+#
+# Replace this with a faithful copy of your production reverse-proxy config, changing ONLY the upstream
+# so it points at the origin you are testing. Everything else — cache zones, keys, TTLs, timeouts — must
+# match production, otherwise you are not comparing your candidate against reality.
+#
+# What ships here is the common starting point: a proxy that HAS a cache configured, and gets ~0% hits
+# because the application sends `Cache-Control: no-store` and nginx honours it. That combination is easy
+# to miss — the cache is present, the config looks right, and it never stores a byte.
+
+proxy_cache_path /tmp/nginx/cache levels=1:2 keys_zone=MAIN:10m max_size=2g inactive=1d;
+
+upstream origin { server ${ORIGIN_ADDR}:443; keepalive 64; }
+
+server {
+    listen 8080 default_server;
+    server_name _;
+    server_tokens off;
+    access_log /var/log/nginx/access.log;
+
+    # crowdsim reads these to classify every response. Keep the header name in sync with the profile's
+    # cache_headers, or your hit ratio will silently report as n/a.
+    add_header X-Proxy-Cache $upstream_cache_status;
+    add_header X-AB-Leg      "asis";
+
+    proxy_ssl_server_name on;
+    proxy_ssl_name        ${ORIGIN_HOST};
+    proxy_ssl_verify      off;
+    proxy_http_version    1.1;
+
+    location / {
+        proxy_set_header Host              ${ORIGIN_HOST};
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_cache            MAIN;
+        proxy_cache_revalidate on;
+        # The cache key decides what counts as the same response. Adding a header here that varies per
+        # user destroys the hit ratio; omitting one that genuinely changes the response serves the wrong
+        # body to the wrong visitor. This is the line to think hardest about.
+        proxy_cache_key "$scheme$request_method$host$request_uri";
+        proxy_cache_valid 200 301 302 304 307 ${CACHE_TTL}s;
+        proxy_cache_valid 404 5s;
+        proxy_cache_lock on;
+        proxy_cache_background_update on;
+        proxy_cache_use_stale error timeout invalid_header http_500 http_502 http_503 http_504;
+        proxy_buffering on;
+        proxy_read_timeout 7s;      # match your production value: this is where 504s are born
+
+        # ⛔ NO proxy_ignore_headers here. This is the leg that honours the origin's no-store, which is
+        #    why it caches nothing. Leg B is where that changes.
+        proxy_pass https://origin;
+    }
+}

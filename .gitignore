@@ -1,0 +1,16 @@
+# Run output: summaries, logs, resolved profiles, history.
+out/
+
+# ⚠️ Your own profiles and URL pools are a map of your infrastructure — hostnames, internal addresses,
+#    real routes, build hashes. They do not belong in a public repo. Keep them in a private one.
+profiles/*.json
+!profiles/example.json
+pool-*.json
+journey*.json
+!profiles/journey.example.json
+
+# Local cache-ab overrides
+cache-ab/docker-compose.override.yml
+cache-ab/*.local.template
+
+.DS_Store

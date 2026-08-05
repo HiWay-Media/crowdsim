@@ -1,0 +1,66 @@
+# LEG B — THE CANDIDATE. Identical to asis.conf.template except for the lines marked ⭐.
+#
+# The change shipped as the example is the one that most often turns a 0%-hit cache into a useful one:
+# telling nginx to ignore the origin's cache-defeating headers, so a short shared TTL can apply. It is
+# also the change with the sharpest failure mode, which is why it gets its own warning below.
+#
+# ⚠️ READ THIS BEFORE COPYING IT TO PRODUCTION. Ignoring Cache-Control means YOU now decide what is
+#    cacheable, and the origin can no longer tell you it was wrong. Two ways this bites:
+#
+#    1. PERSONALISED RESPONSES. If any response on this path varies by user — a session, a cart, a
+#       localised or geo-targeted variant — and the origin signalled that only through no-store (i.e.
+#       without a correct `Vary`), you will now serve one visitor's response to another. Verify, per
+#       route, that the response is impersonal. Do not assume; fetch it twice with different sessions
+#       and diff the bytes.
+#    2. THE CACHE KEY IS NOW YOURS. Without a `Vary` from the origin, nginx cannot know which request
+#       headers matter. Any header that genuinely changes the response has to be added to
+#       proxy_cache_key by hand, and any header that does not must stay out of it.
+#
+#    Restricting this leg to one narrow, verified-impersonal class of request is usually the version you
+#    can actually ship. Keeping the full change and the narrow subset as two separate legs, measured in
+#    the same run, is how you find out what the narrow one is worth.
+
+proxy_cache_path /tmp/nginx/cache levels=1:2 keys_zone=MAIN:10m max_size=2g inactive=1d;
+
+upstream origin { server ${ORIGIN_ADDR}:443; keepalive 64; }
+
+server {
+    listen 8080 default_server;
+    server_name _;
+    server_tokens off;
+    access_log /var/log/nginx/access.log;
+
+    add_header X-Proxy-Cache $upstream_cache_status;
+    add_header X-AB-Leg      "candidate";
+
+    proxy_ssl_server_name on;
+    proxy_ssl_name        ${ORIGIN_HOST};
+    proxy_ssl_verify      off;
+    proxy_http_version    1.1;
+
+    location / {
+        proxy_set_header Host              ${ORIGIN_HOST};
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+
+        proxy_cache            MAIN;
+        proxy_cache_revalidate on;
+        proxy_cache_key "$scheme$request_method$host$request_uri";
+        proxy_cache_valid 200 301 302 304 307 ${CACHE_TTL}s;
+        proxy_cache_valid 404 5s;
+        proxy_cache_lock on;
+        proxy_cache_background_update on;
+        proxy_cache_use_stale error timeout invalid_header http_500 http_502 http_503 http_504;
+        proxy_buffering on;
+        proxy_read_timeout 7s;
+
+        # ⭐ THE CHANGE: stop honouring the origin's cache-defeating headers, so the TTL above applies.
+        #    `Set-Cookie` is in the list on purpose — leaving it out means a single response that happens
+        #    to set a cookie stays uncacheable and quietly re-opens the hole you are trying to close.
+        #    If any response here is personalised, this is the line that leaks it. See the warning above.
+        proxy_ignore_headers Cache-Control Expires Set-Cookie Vary;
+
+        proxy_pass https://origin;
+    }
+}

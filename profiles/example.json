@@ -1,0 +1,138 @@
+{
+  "name": "example-nextjs",
+  "description": "Example profile for a Next.js App Router site behind a CDN, an HAProxy edge and a caching reverse proxy. Copy it, put YOUR measured numbers in, and keep it in your own private repo — a profile contains hostnames and URL pools, i.e. information about your infrastructure.",
+
+  "targets": {
+    "default": "edge",
+    "list": {
+      "public": {
+        "base_url": "https://www.example.test",
+        "_comment": "through the CDN. ⚠️ measures the CDN, not your origin — and costs you egress."
+      },
+      "edge": {
+        "base_url": "https://www.example.test",
+        "bypass": "www.example.test=203.0.113.10",
+        "_comment": "your own edge load balancer, CDN bypassed, SNI and Host still correct. Put the edge address in bypass. This is normally the target you want."
+      },
+      "proxy-node": {
+        "base_url": "https://10.0.0.11:8092",
+        "host_header": "www.example.test",
+        "insecure": true,
+        "_comment": "a single caching-proxy node: isolates one node and skips the load balancer."
+      },
+      "app-instance": {
+        "base_url": "http://10.0.0.21:3000",
+        "skip_classes": "proxy_only",
+        "_comment": "one application instance directly, to get per-instance capacity. Routes served only by the reverse proxy answer 404 here, so skip those classes or one class goes to 100% failed and trips the brake at a few req/s."
+      }
+    }
+  },
+
+  "_classes_comment": "The MIX. Weights are the share of user requests/s you measured on your own edge access log during the spike you want to replay — not a guess, and not a uniform split. Only count requests the client makes: server-side sub-requests the app issues by itself are a CONSEQUENCE, and generating them yourself would double-count. `--peak` is the total; each class gets weight/total × peak.",
+  "classes": [
+    {
+      "name": "rsc_page",
+      "label": "RSC navigation",
+      "weight": 43.2,
+      "kind": "rsc",
+      "pool": "pages",
+      "_comment": "React Server Components prefetch and navigation. Usually the largest class and the one flat load tools cannot produce."
+    },
+    {
+      "name": "html",
+      "label": "HTML document",
+      "weight": 23.2,
+      "kind": "plain",
+      "pool": "pages",
+      "_comment": "landings and reloads: full server-rendered documents."
+    },
+    {
+      "name": "rsc_search",
+      "label": "RSC search",
+      "weight": 22.9,
+      "kind": "rsc",
+      "pool": "searches",
+      "rsc_state_path": "/search",
+      "_comment": "search is frequently the most expensive class per request. Keep it separate: averaging it into the others hides the thing that actually falls over."
+    },
+    {
+      "name": "static",
+      "label": "static asset",
+      "weight": 9.8,
+      "kind": "plain",
+      "pool": "static",
+      "_comment": "assets that are served BY THE APP rather than by the CDN. Regenerate this pool after every deploy: it contains build hashes."
+    },
+    {
+      "name": "proxy_only",
+      "label": "proxy-only route",
+      "weight": 0.9,
+      "kind": "plain",
+      "pool": "pages",
+      "path_prefix": "/page",
+      "_comment": "a route the reverse proxy serves and the app instance does not. Listed to show path_prefix; skipped on the app-instance target."
+    }
+  ],
+
+  "pools": {
+    "pages": [
+      "/",
+      "/news",
+      "/news/latest",
+      "/teams/first-team",
+      "/teams/first-team/results",
+      "/teams/first-team/standings"
+    ],
+    "searches": [
+      "/search?q=alpha",
+      "/search?q=beta",
+      "/search?q=gamma",
+      "/search?q=delta"
+    ],
+    "static": [],
+    "_comment": "Pools can be inlined like above, or pulled from a sibling file with \"@pool-pages.json\" — which is what `crowdsim discover` writes. Keep pools OUT of a public repo: they are a map of your site."
+  },
+
+  "rsc": {
+    "param": "_rsc",
+    "mode_comment": "In a real Next.js build the _rsc value depends on route+build, not on the request: one measured event had tens of thousands of RSC requests collapsing onto ~13 distinct values. That repetitiveness is the entire premise of 'a shared micro-cache would absorb most of this'. RSC_MODE=repeat replays it; RSC_MODE=random tests the opposite hypothesis.",
+    "hashes": ["1dxlt", "9y2af", "b7k0q", "c3m8w", "d1p5r", "e6t2v", "f4h9n",
+               "g8j3s", "h2l7x", "j5n1z", "k9q4b", "m3s6d", "p7v0g"]
+  },
+
+  "_cache_headers_comment": "Which response header tells you the cache state of each layer, and what counts as a hit. crowdsim reports a hit ratio per layer per class from these.",
+  "cache_headers": [
+    { "label": "proxy",  "header": "X-Proxy-Cache", "hit": "HIT|STALE|UPDATING|REVALIDATED" },
+    { "label": "cdn",    "header": "X-Cache",       "hit": "Hit" },
+    { "label": "souin",  "header": "Cache-Status",  "hit": "hit" }
+  ],
+
+  "headers": {
+    "Accept-Language": "en-GB,en;q=0.9"
+  },
+
+  "slo": {
+    "max_failed_rate": 0.05,
+    "max_p95_ms": 5000,
+    "guillotine_ms": 7000,
+    "brake_class": "rsc_page",
+    "_comment": "guillotine_ms is your reverse proxy read timeout: requests slower than this become 504s for real users, so crowdsim reports the share that crossed it. brake_class is the class whose p95 aborts the run."
+  },
+
+  "safety": {
+    "safe_peak_rps": 150,
+    "allow_hosts": ["www.example.test", "10.0.0.*", "127.0.0.1"],
+    "_comment": "allow_hosts is a hard gate: crowdsim refuses any target whose host does not match. safe_peak_rps is the ceiling above which --i-know-this-breaks-production is mandatory. Set safe_peak_rps to a level you have already proven harmless, not to what you hope is harmless."
+  },
+
+  "discover": {
+    "sitemap": "https://www.example.test/sitemap.xml",
+    "strip_prefix_regex": "^/(en|es|it)(?=/)",
+    "_comment": "strip_prefix_regex removes locale prefixes that the site redirects: testing a 307 measures the redirect, not the render."
+  },
+
+  "journey": {
+    "file": "journey.json",
+    "_comment": "Only needed for --shape journey: a recorded fan-out of {path, rsc[], static[]} per page. Record it with a real browser against your own site."
+  }
+}

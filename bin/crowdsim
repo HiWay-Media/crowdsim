@@ -1,0 +1,499 @@
+#!/usr/bin/env bash
+#
+# crowdsim — replay a live-event traffic mix against a web frontend, and measure what caching buys you.
+#
+# WHY IT EXISTS — when an SSR frontend collapses under a traffic spike you usually end up with two
+#   numbers reconstructed from logs after the fact: "the app tier saturates around N req/s" and "a shared
+#   micro-cache would cut origin load by X". Both are guesses until you can produce them on demand.
+#   crowdsim climbs in steps until the knee, brakes as soon as it is crossed, and its `cache-ab` mode
+#   measures the real offload factor of a candidate cache config instead of simulating it.
+#
+# ⚠️ THIS TOOL GENERATES REAL LOAD ON WHATEVER YOU POINT IT AT. If you point it at production you will
+#   serve errors to real users, and to every co-tenant sharing that infrastructure. Hence the gates:
+#   the target host must match an explicit allowlist, and going past the safe peak needs
+#   --i-know-this-breaks-production. There is no interactive "are you sure" fallback, on purpose:
+#   this runs unattended in CI and on schedulers, where a prompt would either hang or be auto-answered.
+#
+# SUBCOMMANDS
+#   doctor      check the prerequisites on this machine and say what is missing (run this first)
+#   discover    fetch the sitemap and extract a pool of REAL URLs (404s do not load the app tier:
+#               testing non-existent URLs yields a false "it handles this beautifully")
+#   probe       preflight: reachability, cache headers hop by hop, MTU, weight of one page
+#   load        the load test
+#   cache-ab    A/B a candidate cache config: two local nginx legs against the same origin, one with
+#               the tweak under evaluation and one as-is → measured hit ratio and offload
+#   history     one line per run, to see whether the knee moves over time
+#
+# Usage:
+#   crowdsim doctor
+#   crowdsim discover --profile <f.json> [--limit 400]
+#   crowdsim probe    --profile <f.json> [--target <name>]
+#   crowdsim load     --profile <f.json> [--target <name>] [--shape mix|journey]
+#                     [--peak 120] [--start 30] [--steps 4] [--step-dur 60s] [--hold 120s]
+#                     [--rsc-mode repeat|random] [--max-5xx 0.05] [--max-p95 5000]
+#                     [--safe-peak 150] [--i-know-this-breaks-production] [--touch-and-go] [--dry-run]
+#   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10]
+#
+# Environment:
+#   CROWDSIM_ALLOW_TARGETS   comma-separated host globs the tool is allowed to hit. REQUIRED unless the
+#                            profile declares safety.allow_hosts. No default, by design.
+#   CROWDSIM_OUT             output directory for logs and summaries (default: ./out)
+#   CROWDSIM_SLACK_WEBHOOK   if set, --slack posts the run recap there. Never hardcode a webhook here.
+#
+# Exit: 0 = executed (a run stopped by the brake is an OUTCOME, not an error) · 2 = usage
+#       3 = safety gate · 4 = target unreachable · 5 = k6 missing
+# Requires: k6, curl, python3.
+
+set -eo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="$(cd "$SELF_DIR/.." && pwd)"
+K6_SCRIPT="${CROWDSIM_K6_SCRIPT:-$ROOT/k6/live-event.js}"
+OUT_DIR="${CROWDSIM_OUT:-$PWD/out}"
+
+PROFILE_F=""; TARGET=""; SHAPE="mix"; PEAK=60; START=15; STEPS=4; STEP_DUR="60s"; HOLD="120s"
+RSC_MODE="repeat"; MAX_5XX=""; MAX_P95=""; SAFE_PEAK=""; ABORT_DELAY="30s"; TOUCH_AND_GO=0
+BASE_URL_OVERRIDE=""; SLACK=0; DRY=0; FORCE=0; LIMIT=400; TTL=10; INSECURE=0; SKIP_CLASSES=""
+
+usage() { sed -n '1,60p' "$0" | grep -E '^#' | sed 's/^# \{0,1\}//'; }
+say()   { printf '%s\n' "$*"; }
+ok()    { printf '  ✅ %s\n' "$*"; }
+warn()  { printf '  ⚠️  %s\n' "$*"; }
+# note: "$1" and not "$*" — the second argument is the exit code, not part of the message
+die()   { printf '❌ %s\n' "$1" >&2; exit "${2:-1}"; }
+
+CMD="${1:-}"; shift || true
+# `--help` in SUBCOMMAND position: without this case it falls through to the unknown-subcommand branch
+# and exits 2 — which is the first thing anyone tries.
+case "$CMD" in
+  -h|--help) usage; exit 0;;
+  "") usage; exit 2;;
+esac
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --profile) PROFILE_F="$2"; shift 2;;
+    --target) TARGET="$2"; shift 2;;
+    --shape) SHAPE="$2"; shift 2;;
+    --peak) PEAK="$2"; shift 2;;
+    --start) START="$2"; shift 2;;
+    --steps) STEPS="$2"; shift 2;;
+    --step-dur) STEP_DUR="$2"; shift 2;;
+    --hold) HOLD="$2"; shift 2;;
+    --rsc-mode) RSC_MODE="$2"; shift 2;;
+    --max-5xx) MAX_5XX="$2"; shift 2;;
+    --max-p95) MAX_P95="$2"; shift 2;;
+    --safe-peak) SAFE_PEAK="$2"; shift 2;;
+    --skip-classes) SKIP_CLASSES="$2"; shift 2;;
+    --base-url) BASE_URL_OVERRIDE="$2"; shift 2;;
+    --limit) LIMIT="$2"; shift 2;;
+    --ttl) TTL="$2"; shift 2;;
+    --abort-delay) ABORT_DELAY="$2"; shift 2;;
+    --touch-and-go) TOUCH_AND_GO=1; shift;;
+    --insecure) INSECURE=1; shift;;
+    --slack) SLACK=1; shift;;
+    --dry-run) DRY=1; shift;;
+    --i-know-this-breaks-production) FORCE=1; shift;;
+    -h|--help) usage; exit 0;;
+    *) die "unknown option: $1" 2;;
+  esac
+done
+
+if [ "$TOUCH_AND_GO" = "1" ]; then
+  # ⚠️ "just a few seconds" does not produce 504s: a 504 needs a QUEUE, and a queue needs time to build.
+  #   This preset is the cheapest thing that still produces errors: steep ramp, no hold, brake reacting
+  #   in 10s instead of 30. Expect ~20-40s of errors, not 5.
+  STEPS=3; STEP_DUR="20s"; HOLD="0s"; ABORT_DELAY="10s"
+fi
+
+RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+mkdir -p "$OUT_DIR"
+HISTORY_F="$OUT_DIR/history.tsv"
+
+# ─────────────────────────────── profile handling ───────────────────────────────────────────────────
+# The profile is the only place a real hostname, URL pool or measured mix ever lives. This repo ships
+# profiles/example.json and nothing else: keep your own profiles in your own private repo.
+need_profile() {
+  if [ -z "$PROFILE_F" ]; then die "--profile <file.json> is required (see profiles/example.json)" 2; fi
+  if [ ! -f "$PROFILE_F" ]; then die "profile not found: $PROFILE_F" 2; fi
+}
+
+# Resolves "@relative/file.json" pool references into inlined arrays and writes the result to
+# $RESOLVED. k6 can only open() files in the init context, so one self-contained file keeps it simple.
+RESOLVED=""
+resolve_profile() {
+  need_profile
+  RESOLVED="$OUT_DIR/profile-$RUN_ID.json"
+  python3 - "$PROFILE_F" "$RESOLVED" <<'PY'
+import json, os, sys
+src, dst = sys.argv[1], sys.argv[2]
+base = os.path.dirname(os.path.abspath(src))
+with open(src) as f: p = json.load(f)
+# keys starting with "_" are documentation: JSON has no comments, and a profile that cannot explain
+# itself gets copied wrong. They are stripped here so they never reach the generator as data.
+pools = {k: v for k, v in (p.get('pools') or {}).items() if not k.startswith('_')}
+for k, v in list(pools.items()):
+    if isinstance(v, str) and v.startswith('@'):
+        path = os.path.join(base, v[1:])
+        if not os.path.exists(path):
+            sys.exit(f"pool '{k}' points at a missing file: {path}")
+        with open(path) as f: pools[k] = json.load(f)
+    if not isinstance(pools[k], list):
+        sys.exit(f"pool '{k}' must be a list of paths (or '@file.json')")
+p['pools'] = pools
+
+classes, dropped = [], []
+for c in p.get('classes', []):
+    for key in ('pool', 'path_suffix_pool'):
+        ref = c.get(key)
+        if ref and ref not in pools:
+            sys.exit(f"class '{c.get('name')}' references unknown pool '{ref}'")
+    # An empty pool has NO honest fallback. Sending the class at some other pool would silently
+    # measure the wrong request type under the right label — e.g. a rendered 404 counted as a static
+    # asset. Dropping the class and saying so is the only non-misleading option; the remaining
+    # weights are then renormalised, so --peak still means what you asked for.
+    if c.get('pool') and not pools.get(c['pool']):
+        dropped.append(f"{c.get('name')} (pool '{c['pool']}' is empty)")
+        continue
+    classes.append(c)
+if not classes:
+    sys.exit('every class was dropped for want of a non-empty pool')
+p['classes'] = classes
+with open(dst, 'w') as f: json.dump(p, f)
+for d in dropped:
+    print(f"  ⚠️  class skipped: {d} — the mix is renormalised over the rest", file=sys.stderr)
+PY
+}
+
+# jq is deliberately not a dependency: python3 is already required and is present on every host that
+# runs a scheduler agent, whereas jq often is not.
+pf() { python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+for k in sys.argv[2].split("."):
+    if d is None: break
+    d = d.get(k) if isinstance(d, dict) else None
+print("" if d is None else (json.dumps(d) if isinstance(d,(dict,list)) else d))' "$PROFILE_F" "$1"; }
+
+# ─────────────────────────────── target resolution ──────────────────────────────────────────────────
+# A profile declares named targets. `bypass` lets you skip a CDN while keeping SNI and Host correct,
+# which is how you measure your own origin instead of someone else's edge cache.
+BASE_URL=""; HOST_HEADER=""; BYPASS=""
+resolve_target() {
+  if [ -n "$BASE_URL_OVERRIDE" ]; then
+    BASE_URL="$BASE_URL_OVERRIDE"
+    return 0
+  fi
+  local name="${TARGET:-$(pf targets.default)}"
+  if [ -z "$name" ]; then die "no --target given and the profile has no targets.default" 2; fi
+  local spec
+  spec="$(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+t=(d.get("targets") or {}).get("list") or {}
+if sys.argv[2] not in t: sys.exit("unknown target: "+sys.argv[2]+" (have: "+", ".join(t)+")")
+t=t[sys.argv[2]]
+print(t.get("base_url",""));print(t.get("host_header",""));print(t.get("bypass",""))
+print(t.get("skip_classes",""))' "$PROFILE_F" "$name")" || die "$spec" 2
+  BASE_URL="$(printf '%s' "$spec"  | sed -n 1p)"
+  HOST_HEADER="$(printf '%s' "$spec" | sed -n 2p)"
+  BYPASS="$(printf '%s' "$spec"    | sed -n 3p)"
+  local sk; sk="$(printf '%s' "$spec" | sed -n 4p)"
+  if [ -z "$SKIP_CLASSES" ] && [ -n "$sk" ]; then SKIP_CLASSES="$sk"; fi
+  if [ -z "$BASE_URL" ]; then die "target '$name' has no base_url" 2; fi
+  say "  target '$name' → $BASE_URL${HOST_HEADER:+  Host: $HOST_HEADER}${BYPASS:+  bypass: $BYPASS}"
+}
+
+# ─────────────────────────────── safety gates ───────────────────────────────────────────────────────
+# Gate 1: the host must be explicitly allowlisted. This is what stops a copy-pasted command, a stale
+# --base-url or a mis-set Nomad meta from firing at something that is not yours to load-test.
+gate_allowlist() {
+  local host allow
+  host="$(printf '%s' "$BASE_URL" | sed -E 's#^[a-z]+://##; s#[:/].*$##')"
+  allow="${CROWDSIM_ALLOW_TARGETS:-$(pf safety.allow_hosts | tr -d '[]"' | tr -d ' ')}"
+  if [ -z "$allow" ]; then
+    die "no target allowlist: set CROWDSIM_ALLOW_TARGETS=host1,host2 or safety.allow_hosts in the profile
+
+  crowdsim refuses to generate load against a host nobody explicitly authorised. This is not a
+  formality: a load test aimed at the wrong hostname is indistinguishable from an attack." 3
+  fi
+  local m=0 pat
+  IFS=',' read -r -a _pats <<< "$allow"
+  for pat in "${_pats[@]}"; do
+    case "$host" in $pat) m=1;; esac
+  done
+  if [ "$m" != "1" ]; then
+    die "host '$host' is not in the allowlist ($allow)" 3
+  fi
+  ok "allowlist: '$host' authorised"
+}
+
+# Gate 2: past the safe peak you are knowingly aiming at the knee, which means real errors for real
+# users. It must be stated on the command line every single time — never remembered in a config.
+gate_peak() {
+  local safe="${SAFE_PEAK:-$(pf safety.safe_peak_rps)}"
+  safe="${safe:-150}"
+  if [ "$PEAK" -le "$safe" ] 2>/dev/null; then
+    ok "peak ${PEAK} req/s is within the safe ceiling (${safe})"
+    return 0
+  fi
+  if [ "$FORCE" != "1" ]; then
+    die "peak ${PEAK} req/s is above the safe ceiling (${safe} req/s)
+
+  Past this point the test is expected to produce 5xx for real users of $BASE_URL, and to degrade
+  any co-tenant sharing the same nodes. If that is the intent, say so explicitly:
+
+      --i-know-this-breaks-production
+
+  Before you do: agree a window, warn whoever watches the uptime alerts, and be ready to stop." 3
+  fi
+  warn "peak ${PEAK} req/s is ABOVE the safe ceiling (${safe}) and the override is set — this will hurt"
+}
+
+# ─────────────────────────────── doctor ─────────────────────────────────────────────────────────────
+K6=""
+k6_bin() {
+  if command -v k6 >/dev/null 2>&1; then K6="k6"; return 0; fi
+  die "k6 not found.
+
+  Install it natively — do NOT run the generator through Docker on a laptop: on macOS and Windows the
+  Docker network layer becomes the bottleneck before the target does, iterations get dropped, and the
+  run is invalid (crowdsim will tell you, but you will have wasted the window).
+
+    macOS:  brew install k6
+    Linux:  https://grafana.com/docs/k6/latest/set-up/install-k6/
+
+  Inside a Linux container on a host near the target, Docker is fine — that is what the shipped image
+  and the Nomad job are for." 5
+}
+
+cmd_doctor() {
+  say "▶ crowdsim prerequisites"
+  if command -v k6 >/dev/null 2>&1; then ok "k6 $(k6 version 2>/dev/null | head -1)"; else warn "k6 MISSING (see: crowdsim load)"; fi
+  if command -v curl >/dev/null 2>&1; then ok "curl"; else warn "curl missing"; fi
+  if command -v python3 >/dev/null 2>&1; then ok "python3"; else warn "python3 missing"; fi
+  if command -v docker >/dev/null 2>&1; then ok "docker (needed only for cache-ab)"; else warn "docker missing (cache-ab unavailable)"; fi
+  if [ -n "${CROWDSIM_ALLOW_TARGETS:-}" ]; then ok "CROWDSIM_ALLOW_TARGETS=$CROWDSIM_ALLOW_TARGETS"; else warn "CROWDSIM_ALLOW_TARGETS unset (the profile must declare safety.allow_hosts)"; fi
+  ok "output directory: $OUT_DIR"
+  if [ -n "$PROFILE_F" ]; then
+    resolve_profile && ok "profile '$PROFILE_F' parses, pools resolved"
+  fi
+}
+
+# ─────────────────────────────── discover ───────────────────────────────────────────────────────────
+# Pools must contain URLs that actually render. Two traps this handles:
+#  · a 404 is cheap for the app tier (or, worse, is itself rendered) → it measures the wrong thing;
+#  · sitemaps commonly advertise locale-prefixed paths that the site 307-redirects, so testing them
+#    measures redirects instead of renders.
+cmd_discover() {
+  need_profile; resolve_target; gate_allowlist
+  local sitemap; sitemap="$(pf discover.sitemap)"
+  if [ -z "$sitemap" ]; then die "profile has no discover.sitemap" 2; fi
+  local strip; strip="$(pf discover.strip_prefix_regex)"
+  local out="$OUT_DIR/pool-$RUN_ID.json"
+  say "▶ discovering URLs from $sitemap (limit $LIMIT)"
+  curl -sS --max-time 30 --retry 1 --retry-connrefused "$sitemap" \
+    | python3 - "$LIMIT" "${strip:-}" "$out" <<'PY'
+import json, re, sys
+limit, strip, out = int(sys.argv[1]), sys.argv[2], sys.argv[3]
+raw = sys.stdin.read()
+locs = re.findall(r'<loc>\s*([^<\s]+)\s*</loc>', raw)
+paths = []
+for u in locs:
+    p = re.sub(r'^[a-z]+://[^/]+', '', u) or '/'
+    if strip: p = re.sub(strip, '', p) or '/'
+    if p not in paths: paths.append(p)
+paths = paths[:limit]
+json.dump(paths, open(out, 'w'), indent=1)
+print(f"  {len(locs)} <loc> entries → {len(paths)} distinct paths → {out}")
+PY
+  say ""
+  say "  Verify they render before using them, then point a pool at the file:"
+  say "      \"pools\": { \"pages\": \"@$(basename "$out")\" }"
+  say "  ⚠️  Regenerate after every deploy: static-asset pools contain build hashes."
+}
+
+# ─────────────────────────────── probe ──────────────────────────────────────────────────────────────
+cmd_probe() {
+  need_profile; resolve_target; gate_allowlist
+  local log="$OUT_DIR/probe-$RUN_ID.log"
+  say "▶ preflight on $BASE_URL"
+  local curl_opts=(-sS -o /dev/null --max-time 10 --retry 1 --retry-connrefused
+                   -D "$OUT_DIR/.probe-hdr")
+  if [ "$INSECURE" = "1" ]; then curl_opts+=(-k); fi
+  if [ -n "$HOST_HEADER" ]; then curl_opts+=(-H "Host: $HOST_HEADER"); fi
+  if [ -n "$BYPASS" ]; then curl_opts+=(--resolve "${BYPASS/=/:443:}"); fi
+
+  local first; first="$(python3 -c '
+import json,sys
+d=json.load(open(sys.argv[1]))
+p=(d.get("pools") or {}).get("pages")
+print(p[0] if isinstance(p,list) and p else "/")' "$RESOLVED" 2>/dev/null || echo /)"
+
+  {
+    say "run: $RUN_ID  base: $BASE_URL  path: $first"
+    local code ttfb size
+    read -r code ttfb size < <(curl "${curl_opts[@]}" \
+      -w '%{http_code} %{time_starttransfer} %{size_download}\n' \
+      "$BASE_URL$first" 2>/dev/null) || true
+    say "status=$code  ttfb=${ttfb}s  bytes=$size"
+    if [ "${code:-0}" -ge 400 ] 2>/dev/null || [ -z "${code:-}" ]; then
+      say "⛔ target does not answer 2xx/3xx on the first pool entry"
+    fi
+    say ""
+    say "── response headers (cache state of every layer it crossed) ──"
+    grep -iE '^(HTTP/|cache-control|age|x-cache|cache-status|x-proxy-cache|x-souin|vary|server|content-encoding)' \
+      "$OUT_DIR/.probe-hdr" 2>/dev/null || say "(none captured)"
+  } | tee "$log"
+  rm -f "$OUT_DIR/.probe-hdr"
+  local rc="${code:-0}"
+  if [ "$rc" -ge 400 ] 2>/dev/null; then exit 4; fi
+  say ""
+  ok "probe log: $log"
+}
+
+# ─────────────────────────────── load ───────────────────────────────────────────────────────────────
+cmd_load() {
+  need_profile; resolve_profile; resolve_target
+  gate_allowlist
+  gate_peak
+  k6_bin
+
+  local summary="$OUT_DIR/summary-$RUN_ID.json"
+  local log="$OUT_DIR/load-$RUN_ID.log"
+
+  local -a env=(
+    "PROFILE=$RESOLVED" "BASE_URL=$BASE_URL" "RUN_ID=$RUN_ID" "SHAPE=$SHAPE"
+    "PEAK_RPS=$PEAK" "START_RPS=$START" "STEPS=$STEPS" "STEP_DUR=$STEP_DUR" "HOLD_DUR=$HOLD"
+    "RSC_MODE=$RSC_MODE" "ABORT_DELAY=$ABORT_DELAY" "SUMMARY_OUT=$summary"
+    "INSECURE=$INSECURE" "SKIP_CLASSES=$SKIP_CLASSES"
+  )
+  if [ -n "$HOST_HEADER" ]; then env+=("HOST_HEADER=$HOST_HEADER"); fi
+  if [ -n "$BYPASS" ]; then env+=("BYPASS=$BYPASS"); fi
+  if [ -n "$MAX_5XX" ]; then env+=("MAX_5XX=$MAX_5XX"); fi
+  if [ -n "$MAX_P95" ]; then env+=("MAX_P95_MS=$MAX_P95"); fi
+  # Only for --shape journey. Passing it in `mix` mode would make k6 open a file it never uses, and a
+  # profile that merely mentions a journey file it does not ship would abort the run in the init context
+  # with a stack trace instead of a load test.
+  if [ "$SHAPE" = "journey" ]; then
+    local j; j="$(pf journey.file)"
+    if [ -z "$j" ]; then die "--shape journey needs journey.file in the profile" 2; fi
+    local jpath="$(cd "$(dirname "$PROFILE_F")" && pwd)/$j"
+    if [ ! -f "$jpath" ]; then die "--shape journey: journey file not found: $jpath" 2; fi
+    env+=("JOURNEY=$jpath")
+  fi
+
+  local -a k6args=()
+  for e in "${env[@]}"; do k6args+=(-e "$e"); done
+
+  say "╔═══ crowdsim ═════════════════════════════════════════════════════════════════╗"
+  say "  run       $RUN_ID"
+  say "  target    $BASE_URL"
+  say "  profile   $PROFILE_F"
+  say "  shape     $SHAPE   peak ${PEAK} → hold ${HOLD}   steps ${STEPS}×${STEP_DUR}"
+  say "╚══════════════════════════════════════════════════════════════════════════════╝"
+
+  if [ "$DRY" = "1" ]; then
+    say "(dry run) k6 run ${k6args[*]} $K6_SCRIPT"
+    return 0
+  fi
+
+  # The brake tripping means k6 exits non-zero. That is an OUTCOME (you found the knee), not a failure
+  # of the tool, so it must not kill the wrapper before the summary is written and recorded.
+  set +e
+  "$K6" run "${k6args[@]}" "$K6_SCRIPT" 2>&1 | tee "$log"
+  local k6rc="${PIPESTATUS[0]}"
+  set -e
+
+  if [ -f "$summary" ]; then
+    record_history "$summary"
+    if [ "$SLACK" = "1" ]; then notify_slack "$summary"; fi
+    ok "summary: $summary"
+    ok "log:     $log"
+    local flags
+    flags="$(python3 -c 'import json,sys
+d=json.load(open(sys.argv[1]))
+print(d.get("generator_ok"), d.get("target_unreachable"))' "$summary")"
+    if [ "${flags% *}" != "True" ]; then
+      warn "THE GENERATOR DID NOT HOLD THE RATE — discard this run, do not interpret it."
+      warn "Move the generator closer to the target (or onto a bigger host) and repeat."
+    fi
+    if [ "${flags#* }" = "True" ]; then
+      warn "THE TARGET NEVER ANSWERED — this is a connectivity problem, not a capacity result."
+      warn "Run 'crowdsim probe' against the same target before trying again."
+    fi
+  else
+    warn "no summary produced (k6 exit $k6rc) — see $log"
+  fi
+  return 0
+}
+
+record_history() {
+  if [ ! -f "$HISTORY_F" ]; then
+    printf 'run_id\tprofile\tbase_url\tshape\tpeak\taborted\treqs\trps\tfailed\tp95\te504\tgen_ok\n' > "$HISTORY_F"
+  fi
+  python3 - "$1" >> "$HISTORY_F" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+f = lambda x: '' if x is None else x
+print('\t'.join(str(f(v)) for v in [
+    d['run_id'], d.get('profile'), d['base_url'], d['shape'], d['peak_rps_user_target'],
+    d['aborted'], d['requests'], round(d['rps_avg'], 1), round(d['failed_rate'], 4),
+    round(d['dur']['p95'] or 0), d['e504'], d['generator_ok']]))
+PY
+}
+
+cmd_history() {
+  if [ -f "$HISTORY_F" ]; then column -t -s $'\t' "$HISTORY_F"; else say "no runs yet ($HISTORY_F)"; fi
+}
+
+notify_slack() {
+  local hook="${CROWDSIM_SLACK_WEBHOOK:-}"
+  if [ -z "$hook" ]; then warn "--slack given but CROWDSIM_SLACK_WEBHOOK is unset"; return 0; fi
+  python3 - "$1" "$hook" <<'PY'
+import json, sys, urllib.request
+d = json.load(open(sys.argv[1]))
+pct = lambda x: 'n/a' if x is None else f'{x*100:.2f}%'
+head = '⛔ aborted by the brake' if d['aborted'] else '✅ completed'
+if not d.get('generator_ok'): head = '⚠️ INVALID (generator did not hold the rate)'
+txt = (f"*crowdsim — {d.get('profile')} — run {d['run_id']}*  {head}\n"
+       f"target `{d['base_url']}` · shape {d['shape']} · requested peak {d['peak_rps_user_target']} req/s\n"
+       f"{d['requests']} requests · {d['rps_avg']:.1f} req/s · failed {pct(d['failed_rate'])} · "
+       f"p95 {round(d['dur']['p95'] or 0)} ms · 504 {d['e504']} · 502 {d['e502']}")
+req = urllib.request.Request(sys.argv[2], data=json.dumps({'text': txt}).encode(),
+                             headers={'Content-Type': 'application/json'})
+try:
+    urllib.request.urlopen(req, timeout=10).read()
+    print('  ✅ slack recap sent')
+except Exception as e:
+    print(f'  ⚠️  slack recap failed: {e}')
+PY
+}
+
+# ─────────────────────────────── cache-ab ───────────────────────────────────────────────────────────
+cmd_cache_ab() {
+  need_profile; resolve_profile; resolve_target; gate_allowlist
+  if ! command -v docker >/dev/null 2>&1; then die "cache-ab needs docker" 5; fi
+  local origin_host="${HOST_HEADER:-$(printf '%s' "$BASE_URL" | sed -E 's#^[a-z]+://##; s#[:/].*$##')}"
+  local origin_addr; origin_addr="${BYPASS#*=}"
+  if [ -z "$origin_addr" ]; then origin_addr="$origin_host"; fi
+  say "▶ cache-ab: two nginx legs against $origin_host ($origin_addr), TTL ${TTL}s"
+  say "  see cache-ab/README.md — the legs are yours to edit; the point is comparing YOUR candidate"
+  say "  config against as-is on the same origin, at the same time, with the same pool."
+  ( cd "$ROOT/cache-ab" && ORIGIN_ADDR="$origin_addr" ORIGIN_HOST="$origin_host" CACHE_TTL="$TTL" \
+      docker compose up -d --force-recreate )
+  say ""
+  say "  legs up. Now run the load against each and compare:"
+  say "      crowdsim load --profile $PROFILE_F --base-url http://127.0.0.1:8081 --peak $PEAK   # as-is"
+  say "      crowdsim load --profile $PROFILE_F --base-url http://127.0.0.1:8082 --peak $PEAK   # candidate"
+  say "  then:  cd $ROOT/cache-ab && docker compose down"
+}
+
+case "$CMD" in
+  doctor)   cmd_doctor;;
+  discover) cmd_discover;;
+  probe)    resolve_profile; cmd_probe;;
+  load)     cmd_load;;
+  cache-ab) cmd_cache_ab;;
+  history)  cmd_history;;
+  *)        die "unknown subcommand: $CMD (try --help)" 2;;
+esac

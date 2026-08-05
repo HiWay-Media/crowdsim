@@ -1,0 +1,53 @@
+# Cache A/B — two reverse proxies, identical except for the change under evaluation, in front of the
+# SAME origin, loaded at the same time with the same URL pool.
+#
+# WHY THIS AND NOT "just enable the cache and see": a cache config change is judged by its hit ratio and
+# by the offload it produces at the origin, and both depend on the *traffic mix*. Enabling it in
+# production and eyeballing a dashboard conflates the change with whatever the traffic happened to do
+# that hour. Two legs, same second, same pool, gives you a ratio you can defend.
+#
+# ⚠️ Use these containers to compare the two LEGS against each other, never to measure absolute nginx
+#    performance: the image here will not match the version and tuning of your production proxy. Pin the
+#    image to your production minor if you can. The cache directives used below have been stable across
+#    nginx versions for years, so the comparison holds even when the version does not match.
+#
+# NGINX_ENVSUBST_FILTER restricts substitution to our three variables: without the filter, envsubst
+# would also eat nginx's own $host / $args / $uri.
+
+name: crowdsim-cache-ab
+
+x-leg: &leg
+  image: nginx:1.26-alpine
+  environment: &leg-env
+    ORIGIN_ADDR: "${ORIGIN_ADDR:?set ORIGIN_ADDR to the origin host or IP}"
+    ORIGIN_HOST: "${ORIGIN_HOST:?set ORIGIN_HOST to the Host/SNI the origin expects}"
+    CACHE_TTL: "${CACHE_TTL:-10}"
+    NGINX_ENVSUBST_FILTER: "^(ORIGIN_ADDR|ORIGIN_HOST|CACHE_TTL)$$"
+    NGINX_ENVSUBST_OUTPUT_DIR: /etc/nginx/conf.d
+  tmpfs:
+    # tmpfs, not a volume: cache on disk would make you measure your disk. Size it above the working
+    # set you expect to cache in one run, or you will measure evictions instead of hits.
+    - /tmp/nginx:size=2g
+
+services:
+  # LEG A — "as is". Replace this template with a faithful copy of your production proxy config,
+  # changing only the upstream. If your production config caches nothing, that is the point: leg A is
+  # the baseline you have to beat, whatever it currently is.
+  asis:
+    <<: *leg
+    container_name: crowdsim-ab-asis
+    ports: ["8081:8080"]
+    volumes:
+      - ./asis.conf.template:/etc/nginx/templates/default.conf.template:ro
+
+  # LEG B — the candidate. Keep the diff against leg A as SMALL as you can defend: one behavioural
+  # change per A/B, or you will not know which line bought you the offload.
+  candidate:
+    <<: *leg
+    container_name: crowdsim-ab-candidate
+    ports: ["8082:8080"]
+    volumes:
+      - ./candidate.conf.template:/etc/nginx/templates/default.conf.template:ro
+
+  # Add further legs by copying the block above with a new template and port — useful when you want to
+  # compare a full fix against the narrower subset of it that you can actually ship this week.
