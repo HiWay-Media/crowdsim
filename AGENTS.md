@@ -102,6 +102,8 @@ in questo repository.
 - Immagine k6 pinnata (`grafana/k6:0.52.0`) e `ENTRYPOINT []` resettato (l'entrypoint originale e k6
   stesso, ma qui e crowdsim a pilotare k6). Dipendenze runtime: `bash`, `curl`, `python3`.
 - Parsing JSON solo con `python3` inline (no `jq`: non e nell'immagine k6). Non introdurre `jq`.
+  Vale per `bin/crowdsim` e per il generatore; `scripts/sync-roadmap.sh` usa `gh` e `jq` di proposito
+  (gira solo su workstation/CI, non nell'immagine).
 - `CROWDSIM_SLACK_WEBHOOK` da env: mai un webhook hardcoded qui (e un repo pubblico). `/api/env` della
   GUI riporta solo se e configurato, mai il valore.
 - `cache-ab/candidate.conf.template` ignora il `Cache-Control` dell'origine: l'avviso in testa al file

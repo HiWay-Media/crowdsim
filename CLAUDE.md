@@ -98,6 +98,8 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
 - Immagine k6 pinnata (`grafana/k6:0.52.0`) e `ENTRYPOINT []` resettato (l'entrypoint originale è k6
   stesso, ma qui è crowdsim a pilotare k6). Dipendenze runtime: `bash`, `curl`, `python3`.
 - Parsing JSON solo con `python3` inline (no `jq`: non è nell'immagine k6). Non introdurre `jq`.
+  Vale per `bin/crowdsim` e per il generatore; `scripts/sync-roadmap.sh` usa `gh` e `jq` di proposito
+  (gira solo su workstation/CI, non nell'immagine).
 - `CROWDSIM_SLACK_WEBHOOK` da env: **mai** un webhook hardcoded qui (è un repo pubblico).
 - `cache-ab/candidate.conf.template` ignora il `Cache-Control` dell'origine: l'avviso in testa al file
   non si rimuove né si ammorbidisce.
