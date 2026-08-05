@@ -80,9 +80,16 @@ function targetName(v) {
  *   run          — the request body from the GUI
  *   profilePath  — an absolute path already resolved and checked by profiles.js
  *   profileName  — used as the confirmation phrase for the safe-peak override
+ *   opts.preview — build the line WITHOUT demanding the typed confirmation, for display only
+ *
+ * `preview` exists so the operator can read the exact command before committing to it, including the
+ * override flag while it is still being armed. It is safe precisely because it changes nothing else: the
+ * only caller that may pass it is the endpoint that spawns no process, and the check it skips is re-run in
+ * full when the run is actually started. It must never be reachable from POST /api/runs.
  */
-export function buildLoadArgs(run, profilePath, profileName) {
+export function buildLoadArgs(run, profilePath, profileName, opts) {
   const r = run || {};
+  const preview = Boolean(opts && opts.preview);
   const args = ['load', '--profile', profilePath];
 
   if (r.baseUrl) args.push('--base-url', baseUrl(r.baseUrl));
@@ -111,7 +118,7 @@ export function buildLoadArgs(run, profilePath, profileName) {
     // Deliberate friction. The CLI already demands the flag on the command line every time; the GUI is a
     // button, so it demands the profile name typed by hand for this specific run. Anything less and the
     // override becomes a checkbox someone leaves ticked.
-    if (String(r.confirm || '') !== String(profileName)) {
+    if (!preview && String(r.confirm || '') !== String(profileName)) {
       throw new InvalidRun('confirm',
         `going past the safe peak requires typing the profile name (“${profileName}”) as confirmation`);
     }

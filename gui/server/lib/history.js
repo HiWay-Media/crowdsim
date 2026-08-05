@@ -58,9 +58,30 @@ export function readSummary(outDir, runId) {
   try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch (e) { return null; }
 }
 
-export function readRunLog(outDir, runId) {
+export function readRunLog(outDir, runId, kind) {
   if (!RUN_ID.test(String(runId || ''))) return null;
-  try { return fs.readFileSync(path.join(outDir, `load-${runId}.log`), 'utf8'); } catch (e) { return null; }
+  const prefix = kind === 'probe' ? 'probe' : 'load';
+  try { return fs.readFileSync(path.join(outDir, `${prefix}-${runId}.log`), 'utf8'); } catch (e) { return null; }
+}
+
+/**
+ * The two preflight artefacts, as the driver wrote them. `probe` records the cache verdict per declared
+ * layer and the page weight; `discover` records what the sitemap offered and what was dropped.
+ *
+ * Read, never derived: the alternative is scraping the run log for numbers, which produces a table that
+ * disagrees with the file the next run reads back — and then two answers to the same question.
+ */
+export function readProbe(outDir, runId) {
+  return readArtifact(outDir, 'probe', runId);
+}
+
+export function readDiscover(outDir, runId) {
+  return readArtifact(outDir, 'discover', runId);
+}
+
+function readArtifact(outDir, prefix, runId) {
+  if (!RUN_ID.test(String(runId || ''))) return null;
+  try { return JSON.parse(fs.readFileSync(path.join(outDir, `${prefix}-${runId}.json`), 'utf8')); } catch (e) { return null; }
 }
 
 /**

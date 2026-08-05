@@ -18,7 +18,7 @@
 #   doctor      check the prerequisites on this machine and say what is missing (run this first)
 #   discover    fetch the sitemap and extract a pool of REAL URLs (404s do not load the app tier:
 #               testing non-existent URLs yields a false "it handles this beautifully")
-#   probe       preflight: reachability, cache headers hop by hop, MTU, weight of one page
+#   probe       preflight: reachability, a verdict per declared cache layer, weight of one page
 #   load        the load test
 #   cache-ab    A/B a candidate cache config: two local nginx legs against the same origin, one with
 #               the tweak under evaluation and one as-is → measured hit ratio and offload
@@ -356,6 +356,9 @@ cmd_discover() {
   if [ -z "$sitemap" ]; then die "profile has no discover.sitemap" 2; fi
   local strip; strip="$(pf discover.strip_prefix_regex)"
   local out="$OUT_DIR/pool-$RUN_ID.json"
+  # Announced the same way `probe` announces it, and for the same reason: the run id is how anything reading
+  # this afterwards — a person, or the GUI — finds the files this command wrote.
+  say "run: $RUN_ID  base: $BASE_URL"
   say "▶ discovering URLs from $sitemap (limit $LIMIT)"
   # The sitemap goes to a FILE, and python reads the file. It must not arrive on stdin: `python3 - <<PY`
   # takes the PROGRAM from stdin, so a pipe into it is silently discarded and sys.stdin.read() returns the
@@ -366,9 +369,14 @@ cmd_discover() {
     rm -f "$raw"
     die "the sitemap did not answer: $sitemap" 4
   fi
-  python3 - "$LIMIT" "${strip:-}" "$out" "$raw" <<'PY'
+  # The pool is the artefact a run consumes; the report next to it is the same thing as data — what the
+  # sitemap offered, what survived, and (with --verify) what was dropped and why. The GUI reads the report
+  # instead of scraping this log, which is the only way it can show a table that cannot drift from the run.
+  python3 - "$LIMIT" "${strip:-}" "$out" "$raw" \
+           "$OUT_DIR/discover-$RUN_ID.json" "$RUN_ID" "$BASE_URL" "$sitemap" <<'PY'
 import json, re, sys
 limit, strip, out, src = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+report, run_id, base, sitemap = sys.argv[5:9]
 raw = open(src, encoding='utf-8', errors='replace').read()
 locs = re.findall(r'<loc>\s*([^<\s]+)\s*</loc>', raw)
 if not locs:
@@ -382,12 +390,19 @@ for u in locs:
     if p not in paths: paths.append(p)
 paths = paths[:limit]
 json.dump(paths, open(out, 'w'), indent=1)
+json.dump({'run_id': run_id, 'base_url': base, 'sitemap': sitemap, 'pool_path': out,
+           'limit': limit, 'strip_prefix_regex': strip or None,
+           'loc_entries': len(locs), 'distinct': len(paths),
+           # Unverified means exactly that: nobody has asked these paths whether they render.
+           'verified': False, 'kept': None, 'dropped': []},
+          open(report, 'w'), indent=1)
 print(f"  {len(locs)} <loc> entries → {len(paths)} distinct paths → {out}")
 PY
   rm -f "$raw"
   if [ "$VERIFY" = "1" ]; then verify_pool "$out"; fi
 
   say ""
+  say "  report (same result as data, for the GUI and for later): $OUT_DIR/discover-$RUN_ID.json"
   if [ "$VERIFY" = "1" ]; then
     say "  Point a pool at the file:"
   else
@@ -423,7 +438,9 @@ verify_pool() {
   printf 'verified_at=%s\nbase_url=%s\n\n' "$RUN_ID" "$BASE_URL" >> "$report"
 
   local keep_file="$OUT_DIR/.verified-$RUN_ID.json"
+  local drop_file="$OUT_DIR/.dropped-$RUN_ID.tsv"
   : > "$keep_file.tmp"
+  : > "$drop_file"
   while IFS= read -r path; do
     [ -n "$path" ] || continue
     # -o /dev/null still transfers the body: a HEAD would be cheaper but plenty of frameworks do not
@@ -431,20 +448,44 @@ verify_pool() {
     code="$(curl "${curl_opts[@]}" -w '%{http_code}' "$BASE_URL$path" 2>/dev/null || echo 000)"
     case "$code" in
       2*)  kept=$((kept + 1)); printf '%s\n' "$path" >> "$keep_file.tmp" ;;
-      3*)  dropped=$((dropped + 1)); printf 'redirect %s  %s\n' "$code" "$path" >> "$report" ;;
-      000) dropped=$((dropped + 1)); printf 'timeout  --- %s\n' "$path" >> "$report" ;;
-      *)   dropped=$((dropped + 1)); printf 'status   %s  %s\n' "$code" "$path" >> "$report" ;;
+      3*)  dropped=$((dropped + 1)); printf 'redirect %s  %s\n' "$code" "$path" >> "$report"
+           printf '%s\tredirect\t%s\n' "$path" "$code" >> "$drop_file" ;;
+      000) dropped=$((dropped + 1)); printf 'timeout  --- %s\n' "$path" >> "$report"
+           printf '%s\ttimeout\t\n' "$path" >> "$drop_file" ;;
+      *)   dropped=$((dropped + 1)); printf 'status   %s  %s\n' "$code" "$path" >> "$report"
+           printf '%s\tstatus\t%s\n' "$path" "$code" >> "$drop_file" ;;
     esac
     sleep "$VERIFY_DELAY"
   done < <(python3 -c 'import json,sys
 for p in json.load(open(sys.argv[1])): print(p)' "$pool")
 
-  python3 - "$keep_file.tmp" "$pool" <<'PY'
-import json, sys
+  # The pool is rewritten to what survived, and the JSON report is completed with the same verdicts the
+  # text report carries — one measurement, two readers.
+  python3 - "$keep_file.tmp" "$pool" "$drop_file" "$OUT_DIR/discover-$RUN_ID.json" <<'PY'
+import json, os, sys
 paths = [l.rstrip('\n') for l in open(sys.argv[1]) if l.strip()]
 json.dump(paths, open(sys.argv[2], 'w'), indent=1)
+
+dropped = []
+try:
+    for line in open(sys.argv[3], encoding='utf-8'):
+        cells = line.rstrip('\n').split('\t')
+        if not cells or not cells[0]:
+            continue
+        dropped.append({'path': cells[0], 'reason': cells[1] if len(cells) > 1 else 'unknown',
+                        'status': int(cells[2]) if len(cells) > 2 and cells[2].isdigit() else None})
+except OSError:
+    pass
+
+report = sys.argv[4]
+try:
+    d = json.load(open(report, encoding='utf-8'))
+except Exception:
+    d = {}
+d.update({'verified': True, 'kept': len(paths), 'dropped': dropped})
+json.dump(d, open(report, 'w'), indent=1)
 PY
-  rm -f "$keep_file.tmp"
+  rm -f "$keep_file.tmp" "$drop_file"
 
   if [ "$dropped" = "0" ]; then
     ok "all $kept paths render"
@@ -482,14 +523,56 @@ print(p[0] if isinstance(p,list) and p else "/")' "$RESOLVED" 2>/dev/null || ech
       -w '%{http_code} %{time_starttransfer} %{size_download}\n' \
       "$BASE_URL$first" 2>/dev/null) || true
     say "status=$code  ttfb=${ttfb}s  bytes=$size"
-    # Also written as JSON: `load` reads it back to say what bandwidth the requested peak implies. Prose in
-    # a log is for a human reading this run; the number is for the run somebody starts next week.
+    # Also written as JSON, and it carries the cache verdict per layer as well as the weight. Prose in a log
+    # is for the human reading this run; the JSON is for `load` (which reads the weight back to say what
+    # bandwidth a peak implies) and for the GUI, which must show this as a table rather than make somebody
+    # re-read curl output to find out whether the proxy answered.
+    #
+    # Only the cache-relevant headers are stored, never the whole response: a probe against a real site can
+    # come back with Set-Cookie, and an archive under out/ is not the place for somebody's session.
     python3 - "$OUT_DIR/probe-$RUN_ID.json" "$RUN_ID" "$BASE_URL" "$first" \
-             "${code:-0}" "${ttfb:-0}" "${size:-0}" <<'PY'
-import json, sys
-dst, run_id, base, path, code, ttfb, size = sys.argv[1:8]
+             "${code:-0}" "${ttfb:-0}" "${size:-0}" "$OUT_DIR/.probe-hdr" "$RESOLVED" <<'PY'
+import json, re, sys
+dst, run_id, base, path, code, ttfb, size, hdr_file, profile = sys.argv[1:10]
+
+KEEP = ('cache-control', 'age', 'expires', 'etag', 'last-modified', 'vary', 'server',
+        'content-encoding', 'content-type', 'x-cache', 'cache-status', 'x-proxy-cache', 'x-souin')
+
+headers = {}
+try:
+    for line in open(hdr_file, encoding='utf-8', errors='replace'):
+        if ':' not in line:
+            continue
+        k, v = line.split(':', 1)
+        headers[k.strip().lower()] = v.strip()
+except OSError:
+    pass
+
+try:
+    declared = json.load(open(profile, encoding='utf-8')).get('cache_headers') or []
+except Exception:
+    declared = []
+
+# Same rule as k6/lib/classify.js layerHit, and the same three-valued answer: True hit, False miss,
+# None the header never appeared. None is NOT a miss — it usually means the profile names a header this
+# layer does not send, which is a profile bug that looks exactly like a cold cache.
+layers = []
+for l in declared:
+    if not isinstance(l, dict) or not l.get('label') or not l.get('header'):
+        continue
+    name = str(l['header']).lower()
+    pattern = l.get('hit') or 'hit'
+    value = headers.get(name)
+    hit = None if not value else bool(re.search(pattern, value, re.I))
+    layers.append({'label': l['label'], 'header': l['header'], 'hit_pattern': pattern,
+                   'value': value, 'hit': hit})
+
+kept = {k: v for k, v in headers.items()
+        if k in KEEP or k in {str(l.get('header', '')).lower() for l in declared if isinstance(l, dict)}}
+
 json.dump({'run_id': run_id, 'base_url': base, 'path': path,
-           'status': int(code or 0), 'ttfb_s': float(ttfb or 0), 'bytes': int(size or 0)},
+           'status': int(code or 0), 'ttfb_s': float(ttfb or 0), 'bytes': int(size or 0),
+           'headers': kept, 'layers': layers},
           open(dst, 'w'), indent=1)
 PY
     if [ "${code:-0}" -ge 400 ] 2>/dev/null || [ -z "${code:-}" ]; then
@@ -499,6 +582,34 @@ PY
     say "── response headers (cache state of every layer it crossed) ──"
     grep -iE '^(HTTP/|cache-control|age|x-cache|cache-status|x-proxy-cache|x-souin|vary|server|content-encoding)' \
       "$OUT_DIR/.probe-hdr" 2>/dev/null || say "(none captured)"
+    say ""
+    say "── the layers this profile declares ──"
+    # The verdict per declared layer, not just the raw headers, because "the header is not there" and "the
+    # header says MISS" send you to two different places: a profile to fix, or a cache to warm.
+    python3 - "$OUT_DIR/probe-$RUN_ID.json" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding='utf-8'))
+except Exception:
+    raise SystemExit
+layers = d.get('layers') or []
+if not layers:
+    print("  (this profile declares no cache_headers: no layer can be reported)")
+    raise SystemExit
+width = max(len(l['label']) for l in layers)
+absent = 0
+for l in layers:
+    if l['hit'] is None:
+        absent += 1
+        print(f"  {l['label']:<{width}}  {l['header']}: NOT PRESENT — nothing to classify")
+    else:
+        print(f"  {l['label']:<{width}}  {l['header']}: {l['value']} → "
+              f"{'HIT' if l['hit'] else 'MISS'} (matches /{l['hit_pattern']}/i)")
+if absent:
+    print(f"  ⚠️  {absent} declared header(s) never appeared. That is usually the wrong header NAME in the")
+    print("     profile rather than a cold cache — and a layer that never speaks is reported as unknown,")
+    print("     never as a miss, so it cannot quietly drag a hit ratio to zero.")
+PY
   } | tee "$log"
   rm -f "$OUT_DIR/.probe-hdr"
   local rc="${code:-0}"

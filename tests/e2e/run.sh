@@ -66,6 +66,22 @@ CROWDSIM_OUT="$OUT" "$ROOT/bin/crowdsim" probe --profile "$FAST_PROFILE" >/dev/n
 grep -qi 'x-proxy-cache' "$OUT"/probe-*.log || die "probe did not capture the cache header"
 ok "probe saw the cache headers"
 
+# The same measurement as data, which is what the GUI shows and what `load` reads back. nginx here declares
+# X-Proxy-Cache on every response and never X-Cache, so this leg pins down all three answers a layer can
+# give — hit, miss, and never spoke — against a real response rather than a fixture.
+python3 - "$(ls -1 "$OUT"/probe-*.json | tail -1)" <<'PY' || die "the probe JSON does not classify the layers"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d['status'] == 200, d
+assert d['bytes'] > 0, 'the page weight is what a peak gets multiplied by'
+layers = {l['label']: l for l in d['layers']}
+assert layers['proxy']['hit'] is True, layers['proxy']
+assert layers['cdn']['hit'] is None, ('a header that never appeared must be unknown, never a miss',
+                                      layers['cdn'])
+assert 'set-cookie' not in d['headers'], 'a run archive is not the place for somebody\'s session'
+print('  ✅ probe JSON: proxy HIT, cdn unknown (header absent), page weight recorded')
+PY
+
 # Small and short on purpose: this suite must be safe to run anywhere, including CI on a laptop.
 say "▶ leg 1 — load (peak 12 req/s, ~20s)"
 CROWDSIM_OUT="$OUT" "$ROOT/bin/crowdsim" load --profile "$FAST_PROFILE" \
@@ -148,6 +164,20 @@ check('3 of 5 render' in log, "the summary line does not say how many were kept"
 if fail:
     print('\n'.join('  ❌ ' + f for f in fail)); sys.exit(1)
 print('  ✅ 5 discovered, 3 kept, the 404 and the redirect dropped with reasons')
+PY
+
+# The JSON report carries the same verdicts as the text one. Two readers, one measurement: if these ever
+# disagree, the GUI is showing a table that the next run will not act on.
+python3 - "$(ls -1 "$OUT"/discover-*.json | tail -1)" <<'PY' || die "the discover JSON report does not match the run"
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d['verified'] is True, d
+assert d['loc_entries'] == 5 and d['distinct'] == 5, d
+assert d['kept'] == 3, d
+by_path = {x['path']: x for x in d['dropped']}
+assert by_path['/gone']['reason'] == 'status' and by_path['/gone']['status'] == 404, by_path
+assert by_path['/moved']['reason'] == 'redirect', by_path
+print('  ✅ discover JSON: verified, 3 kept, /gone 404 and /moved redirect recorded as data')
 PY
 
 # ─────────────────────────────── leg 2: the brake aborts ────────────────────────────────────────────

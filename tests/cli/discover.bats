@@ -101,3 +101,40 @@ PY
   [ "$status" -eq 3 ]
   [[ "$output" != *"unknown option"* ]]
 }
+
+@test "the result is written as data as well as prose, and the run id is announced so it can be found" {
+  # The GUI (and anything else reading afterwards) needs both: the run id in the output, and a report it can
+  # parse. Without the run id, discover-<run>.json exists and nothing knows its name — which is exactly the
+  # state this command was in until the GUI tried to read it.
+  run "$CROWDSIM" discover --profile "$PROFILE"
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ run:\ [0-9]{8}T[0-9]{6}Z ]]
+
+  local report
+  report="$(echo "$CROWDSIM_OUT"/discover-*.json)"
+  [ -f "$report" ]
+  python3 - "$report" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d['loc_entries'] == 6, d
+assert d['distinct'] == 5, d
+# Unverified must say so: nobody has asked these paths whether they render, and a pool of 404s measures
+# the app tier's error page at full speed.
+assert d['verified'] is False, d
+assert d['kept'] is None, d
+assert d['dropped'] == [], d
+assert d['pool_path'].endswith('.json'), d
+PY
+}
+
+@test "--limit is recorded in the report, so a truncated pool cannot look complete" {
+  run "$CROWDSIM" discover --profile "$PROFILE" --limit 2
+  [ "$status" -eq 0 ]
+  python3 - "$(echo "$CROWDSIM_OUT"/discover-*.json)" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+assert d['limit'] == 2, d
+assert d['distinct'] == 2, d
+assert d['loc_entries'] == 6, d   # what the sitemap offered is kept: 2 of 6 is the honest reading
+PY
+}

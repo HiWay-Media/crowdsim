@@ -139,6 +139,23 @@ this was noticed); too lenient and the rule is decoration. The rules are tested 
 - `gui/ui` is a static bundle; React is a devDependency because nothing imports it at runtime.
 - After changing `gui/ui`, `npm run gui:build` — `crowdsim serve` serves `gui/ui/dist`, and `doctor` warns
   when it is missing.
+- **One argv builder, two endpoints.** `POST /api/preview` and `POST /api/runs` both go through
+  `resolveArgv` in `app.js`, and `gui/server/lib/command.js` only *renders* that array. Never build a command
+  line in the UI: a preview assembled separately is a description of what the server probably does, and the
+  first time the two drift it is a wrong answer delivered just as somebody authorises real traffic. The
+  `preview` option exists to show the override flag while it is being armed; it skips only the typed
+  confirmation, and only on the path that spawns nothing.
+- **New output from a subcommand goes in a file, and the file gets read.** `probe` and `discover` write
+  `out/probe-<run>.json` and `out/discover-<run>.json`; the GUI reads them. Do not scrape the run log to
+  build a table — that produces a second answer to a question the next run will answer from the file. Every
+  subcommand that writes files must also *announce its run id*, since that is the only handle on them
+  (`probe` prints it inline, `load` on its own line, and the runner accepts both shapes; `discover` did not
+  print one at all, and its report was unreachable until it did).
+- **Run state lives in `out/gui-run.json`** so a restart can tell what happened. Measured, and worth knowing
+  before changing it: killing the server takes the driver and k6 down inside ~2 s, because the driver's
+  stdout is a pipe to the server. The child is deliberately not detached — a generator whose supervisor is
+  gone is one nobody can stop — so the common case after a crash is "this run was interrupted", not "this
+  run is still going". Both cases are handled in `runner.adopt()`.
 
 ## Releasing
 

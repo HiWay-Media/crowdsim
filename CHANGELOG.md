@@ -4,6 +4,68 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] — 2026-08-05
+
+The three GUI items of milestone v1.3.0, and a documented walkthrough with real screenshots. Writing that
+walkthrough found three bugs, which is the reason the rule about trying every documented step exists.
+
+### Added
+- **The command is readable before it runs** ([#22](https://github.com/HiWay-Media/crowdsim/issues/22)). The
+  run panel shows the argv the server will spawn, live as the form changes, pasteable into a terminal with
+  `CROWDSIM_ALLOW_TARGETS` included — without it the CLI exits 3 and the copy would confuse rather than help.
+  - **It is not assembled by the page.** `POST /api/preview` and `POST /api/runs` go through one
+    `resolveArgv`, and `gui/server/lib/command.js` only renders that array. A preview built separately is a
+    description of what the server probably does, and the first time the two drift it is a wrong answer
+    delivered exactly as somebody authorises real traffic. The test asserts array equality between what was
+    previewed and what was spawned, not similarity.
+  - The preview renders `--i-know-this-breaks-production` as soon as the box is ticked, and says you are
+    reading it armed. Nobody should have to type a confirmation in order to *read* what a flag will do —
+    and reading it buys nothing: the launch still demands the profile name, per run.
+  - It doubles as live validation: `peak: lots` comes back as a field error before the button exists.
+- **`probe` and `discover` come back as data**
+  ([#24](https://github.com/HiWay-Media/crowdsim/issues/24)). Both commands now write their result as JSON
+  next to their log, and the GUI renders tables from those files rather than scraping terminal output.
+  - `out/probe-<run>.json` carries a verdict per declared cache layer: the header, what it said, and whether
+    that counts as a hit under the profile's own pattern — with **three** answers, not two. *Never appeared*
+    is kept distinct from *miss*, because the first is a wrong header name in your profile and the second is
+    a cold cache, and reporting the first as a miss puts a confident 0% hit ratio next to a layer the request
+    never crossed. Same rule as `k6/lib/classify.js`, so the preflight and the run cannot disagree.
+  - Only cache-relevant headers are stored. A probe against a real site can come back with `Set-Cookie`, and
+    a run archive is not the place for somebody's session — asserted in the e2e suite.
+  - `out/discover-<run>.json` carries what the sitemap offered, what survived `--limit`, whether verification
+    ran, and every dropped path with its reason and status. `verified: false` is stated rather than implied.
+- **A restart no longer loses the run** ([#23](https://github.com/HiWay-Media/crowdsim/issues/23)), and the
+  page now says which of two things happened — see *Changed* for what was measured.
+  - `out/gui-run.json` holds one line of state: id, kind, pid, argv, run id. On startup the server checks it.
+  - A pid still alive is **adopted**: listed, counted for one-run-at-a-time (a rebuild must not become two
+    generators), stoppable by pid, and followed through the driver's own run log file. It never invents an
+    exit code — this server was not there when it ended.
+  - A stop that cannot be delivered says so and gives the command: `kill -INT <pid>`.
+- **A step-by-step [GUI guide](docs/gui.md) with eight screenshots**, all from real runs against a local
+  target, plus a troubleshooting table of symptom → cause → fix. Reloading the page keeps the last result,
+  and each tab is a link (`#run`, `#profiles`, `#history`).
+
+### Changed
+- **What happens when the GUI server dies was measured, and it is not what the issue assumed.** Kill the
+  server and the driver *and* k6 are gone within about two seconds: the driver's stdout is a pipe held by the
+  server, so the next write fails and `set -eo pipefail` takes the run down. The child is therefore
+  deliberately **not** detached — a load generator whose supervisor is gone is precisely the one nobody can
+  see and nobody can stop. So the common case after a crash is not "still running" but "interrupted", and the
+  page now states that plainly, recovers the driver's log from disk, and points at the archive instead of
+  showing an empty list. Adoption remains for the case where the process does outlive the server.
+
+### Fixed
+- **A probe run's own result was unreachable from the GUI.** The runner recognised only the run id shape
+  `load` prints (alone on a line) and not the one `probe` prints (inline with the base url), so a probe never
+  had a run id — and therefore no route to `out/probe-<run>.json`, the file with the answer in it. Both
+  shapes are now read, and prose that merely contains the word "run" still is not.
+- **`discover` never announced its run id at all**, so the report it writes existed under a name nothing
+  could know. It now prints it the same way `probe` does.
+- **Reloading the page threw away the finished run.** The effect that loads a profile also cleared the last
+  result, and it runs on first load too — wiping the run just restored from the server and leaving the page
+  looking like nothing had ever happened. Clearing now happens where it belongs: when somebody actually
+  selects a different profile, because a result belongs to the profile it came from.
+
 ## [1.6.2] — 2026-08-05
 
 CI failed on one wrong digit, and the interesting part is why no local run ever caught it: on macOS the CLI

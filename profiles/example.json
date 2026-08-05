@@ -100,7 +100,7 @@
                "g8j3s", "h2l7x", "j5n1z", "k9q4b", "m3s6d", "p7v0g"]
   },
 
-  "_cache_headers_comment": "Which response header tells you the cache state of each layer, and what counts as a hit. crowdsim reports a hit ratio per layer per class from these.",
+  "_cache_headers_comment": "Which response header tells you the cache state of each layer, and what counts as a hit. crowdsim reports a hit ratio per layer per class from these, and `probe` states a verdict per layer for one request. Three answers, not two: hit, miss, and NEVER APPEARED — the last one means this profile names a header the layer does not send, which looks exactly like a cold cache and is not. It is reported as unknown, never as a miss.",
   "cache_headers": [
     { "label": "proxy",  "header": "X-Proxy-Cache", "hit": "HIT|STALE|UPDATING|REVALIDATED" },
     { "label": "cdn",    "header": "X-Cache",       "hit": "Hit" },

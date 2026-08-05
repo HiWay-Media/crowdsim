@@ -18,7 +18,8 @@ import { spawnSync } from 'node:child_process';
 import { listProfiles, readProfile, writeProfile, deleteProfile, profilePath, BadProfile } from './profiles.js';
 import { validateProfile } from '../../../lib/validate.mjs';
 import { buildLoadArgs, buildProbeArgs, buildDiscoverArgs, InvalidRun, SHAPES, RSC_MODES } from './args.js';
-import { readHistory, readSummary, readRunLog, comparable } from './history.js';
+import { commandLine } from './command.js';
+import { readHistory, readSummary, readRunLog, comparable, readProbe, readDiscover } from './history.js';
 import { Runner, Busy } from './runner.js';
 
 export function createApp(opts) {
@@ -30,6 +31,11 @@ export function createApp(opts) {
   const runner = o.runner || new Runner({ bin: o.crowdsimBin, outDir, env: o.env });
 
   fs.mkdirSync(outDir, { recursive: true });
+
+  // Before serving anything: is a generator from a previous life of this server still running? If so it is
+  // adopted, which also means the one-run-at-a-time rule survives a restart — otherwise the first click
+  // after a rebuild would start a second generator against a target already under load.
+  if (o.adopt !== false) runner.adopt();
 
   const app = express();
   app.disable('x-powered-by');
@@ -105,8 +111,12 @@ export function createApp(opts) {
   }));
 
   // ── runs ──────────────────────────────────────────────────────────────────────────────────────────
-  app.post('/api/runs', wrap((req, res) => {
-    const body = req.body || {};
+  //
+  // One function resolves a request into an argv, and both the preview and the launch go through it. If the
+  // preview were assembled separately — in the UI, or by a second builder here — it would be a description
+  // of what the server probably does, and the first time the two drifted the preview would be a lie told at
+  // exactly the wrong moment.
+  const resolveArgv = (body, opts) => {
     const kind = body.kind || 'load';
     if (['load', 'probe', 'discover'].indexOf(kind) === -1) {
       throw new InvalidRun('kind', 'kind must be load, probe or discover');
@@ -121,10 +131,35 @@ export function createApp(opts) {
       throw e;
     }
     const name = (read.parsed && read.parsed.name) || body.profile;
-    const argv = kind === 'load' ? buildLoadArgs(body, full, name)
+    const argv = kind === 'load' ? buildLoadArgs(body, full, name, opts)
       : kind === 'probe' ? buildProbeArgs(body, full)
         : buildDiscoverArgs(body, full);
+    return { kind, argv, profileName: name };
+  };
+
+  app.post('/api/runs', wrap((req, res) => {
+    const body = req.body || {};
+    // No preview option here: the typed confirmation is enforced on the path that actually spawns.
+    const { kind, argv } = resolveArgv(body);
     res.status(201).json(runner.start({ kind, argv, request: redact(body) }));
+  }));
+
+  // The command the operator is about to authorise. Spawns nothing, writes nothing, and is allowed to
+  // render the override flag while it is still being armed — reading it is the point.
+  app.post('/api/preview', wrap((req, res) => {
+    const body = req.body || {};
+    const { kind, argv } = resolveArgv(body, { preview: true });
+    const env = {};
+    if (process.env.CROWDSIM_ALLOW_TARGETS) env.CROWDSIM_ALLOW_TARGETS = process.env.CROWDSIM_ALLOW_TARGETS;
+    res.json({
+      kind,
+      argv,
+      command: commandLine(argv, { bin: 'crowdsim', env }),
+      env,
+      // Stated rather than implied: the preview shows the flag as armed, the launch still asks for the
+      // profile name to be typed.
+      needs_confirmation: Boolean(body.force),
+    });
   }));
 
   app.get('/api/runs', wrap((req, res) => res.json({ runs: runner.list(), active: runner.active() ? runner.get(runner.active().id) : null })));
@@ -133,7 +168,14 @@ export function createApp(opts) {
     const run = runner.get(req.params.id);
     if (!run) return res.status(404).json({ error: 'no such run' });
     const summary = run.run_id ? readSummary(outDir, run.run_id) : null;
-    res.json(Object.assign({}, run, { log: runner.logOf(req.params.id), summary }));
+    // The preflight artefacts, when the driver wrote them. `probe` and `discover` answer questions that
+    // decide whether a load run is worth doing at all, and they are data on disk — not something the page
+    // should be reconstructing out of terminal output.
+    const artifacts = run.run_id ? {
+      probe: run.kind === 'probe' ? readProbe(outDir, run.run_id) : null,
+      discover: run.kind === 'discover' ? readDiscover(outDir, run.run_id) : null,
+    } : { probe: null, discover: null };
+    res.json(Object.assign({}, run, { log: runner.logOf(req.params.id), summary, artifacts }));
   }));
 
   app.post('/api/runs/:id/stop', wrap((req, res) => {
@@ -155,13 +197,31 @@ export function createApp(opts) {
       'X-Accel-Buffering': 'no',
     });
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    for (const line of runner.logOf(id) || []) send('line', { line });
-    const onLine = (e) => { if (e.id === id) send('line', { line: e.line }); };
+    let sent = 0;
+    for (const line of runner.logOf(id) || []) { send('line', { line }); sent++; }
+    const onLine = (e) => { if (e.id === id) { send('line', { line: e.line }); sent++; } };
     const onEnd = (e) => { if (e.id === id) { send('end', e); res.end(); } };
     runner.on('line', onLine);
     runner.on('end', onEnd);
+
+    // An adopted run produces no 'line' events here: this server is not the parent of that process, so its
+    // output never passes through. Follow the driver's log file instead — same lines, one hop later.
+    let follow = null;
+    if (run.adopted && run.status === 'running') {
+      follow = setInterval(() => {
+        const lines = runner.logOf(id) || [];
+        for (let i = sent; i < lines.length; i++) send('line', { line: lines[i] });
+        if (lines.length > sent) sent = lines.length;
+      }, 1000);
+      if (follow.unref) follow.unref();
+    }
+
     if (run.status !== 'running') { send('end', run); res.end(); }
-    req.on('close', () => { runner.off('line', onLine); runner.off('end', onEnd); });
+    req.on('close', () => {
+      runner.off('line', onLine);
+      runner.off('end', onEnd);
+      if (follow) clearInterval(follow);
+    });
   });
 
   // ── history (written by the driver, read-only here) ────────────────────────────────────────────────

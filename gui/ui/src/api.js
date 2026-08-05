@@ -44,6 +44,9 @@ export const api = {
   saveProfile: (name, raw, force) => call('PUT', `/api/profiles/${encodeURIComponent(name)}`, { raw, force: !!force }),
   deleteProfile: (name) => call('DELETE', `/api/profiles/${encodeURIComponent(name)}`),
   validate: (raw) => call('POST', '/api/validate', { raw }),
+  // Preview and launch go to two endpoints that share one argv builder on the server. Never render a
+  // command line here: see components/CommandPreview.jsx.
+  preview: (body) => call('POST', '/api/preview', body),
   startRun: (body) => call('POST', '/api/runs', body),
   runs: () => call('GET', '/api/runs'),
   run: (id) => call('GET', `/api/runs/${encodeURIComponent(id)}`),

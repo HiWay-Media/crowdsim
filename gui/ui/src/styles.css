@@ -186,3 +186,15 @@ table { width: 100%; border-collapse: collapse; }
   .grid { grid-template-columns: 1fr; }
   .sidenav { width: 190px; }
 }
+
+/* ── the command preview ─────────────────────────────────────────────────────────────────────────── */
+/* Rendered by the server (POST /api/preview), never assembled in the page: see CommandPreview.jsx. */
+.preview h2 { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
+.command {
+  background: #080b0f; border: 1px solid var(--accent); border-radius: 8px; padding: 12px;
+  font-family: var(--mono); font-size: 12.5px; white-space: pre-wrap; word-break: break-all; margin: 0;
+  color: #e7f0ff;
+}
+.data tbody tr.static:hover { background: transparent; cursor: default; }
+h3 { font-size: 12px; text-transform: uppercase; letter-spacing: .5px; color: var(--dim);
+     margin: 18px 0 6px; font-weight: 600; }

@@ -10,8 +10,29 @@ const TABS = [
   { id: 'history', label: 'History', hint: 'does the knee move?' },
 ];
 
+const TAB_IDS = TABS.map((t) => t.id);
+
 export default function App() {
-  const [tab, setTab] = useState('run');
+  // The tab lives in the URL fragment, so a reload keeps you where you were and a link can point at
+  // "#history" — which is also how the documentation screenshots are taken.
+  const [tab, setTab] = useState(() => {
+    const fromHash = String(window.location.hash || '').replace('#', '');
+    return TAB_IDS.indexOf(fromHash) === -1 ? 'run' : fromHash;
+  });
+
+  useEffect(() => {
+    if (window.location.hash !== `#${tab}`) window.location.hash = tab;
+  }, [tab]);
+
+  useEffect(() => {
+    const onHash = () => {
+      const id = String(window.location.hash || '').replace('#', '');
+      if (TAB_IDS.indexOf(id) !== -1) setTab(id);
+    };
+    window.addEventListener('hashchange', onHash);
+    return () => window.removeEventListener('hashchange', onHash);
+  }, []);
+
   const [env, setEnv] = useState(null);
   const [profiles, setProfiles] = useState([]);
   const [error, setError] = useState(null);

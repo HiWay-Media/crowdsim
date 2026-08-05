@@ -2,6 +2,8 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { api, ApiError, streamRun } from '../api.js';
 import MixBars from './MixBars.jsx';
 import SummaryCard from './SummaryCard.jsx';
+import CommandPreview from './CommandPreview.jsx';
+import { ProbeTable, DiscoverTable } from './PreflightTables.jsx';
 
 /*
  * The run launcher. Everything expensive to get wrong is shown BEFORE the button: which host will be hit,
@@ -26,6 +28,7 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
   const [log, setLog] = useState([]);
   const [error, setError] = useState(null);
   const [summary, setSummary] = useState(null);
+  const [artifacts, setArtifacts] = useState(null);
   const logRef = useRef(null);
 
   const usable = profiles.filter((p) => p.ok);
@@ -41,9 +44,11 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
       setProfile(p);
       const s = p.validation ? p.validation.summary : null;
       setTarget((s && s.default_target) || (s && s.targets[0] && s.targets[0].name) || '');
+      // Switching profile must disarm the override — it is granted for one run against one profile. The
+      // last result is NOT cleared here: this effect also runs on first load, where it would wipe the run
+      // just restored from the server and leave the page looking like nothing had ever happened.
       setForce(false);
       setConfirm('');
-      setSummary(null);
     }).catch((e) => setError(e.message));
     return () => { alive = false; };
   }, [profileName]);
@@ -51,6 +56,41 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
   useEffect(() => {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
+
+  // What this page shows on load is what the server says is going on — not an empty form.
+  //
+  // Two cases, and neither used to be handled. A generator may still be RUNNING that this page did not
+  // start: the server keeps one line of state in out/ and adopts it after a restart, so a rebuilt server
+  // must not show an idle form while a target is under load (the operator's next click would come back as
+  // a 409 they cannot explain). And a run may have FINISHED: reloading the tab used to throw away the log,
+  // the summary and the preflight tables, which are all still on the server.
+  useEffect(() => {
+    let alive = true;
+    api.runs().then(async (r) => {
+      const last = r.active || (r.runs && r.runs[0]) || null;
+      if (!alive || !last) return;
+      setRun(last);
+      try {
+        const full = await api.run(last.id);
+        if (!alive) return;
+        setLog(full.log || []);
+        setSummary(full.summary || null);
+        setArtifacts(full.artifacts || null);
+      } catch (e) { /* the run record is enough */ }
+      if (!r.active) return;
+      onActiveRun(r.active);
+      streamRun(r.active.id, (line) => setLog((l) => [...l, line]), async (ended) => {
+        setRun(ended);
+        onActiveRun(null);
+        try {
+          const full = await api.run(ended.id);
+          setSummary(full.summary || null);
+          setArtifacts(full.artifacts || null);
+        } catch (e) { /* the run record is enough */ }
+      });
+    }).catch(() => { /* an empty run list is the normal case */ });
+    return () => { alive = false; };
+  }, []);
 
   const sum = profile && profile.validation ? profile.validation.summary : null;
   const chosen = sum ? sum.targets.find((t) => t.name === target) : null;
@@ -73,34 +113,47 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }));
 
+  // One body, two destinations: the preview endpoint and the launch endpoint. Building it twice is how a
+  // preview starts describing a different run from the one that happens.
+  const buildBody = (kind, extra) => ({
+    kind,
+    profile: profileName,
+    target: target || undefined,
+    ...(kind === 'load' ? {
+      peak: Number(form.peak),
+      start: form.start === '' ? undefined : Number(form.start),
+      steps: form.steps === '' ? undefined : Number(form.steps),
+      stepDur: form.stepDur || undefined,
+      hold: form.hold === '' ? undefined : form.hold,
+      shape: form.shape,
+      rscMode: form.rscMode,
+      maxP95: form.maxP95 === '' ? undefined : Number(form.maxP95),
+      max5xx: form.max5xx === '' ? undefined : Number(form.max5xx),
+      skipClasses: form.skipClasses || undefined,
+      touchAndGo: form.touchAndGo,
+      insecure: form.insecure,
+      slack: form.slack,
+      force,
+      confirm: force ? confirm : undefined,
+    } : {}),
+    ...(extra || {}),
+  });
+
+  // The preview never carries the typed phrase: it is not needed to read the line, and echoing it back on
+  // every keystroke would put it in a request log for no reason.
+  const previewBody = useMemo(() => {
+    const b = buildBody('load');
+    delete b.confirm;
+    return b;
+  }, [profileName, target, form, force]);
+
   async function launch(kind, extra) {
     setError(null);
     setLog([]);
     setSummary(null);
+    setArtifacts(null);
     try {
-      const body = {
-        kind,
-        profile: profileName,
-        target: target || undefined,
-        ...(kind === 'load' ? {
-          peak: Number(form.peak),
-          start: form.start === '' ? undefined : Number(form.start),
-          steps: form.steps === '' ? undefined : Number(form.steps),
-          stepDur: form.stepDur || undefined,
-          hold: form.hold === '' ? undefined : form.hold,
-          shape: form.shape,
-          rscMode: form.rscMode,
-          maxP95: form.maxP95 === '' ? undefined : Number(form.maxP95),
-          max5xx: form.max5xx === '' ? undefined : Number(form.max5xx),
-          skipClasses: form.skipClasses || undefined,
-          touchAndGo: form.touchAndGo,
-          insecure: form.insecure,
-          slack: form.slack,
-          force,
-          confirm: force ? confirm : undefined,
-        } : {}),
-        ...(extra || {}),
-      };
+      const body = buildBody(kind, extra);
       const started = await api.startRun(body);
       setRun(started);
       onActiveRun(started);
@@ -110,6 +163,7 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
         try {
           const full = await api.run(ended.id);
           setSummary(full.summary || null);
+          setArtifacts(full.artifacts || null);
         } catch (e) { /* the run record is enough */ }
       });
     } catch (e) {
@@ -128,7 +182,16 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
         <div className="row">
           <label>
             Profile
-            <select value={profileName} onChange={(e) => setProfileName(e.target.value)}>
+            <select
+              value={profileName}
+              onChange={(e) => {
+                // A result belongs to the profile it came from: keeping it on screen next to a different
+                // profile's form is how somebody reads last week's number as today's.
+                setProfileName(e.target.value);
+                setSummary(null);
+                setArtifacts(null);
+              }}
+            >
               {usable.map((p) => <option key={p.name} value={p.name}>{p.name}{p.title ? ` — ${p.title}` : ''}</option>)}
             </select>
           </label>
@@ -222,10 +285,19 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
           <button disabled={busy || !profileName} onClick={() => launch('load', { dryRun: true })}>Dry run</button>
           <button disabled={busy || !profileName} onClick={() => launch('probe')}>Probe</button>
           <button disabled={busy || !profileName} onClick={() => launch('discover', { limit: 400 })}>Discover URLs</button>
-          {busy ? <button className="danger" onClick={() => api.stopRun(run.id)}>Stop</button> : null}
+          {busy ? (
+            <button
+              className="danger"
+              onClick={() => api.stopRun(run.id).then(setRun).catch((e) => setError(e.message))}
+            >
+              Stop
+            </button>
+          ) : null}
         </div>
         {error ? <div className="banner bad">{error}</div> : null}
       </section>
+
+      <CommandPreview body={previewBody} disabled={!profileName} />
 
       {run ? (
         <section className="card wide">
@@ -233,12 +305,30 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
             Run <span className="mono">{run.run_id || run.id}</span>
             <span className={`state ${run.status}`}>{run.status}{run.exit_code !== null && run.exit_code !== undefined ? ` · exit ${run.exit_code}` : ''}</span>
           </h2>
+          {run.adopted && run.interrupted ? (
+            <div className="banner warn">
+              <strong>This run was interrupted: the server it was started from stopped while it was in
+              flight</strong> (pid {run.pid} is gone). The generator stopped with it — by design, because the
+              driver writes to a pipe held by this server, and a load generator nobody supervises is one
+              nobody can stop. Whatever was written before the interruption is in the output directory; the
+              exit code cannot be known from here.
+            </div>
+          ) : run.adopted ? (
+            <div className="banner warn">
+              <strong>This run was started by an earlier life of this server</strong> (pid {run.pid}) and is
+              still going, so it was picked up again. The log below is the driver's own run log file, and the
+              exit code will not be reported here — read the summary. Stop still works.
+            </div>
+          ) : null}
+          {run.stop_error ? <div className="banner bad">{run.stop_error}</div> : null}
           {run.status === 'failed' && run.exit_code === 3
             ? <div className="banner bad">A safety gate refused this run. Nothing was generated.</div> : null}
           <pre className="log" ref={logRef}>{log.join('\n')}</pre>
         </section>
       ) : null}
 
+      {artifacts && artifacts.probe ? <ProbeTable probe={artifacts.probe} /> : null}
+      {artifacts && artifacts.discover ? <DiscoverTable discover={artifacts.discover} /> : null}
       {summary ? <SummaryCard summary={summary} /> : null}
     </div>
   );

@@ -144,7 +144,8 @@ crowdsim load --profile p.json --peak 60          # stays under the profile's sa
 ## The GUI
 
 `crowdsim serve` puts a page in front of the same CLI: pick a profile and a target, see the mix the peak
-implies, launch, watch the log stream, read the result, compare it with previous runs.
+implies, read the exact command before agreeing to it, launch, watch the log stream, read the result, compare
+it with previous runs. The step-by-step guide, with screenshots, is **[docs/gui.md](docs/gui.md)**.
 
 ```bash
 npm install && npm run gui:build      # once
@@ -157,20 +158,8 @@ Running it in Docker has one wrinkle worth knowing — inside a container, bindi
 "reachable by nobody", so the bind moves to `0.0.0.0` and the reachability decision moves to the port
 publication. [docs/docker.md §4](docs/docker.md#4-using-the-gui) covers it.
 
-```
- ▮▮ crowdsim            k6 v0.52.0   allowlist www.example.test   output ./out
- ┌────────────┬──────────────────────────────────────────────────────────────────┐
- │ New run  ◀ │  TARGET                          RATE                            │
- │ Profiles   │  profile  my-site.json           peak  [ 60] req/s               │
- │ History    │  target   edge ▾                 steps [  4] × [60s]  hold [120s]│
- │            │  base url https://www.example…   shape mix ▾   rsc repeat ▾      │
- │ ● running  │  bypass   CDN skipped            ─────────────────────────────── │
- │            │  allowlist ✅ authorised          rsc_page ████████ 25.9 req/s    │
- │            │                                  html     ████     13.9 req/s    │
- │            │  [ Run ] [Dry run] [Probe]       static   ██        5.9 req/s    │
- └────────────┴──────────────────────────────────────────────────────────────────┘
-   ramping 15 → 60 … p95 780 ms … 0 dropped
-```
+![The crowdsim run form: target and allowlist verdict, the rate, the mix a peak implies, and the exact command
+that will run](docs/assets/screens/gui-run-form.png)
 
 It is a form over `bin/crowdsim`, not a second implementation. Every run is a child process of the CLI
 with the same gates, writing the same `out/` directory — so a run launched from a terminal and a run
@@ -179,8 +168,15 @@ launched from the page are the same kind of object, and appear in the same histo
 - **The gates are not re-implemented, and cannot be bypassed.** An unlisted host is refused with exit 3
   and the page says so. Above the profile's safe peak the override needs the checkbox *and* the profile
   name typed by hand, for that run: nothing about it is remembered.
-- **One run at a time.** A second Run is a 409 that names the run already in flight. Two generators
-  against one target produce twice the load nobody agreed to and two results that are both invalid.
+- **One run at a time**, and it survives a restart. A second Run is a 409 that names the run already in
+  flight. Two generators against one target produce twice the load nobody agreed to and two results that
+  are both invalid.
+- **The command is readable before it runs.** The page shows the argv the server will spawn — rendered by
+  the server from that same argv, not reassembled by the page, so it cannot describe a different run.
+  Defaults you cannot see are decisions somebody else made for you.
+- **`probe` and `discover` come back as tables, not terminal output.** Per declared cache layer: the header,
+  what it said, and whether that counts as a hit — with *the header never appeared* kept distinct from
+  *miss*, because the first is a wrong header name in your profile and the second is a cold cache.
 - **Loopback by default.** A page that can generate 500 req/s at your production has no business on a
   shared network. Another bind address is allowed, but only with `CROWDSIM_GUI_TOKEN` set.
 - **Stop is a SIGINT**, so k6 winds down and still writes the summary. A killed run is a burned window.

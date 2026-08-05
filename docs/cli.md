@@ -51,6 +51,11 @@ hashes.
 If the document has no `<loc>` entries at all, `discover` exits 4 and says so, rather than writing an empty
 pool that surfaces much later as "every class was dropped for want of a non-empty pool".
 
+The same result is written as data, next to the pool, in `out/discover-<run>.json`: what the sitemap offered,
+what survived the limit, whether verification ran, and every dropped path with its reason and status. It is
+what the GUI reads, and it makes `verified: false` impossible to miss — an unverified pool is a pool nobody
+has asked whether it renders.
+
 ### `probe`
 
 Preflight against one target: status, TTFB, page size, and every cache-relevant response header, saved to
@@ -60,6 +65,27 @@ measurement.
 
 The JSON is what makes `load` able to tell you the bandwidth a peak implies (below). Prose in a log is for
 whoever reads this run; the number is for the run somebody starts next week.
+
+It also states a verdict for every layer the profile declares in `cache_headers`, which is the part worth
+reading twice:
+
+```
+── the layers this profile declares ──
+  proxy  X-Proxy-Cache: HIT → HIT (matches /HIT|STALE|UPDATING/i)
+  souin  Cache-Status: souin; fwd=miss → MISS (matches /hit/i)
+  cdn    X-Cache: NOT PRESENT — nothing to classify
+  ⚠️  1 declared header(s) never appeared. That is usually the wrong header NAME in the
+     profile rather than a cold cache — and a layer that never speaks is reported as unknown,
+     never as a miss, so it cannot quietly drag a hit ratio to zero.
+```
+
+Three answers, not two: hit, miss, and *never spoke*. The third is the one that matters, because a header
+name that is wrong in the profile looks exactly like a cache that is not working — and reporting it as a miss
+would put a confident 0% hit ratio next to a layer the request never crossed. Same rule as the load
+generator's own classification (`k6/lib/classify.js`), so the two cannot disagree.
+
+Only cache-relevant headers are stored in the JSON. A probe against a real site can come back with
+`Set-Cookie`, and a run archive is not the place for somebody's session.
 
 ### `load`
 
@@ -198,14 +224,18 @@ out/
   summary-<run_id>.json    the result — see Reading results
   load-<run_id>.log        the full run log
   probe-<run_id>.log       the preflight
-  probe-<run_id>.json      the same, machine-readable (the page weight feeds the bandwidth estimate)
+  probe-<run_id>.json      the same as data: page weight + a verdict per declared cache layer
   pool-<run_id>.json       what discover found
   pool-<run_id>.report.txt what --verify dropped, and why
+  discover-<run_id>.json   the same as data: offered, kept, dropped, and whether it was verified
   profile-<run_id>.json    the profile as resolved for that run (pools inlined)
   history.tsv              one appended line per run
+  gui-run.json             written by `serve` only: the run in flight, so a restart can find it
 ```
 
-`<run_id>` is a UTC timestamp, `20260805T093710Z`. `out/` is gitignored: it names your hosts.
+`<run_id>` is a UTC timestamp, `20260805T093710Z`. Every subcommand that writes files announces its run id in
+its output, which is how anything reading afterwards — you, or the GUI — finds them. `out/` is gitignored: it
+names your hosts.
 
 ## See also
 
