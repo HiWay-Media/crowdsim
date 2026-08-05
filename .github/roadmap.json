@@ -1,5 +1,5 @@
 {
-  "_comment": "Roadmap source of truth. `scripts/sync-roadmap.sh` turns this file into GitHub milestones, labels and issues, and the roadmap-sync workflow replays it on every push to main. The sync is idempotent and additive: it creates what is missing and re-aligns milestone and labels, it never closes an issue and never rewrites a body somebody edited by hand. Each issue is matched by its `key`, not by its title, so a title can be reworded here without opening a duplicate.",
+  "_comment": "Roadmap source of truth. `scripts/sync-roadmap.sh` turns this file into GitHub milestones, labels and issues, and the roadmap-sync workflow replays it on every push to main. The sync is idempotent and additive: it creates what is missing and re-aligns milestone and labels, it never closes an issue and never rewrites a body somebody edited by hand. Each issue is matched by its `key`, not by its title, so a title can be reworded here without opening a duplicate. Consequence worth remembering: editing a `body` here does NOT update an issue that already exists — put the change in a comment on the issue as well.",
 
   "labels": [
     { "name": "area:cli",       "color": "1d76db", "description": "bin/crowdsim, the bash driver" },
@@ -9,17 +9,22 @@
     { "name": "area:ci",        "color": "c2e0c6", "description": "CI, image builds, release automation" },
     { "name": "area:cache-ab",  "color": "bfd4f2", "description": "the two-leg reverse-proxy A/B harness" },
     { "name": "area:release",   "color": "d4c5f9", "description": "versioning, tags, CHANGELOG" },
-    { "name": "safety",         "color": "b60205", "description": "touches a safety gate — review with care" }
+    { "name": "safety",         "color": "b60205", "description": "touches a safety gate — review with care" },
+    { "name": "validity",       "color": "e99695", "description": "affects whether a run's numbers mean anything" }
   ],
 
   "milestones": [
     {
       "title": "v1.1.0",
-      "description": "Modular generator and a test suite that generates no load. Split k6/live-event.js into k6/lib, cover the mix, cache classification and summary logic with unit tests, cover the safety gates with CLI tests, and run all of it in CI."
+      "description": "SHIPPED in release 1.1.0. Modular generator (k6/lib) and a test suite that generates no load: unit tests over the mix, cache classification and summary verdicts; bats tests over the safety gates and the exit-code contract."
     },
     {
       "title": "v1.2.0",
-      "description": "A browser front-end for the driver: browse profiles, launch a run, watch it, read the history. The GUI is a client of bin/crowdsim — it must not acquire a second, weaker copy of the safety gates."
+      "description": "SHIPPED EARLY, inside release 1.1.0. A browser front-end for the driver: profile editor with live validation, run launcher, live log, run archive. The GUI is a client of bin/crowdsim and holds no second copy of the safety gates. Because this scope landed in 1.1.0 there is no 1.2.0 release: the next one is 1.3.0."
+    },
+    {
+      "title": "v1.3.0",
+      "description": "Fewer ways to get a wrong answer, and no manual steps left in the loop. Prove the brake aborts a run end to end, warn before a run the generator cannot sustain, stop using URL pools nobody verified, turn a browser recording into a journey, and collapse the two profile validators into one — plus the GUI refinements that keep a click from being a decision made blind."
     },
     {
       "title": "Backlog",
@@ -52,24 +57,25 @@
         "The value of this suite is that it is the only place where a real k6 process, a real profile and a real HTTP origin meet — it is what catches an argument the wrapper composes but k6 rejects.",
         "",
         "**Done when**",
-        "- `tests/e2e/run.sh` brings up the `cache-ab/` origin, runs a short `load` against it, and asserts on the resulting `out/summary-<run>.json`.",
+        "- `tests/e2e/run.sh` brings up a local origin, runs a short `load` against it, and asserts on the resulting `out/summary-<run>.json`.",
         "- The run is discarded, loudly, when `generator_ok` is false: a generator-bound run proves nothing.",
-        "- The script refuses to start if the target is not a loopback address, so the suite can never be pointed at somebody's infrastructure by editing one variable.",
+        "- The profile it uses allowlists loopback only, so the suite cannot be pointed at somebody's infrastructure by editing one variable.",
         "- It skips with a clear message, rather than failing, when docker or k6 is missing."
       ]
     },
     {
       "key": "ci-lint-test",
       "title": "CI: run make lint and make test on push and pull request",
-      "milestone": "v1.1.0",
+      "milestone": "v1.3.0",
       "labels": ["area:ci", "area:tests"],
       "body": [
-        "The unit, CLI and GUI suites run entirely against fakes — a stub k6 on PATH, a temporary profile, a loopback HTTP server — which is exactly what makes them safe to run on a shared CI runner. Nothing runs them today.",
+        "The unit, CLI and GUI suites run entirely against fakes — a stub k6 on PATH, a temporary profile, a loopback HTTP server — which is exactly what makes them safe to run on a shared CI runner. Nothing runs them today, so the suite only protects whoever remembers to type `make test`.",
         "",
         "**Done when**",
         "- A workflow runs `make lint` and `make test` on push to main and on pull requests.",
         "- `make test-e2e` is **not** part of it: it generates load and needs docker plus k6.",
-        "- The job fails on a `bash -n` or `node --check` error, so a syntax break in the driver cannot land."
+        "- The job fails on a `bash -n` or `node --check` error, so a syntax break in the driver cannot land.",
+        "- It passes on a clean checkout after `npm install` alone: no globally installed bats, no globally installed k6."
       ]
     },
     {
@@ -126,7 +132,8 @@
         "**Done when**",
         "- A run is started as a child process of `bin/crowdsim`; the GUI never calls k6 directly.",
         "- The allowlist gate keeps working end to end: a target outside it fails the run with the driver's own exit code 3, surfaced to the browser.",
-        "- `--i-know-this-breaks-production` is never sent by the server. It stays a command-line decision by a human, which is the whole point of it not being a config key.",
+        "- Only known flags with validated values are composed: no free-form argument passthrough, and no shell.",
+        "- `--i-know-this-breaks-production` is never inferred and never remembered. It is sent only when, for that single run, the operator ticks the box AND types the profile name by hand; the confirmation is not stored, not defaulted, and not part of any saved configuration. (Decided 2026-08-05, superseding the original 'never sent by the server': somebody who needs the knee will run it either way, and pushing them to hand-assemble a command line buys a copy-paste window, not consent.)",
         "- The driver's exit codes are propagated verbatim: a tripped brake is an outcome (0), not an error."
       ]
     },
@@ -153,7 +160,7 @@
         "The `gui/ui` workspace is declared and `make gui-dev` / `make gui-build` target it, but it does not exist.",
         "",
         "**Done when**",
-        "- A form picks a profile, a target and a shape, and shows the resolved command before it runs — no hidden defaults.",
+        "- A form picks a profile, a target and a shape, and shows what the requested peak means per class before it runs — no hidden defaults.",
         "- The history view reads `out/history.tsv` and marks runs with `generator_ok: false` as unusable rather than plotting them next to valid ones.",
         "- The UI states that two runs are only comparable when they used the same URL pool."
       ]
@@ -168,7 +175,7 @@
         "",
         "**Done when**",
         "- Path traversal against the profile endpoints is covered by a test, not by a code review.",
-        "- A test asserts that a target outside the allowlist is refused, and that the server never adds the safe-peak override.",
+        "- A test asserts that a target outside the allowlist is refused, and that the safe-peak override is impossible without the per-run confirmation.",
         "- The suite runs against a stub `crowdsim` on PATH and a loopback server, so it generates no load and needs no k6."
       ]
     },
@@ -179,38 +186,167 @@
       "labels": ["documentation", "area:gui"],
       "body": [
         "**Done when**",
-        "- README covers `make gui`, `make gui-dev` and `make gui-build`, and states that the server binds the loopback interface and ships no authentication — it is a local console, not a shared dashboard.",
-        "- It says explicitly that the safe-peak override is not available from the GUI, and why."
+        "- README covers `crowdsim serve` and the build steps, and states that the server binds loopback by default and refuses any other bind address without `CROWDSIM_GUI_TOKEN` — a local console first, a shared dashboard only deliberately.",
+        "- It says what the GUI cannot do: no scheduler, no user accounts, no second copy of the gates.",
+        "- It says how the safe-peak override works from the GUI (the box ticked plus the profile name typed, per run) and why it is not a setting."
       ]
     },
 
     {
-      "key": "validate-subcommand",
-      "title": "crowdsim validate <profile>: fail on a broken profile before the run",
-      "milestone": "Backlog",
-      "labels": ["enhancement", "area:cli"],
+      "key": "e2e-brake-trips",
+      "title": "e2e: prove the brake actually aborts a run",
+      "milestone": "v1.3.0",
+      "labels": ["area:tests", "validity", "safety"],
       "body": [
-        "A profile that names a journey that does not exist, or a pool file that is missing, currently dies inside the k6 init context with a stack trace — after the operator has already decided to generate load.",
+        "The emergency brake is what makes it defensible to point this tool at anything. Today `brakeTripped()` is unit-tested against synthetic metric trees, and the e2e suite asserts the *opposite* case — that a static nginx does **not** trip it. Nothing proves that a real k6 run against a real slow target aborts, that the summary says `aborted: true`, and that the wrapper still exits 0 and still writes its history row.",
+        "",
+        "The gap matters more than it looks: the brake is a k6 threshold with `abortOnFail` and `delayAbortEval`. A typo in a threshold expression, or a metric renamed by a k6 upgrade, silently produces a run that no longer stops — and the first time anybody notices is during the outage the brake existed to cut short.",
         "",
         "**Done when**",
-        "- `crowdsim validate <profile>` checks structure, pools, referenced files, class shares and the presence of an allowlist, and reports every problem at once rather than the first.",
-        "- It exits 2 on a malformed profile and generates no traffic.",
-        "- `doctor` and `load` reuse the same checks, so validation cannot drift from what the run actually requires."
+        "- The e2e suite adds a leg whose target is deliberately slow enough to cross the SLO (a delay in the origin, on loopback, at a rate that hurts nothing).",
+        "- It asserts `aborted: true`, a non-zero `over_guillotine_rate`, exit code 0 from `crowdsim load`, and a history row for the aborted run.",
+        "- It asserts the run stopped EARLY: wall-clock well below the full ramp plus hold, so a brake that never fires cannot pass by simply finishing.",
+        "- `target_unreachable` is false: a target that refuses connections trips nothing and must not be mistaken for a knee."
+      ]
+    },
+    {
+      "key": "e2e-skip-missing-deps",
+      "title": "e2e: skip cleanly when docker or k6 is missing",
+      "milestone": "v1.3.0",
+      "labels": ["area:tests"],
+      "body": [
+        "`tests/e2e/run.sh` exits 1 when docker or k6 is absent. That is indistinguishable from a real failure, which trains people to ignore a red e2e run — and the suite is legitimately skipped on most machines.",
+        "",
+        "**Done when**",
+        "- A missing prerequisite prints what is missing and exits 0 with a clear SKIPPED line, distinct from a failure.",
+        "- An assertion that actually fails still exits non-zero.",
+        "- `make test-e2e` stays excluded from `make test`: this must not become a reason to fold it in."
+      ]
+    },
+    {
+      "key": "doctor-bandwidth-check",
+      "title": "doctor/load: warn before a run the generator cannot sustain",
+      "milestone": "v1.3.0",
+      "labels": ["area:cli", "validity"],
+      "body": [
+        "`generator_ok: false` is diagnosed after the fact — after the window was agreed, the alerting silenced and the run burned. Most of those runs were predictable beforehand: a page weight of ~45 KB at 380 req/s is ~17 MB/s sustained, which a generator behind a slow link cannot deliver no matter how many VUs k6 provisions.",
+        "",
+        "`probe` already measures the weight of one page. The arithmetic is available before the run, and nothing does it.",
+        "",
+        "**Done when**",
+        "- `probe` records the observed page weight in a machine-readable form, not only in prose.",
+        "- `load` estimates the sustained throughput the requested peak implies and warns, loudly, when it exceeds what was measured as available; the estimate and its assumptions are printed, not hidden.",
+        "- `doctor --profile <f>` reports the same estimate for the profile's peak, so it can be checked without generating anything.",
+        "- It is a warning, not a gate: the number is an estimate, and a wrong estimate must never stop a run somebody needs. The one thing it must not do is stay silent."
+      ]
+    },
+    {
+      "key": "discover-verify",
+      "title": "discover --verify: drop the URLs that do not render",
+      "milestone": "v1.3.0",
+      "labels": ["area:cli", "validity"],
+      "body": [
+        "`discover` writes a pool from the sitemap and the README then tells you to verify the URLs by hand before using them. Nobody verifies 400 URLs by hand. The consequence is specific and quiet: a 404 is cheap for the app tier and a 307 measures a redirect, so a pool full of either yields a flattering capacity number for a load that never reached the renderer.",
+        "",
+        "**Done when**",
+        "- `discover --verify` checks the discovered paths, keeps those answering 2xx, and reports how many were dropped and why (404, redirect, timeout) instead of silently shrinking the pool.",
+        "- Verification is sequential and rate-limited: building a pool must not itself be a load test.",
+        "- It goes through the same allowlist gate as everything else that talks to the target.",
+        "- The written pool records when it was verified — a pool contains build hashes and goes stale at the next deploy."
+      ]
+    },
+    {
+      "key": "record-journey-from-har",
+      "title": "crowdsim record <file.har>: build a journey from a browser recording",
+      "milestone": "v1.3.0",
+      "labels": ["area:cli", "area:generator", "enhancement"],
+      "body": [
+        "`--shape journey` is the mode that reproduces a visitor session — one document plus the fan-out the browser actually performs — and it needs a `journey.json` of `{path, rsc[], static[]}` per page. The README says to record it with a real browser, and offers no way to turn that recording into the file. In practice the mode goes unused and the mix shape carries load nobody clicks.",
+        "",
+        "A HAR export is exactly the recording needed, and every browser produces one.",
+        "",
+        "**Done when**",
+        "- `crowdsim record <file.har>` writes a journey file: documents become pages, each carrying the navigation requests and static assets the browser fetched with it.",
+        "- Third-party hosts are dropped: analytics and fonts are not your capacity problem, and generating them would point load at someone else's infrastructure.",
+        "- Per-request cache-busting query parameters are normalised, so the recording does not become a pool of unique cold URLs.",
+        "- The output records the origin it came from, and `record` never writes into `profiles/` by accident — a journey is data about a site, like a pool."
+      ]
+    },
+    {
+      "key": "validate-subcommand",
+      "title": "One profile validator, reachable from the CLI",
+      "milestone": "v1.3.0",
+      "labels": ["enhancement", "area:cli", "validity"],
+      "body": [
+        "Profile validation exists, and only in JavaScript: `gui/server/lib/validate.js` catches an empty pool, an allowlist of `*`, a brake class that is not in the mix, a read timeout below the p95 SLO. The CLI cannot use any of it — so the operator at a terminal, the primary user of this tool, still learns about a broken profile from a k6 stack trace in the init context, after deciding to generate load.",
+        "",
+        "Two validators would be worse than one late validator. This has to end with a single implementation.",
+        "",
+        "**Done when**",
+        "- `crowdsim validate <profile>` reports every problem at once, not the first, and exits 2 on a malformed profile without generating traffic.",
+        "- `doctor` and `load` reuse the same checks, so validation cannot drift from what a run actually requires.",
+        "- There is exactly one implementation of the rules — either the CLI calls it (node when available, with a documented fallback) or the JS side calls the CLI — and the choice is written down with its cost.",
+        "- The rules are tested once, and both entry points are asserted to agree."
       ]
     },
     {
       "key": "compare-subcommand",
       "title": "crowdsim compare <run-a> <run-b>: a delta between two runs",
-      "milestone": "Backlog",
-      "labels": ["enhancement", "area:cli"],
+      "milestone": "v1.3.0",
+      "labels": ["enhancement", "area:cli", "validity"],
       "body": [
         "The tool measures deltas honestly and absolutes optimistically, so comparison is the operation that carries meaning. Today it is done by reading two summary files side by side.",
         "",
         "**Done when**",
         "- `crowdsim compare` prints per-class latency, error and cache deltas between two runs from `out/`.",
-        "- It refuses to compare, rather than quietly comparing, when the two runs used different URL pools or when either has `generator_ok: false`."
+        "- It refuses to compare, rather than quietly comparing, when either run has `generator_ok: false`, or when the two runs did not use the same URL pool — a pool identity is recorded with the run so this can be checked instead of assumed.",
+        "- The GUI's comparison view uses the same rules, and says the same thing when they are not met."
       ]
     },
+    {
+      "key": "gui-command-preview",
+      "title": "GUI: show the resolved command before it runs",
+      "milestone": "v1.3.0",
+      "labels": ["area:gui", "safety"],
+      "body": [
+        "The GUI composes a `crowdsim load` command line and shows it only afterwards, in the run record. Before the click the operator sees form fields, which means the defaults the form fills in are invisible at the moment the decision is made. For a tool that generates real traffic, the command should be readable before it is run, not after.",
+        "",
+        "**Done when**",
+        "- The exact argv is rendered live as the form changes, in a form that can be copied into a terminal and produce the same run.",
+        "- It is visibly the same string the server will execute, not a reconstruction assembled separately in the UI.",
+        "- The safe-peak override appears in that preview when it is armed, so nobody launches it without having seen it."
+      ]
+    },
+    {
+      "key": "gui-runs-survive-restart",
+      "title": "GUI: a restart must not lose a run that is still going",
+      "milestone": "v1.3.0",
+      "labels": ["area:gui"],
+      "body": [
+        "The run list lives in the server's memory. Restart the server — a crash, a rebuild, a closed laptop — and the page shows no runs while the k6 process it started keeps generating load. The archive in `out/` survives; the knowledge that something is in flight does not.",
+        "",
+        "**Done when**",
+        "- A run in progress is discoverable after a server restart, and the page says a generator is running rather than showing an empty list.",
+        "- Reattaching gives back the log from the driver's own run log file — the GUI still stores no results of its own.",
+        "- Stop still works after a restart, or says plainly that it cannot and how to stop it by hand.",
+        "- The one-run-at-a-time rule survives too: a restart must not make it possible to start a second generator."
+      ]
+    },
+    {
+      "key": "gui-probe-tables",
+      "title": "GUI: read probe and discover output as data, not as a log",
+      "milestone": "v1.3.0",
+      "labels": ["area:gui"],
+      "body": [
+        "`probe` answers the question that decides whether a run is worth doing — which layer answered, what it said about caching, how heavy the page is — and the GUI shows it as raw terminal output. `discover` reports what it found and dropped, also as text.",
+        "",
+        "**Done when**",
+        "- The probe result is shown per layer: the header seen, whether it counts as a hit under the profile's pattern, and the page weight.",
+        "- A declared cache header that never appeared is called out as such, since that is usually a wrong header name in the profile rather than a cold cache.",
+        "- The discover result shows the pool it would write, with the counts kept and dropped, before a run uses it."
+      ]
+    },
+
     {
       "key": "cache-ab-third-leg",
       "title": "cache-ab: make the third leg a first-class option",
@@ -230,12 +366,26 @@
       "milestone": "Backlog",
       "labels": ["area:ci"],
       "body": [
-        "The image pins `grafana/k6` and resets its entrypoint so crowdsim drives k6. Nothing checks that the image still builds and still starts after a change to the driver or to the `k6/` layout.",
+        "The image pins `grafana/k6` and resets its entrypoint so crowdsim drives k6. Nothing checks that the image still builds and still starts after a change to the driver or to the `k6/` layout — and `k6/` now contains `lib/`, which the generator imports at init time.",
         "",
         "**Done when**",
         "- CI builds the image and runs `crowdsim --help` and `crowdsim doctor` inside it.",
         "- The smoke test asserts that the image refuses to run without an allowlist — the absent default is a feature, and a regression there is the one that matters most.",
         "- No load is generated: the image is never pointed at a network target in CI."
+      ]
+    },
+    {
+      "key": "release-helper",
+      "title": "A release helper, so one-commit-one-tag stops depending on memory",
+      "milestone": "Backlog",
+      "labels": ["area:release", "area:ci"],
+      "body": [
+        "The rule is that every commit is a tagged release with its own CHANGELOG section. It held for 1.0.0 only because somebody remembered — the tag was created after the fact, in a later session.",
+        "",
+        "**Done when**",
+        "- A helper prepares the CHANGELOG section and the annotated tag for `minor`, `patch` or an explicit version, and does not push.",
+        "- It refuses to tag a dirty tree, or a version that is already tagged.",
+        "- The commits exempt from the rule (roadmap, CI plumbing) are named in one place instead of being argued about per commit."
       ]
     }
   ]

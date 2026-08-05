@@ -12,7 +12,9 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
 - **Ogni commit = release taggata `vX.Y.Z`**: nuova sezione in `CHANGELOG.md` (Keep a Changelog, **in
   inglese** — il repo è pubblico) + `git tag -a vX.Y.Z -m "Release X.Y.Z"`. Bump `minor` per novità
   sostanziali (nuovi subcomandi/flag/feature, rimozioni), `patch` per fix/aggiornamenti doc. Senza
-  chiederlo. ⚠️ Il commit iniziale `31bc741` (1.0.0) **non è taggato**: il primo tag va creato lì.
+  chiederlo. **Esenti** (niente tag/CHANGELOG): commit `chore(roadmap):` che toccano solo
+  `.github/roadmap.json`, `scripts/sync-roadmap.sh` o `.github/workflows/` — sono pianificazione e
+  plumbing, non prodotto.
 - **MAI `git push`** — lo fa sempre l'utente. MAI `Co-Authored-By` nei commit.
 - **Repo pubblico: zero dati di infrastruttura.** Nessun hostname reale, IP privato, path interno, hash
   di build, webhook o token in codice, doc, commenti, CHANGELOG o commit message. Negli esempi solo
@@ -123,6 +125,12 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
   profilo scaricato al dispatch da repo privato)
 - Output di una run: `out/summary-<run_id>.json`, `out/load-<run_id>.log`, `out/history.tsv` (`out/` è
   gitignorata: non committarla mai)
+- **Roadmap = `.github/roadmap.json`** (sorgente unica: label, milestone, issue). `scripts/sync-roadmap.sh
+  --dry-run` prima, poi senza flag; il workflow `roadmap-sync` lo rigioca al push su main. Il sync è
+  additivo: **non chiude issue e non riscrive i body** già esistenti → una decisione va messa anche in un
+  commento sull'issue, non solo nel file. Le issue si abbinano per `key`, non per titolo.
+  Milestone: `v1.1.0` e `v1.2.0` sono **consegnate dentro la release 1.1.0** (per questo non esiste una
+  1.2.0: la prossima è `v1.3.0`, milestone #4) · `Backlog` = accettato ma non schedulato.
 - Repo affini: `devops_hiway` (doc infrastruttura, incident, runbook — i report delle run reali vanno
   **là**, non qui)
 
