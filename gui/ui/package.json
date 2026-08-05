@@ -1,6 +1,6 @@
 {
   "name": "@crowdsim/gui-ui",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "private": true,
   "description": "crowdsim GUI: configure a profile, launch a run, read the result",
   "license": "MIT",

@@ -68,6 +68,10 @@ COPY bin/crowdsim /usr/local/bin/crowdsim
 COPY k6/ /crowdsim/k6/
 COPY cache-ab/ /crowdsim/cache-ab/
 COPY profiles/example.json /crowdsim/profiles/example.json
+# lib/ holds the profile rules, shared by `crowdsim validate`, doctor, load and the GUI. Without it the
+# driver would silently degrade to the structural checks inside the image only — the worst kind of drift,
+# because the same command would validate differently depending on where it ran.
+COPY lib/ /crowdsim/lib/
 COPY gui/server/ /crowdsim/gui/server/
 COPY --from=ui /build/gui/ui/dist /crowdsim/gui/ui/dist
 COPY --from=deps /build/node_modules /crowdsim/node_modules

@@ -35,7 +35,7 @@ test-e2e: ## REAL run against a local nginx (needs docker + k6) — the only sui
 lint: ## syntax-check the shell driver and the k6 script
 	bash -n bin/crowdsim
 	node --check k6/live-event.js
-	@for f in k6/lib/*.js; do node --check "$$f"; done
+	@for f in k6/lib/*.js lib/*.mjs; do node --check "$$f"; done
 
 gui: gui-build ## build the UI and serve it (http://127.0.0.1:8787)
 	node gui/server/index.js

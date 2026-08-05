@@ -16,7 +16,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { listProfiles, readProfile, writeProfile, deleteProfile, profilePath, BadProfile } from './profiles.js';
-import { validateProfile } from './validate.js';
+import { validateProfile } from '../../../lib/validate.mjs';
 import { buildLoadArgs, buildProbeArgs, buildDiscoverArgs, InvalidRun, SHAPES, RSC_MODES } from './args.js';
 import { readHistory, readSummary, readRunLog, comparable } from './history.js';
 import { Runner, Busy } from './runner.js';

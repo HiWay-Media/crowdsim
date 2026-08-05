@@ -4,6 +4,46 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] — 2026-08-05
+
+The profile rules were reachable only from the GUI, so the operator at a terminal — the primary user of
+this tool — learned about a broken profile from a k6 stack trace in the init context, *after* deciding to
+generate load. Now there is one rule set and both entry points use it.
+
+### Added
+- **`crowdsim validate <profile>`** — every rule at once, errors separated from warnings, exit 2 if any
+  error. Generates nothing. Errors first and all of them together: a validator that stops at the first
+  problem turns one fix into a sequence of round trips.
+- `lib/validate.mjs` is now the single implementation, with `lib/validate-cli.mjs` as its command-line face.
+  The GUI imports the same module, so validation cannot drift from what a run requires.
+- `load` runs it **before the safety gates** and refuses on errors; `doctor --profile` runs it and reports.
+  A profile with a brake class that does not exist can no longer reach k6 — nothing would have aborted that
+  run.
+- 13 CLI tests over the wiring, and one more GUI test over the rules.
+
+### Changed
+- **The error/warning line is now load-bearing**, because `load` refuses on errors. An error is reserved for
+  what is fatal to *any* run of the profile; two rules moved to warnings as a result: a target declared
+  without a `base_url` (nobody has to select it, and selecting it already fails with a precise exit 2), and
+  a profile with no named targets at all (legitimate when every run passes `--base-url`). Getting this wrong
+  in the strict direction was caught by the test fixtures immediately — the suite has profiles with
+  deliberately broken targets, and `load` started rejecting them.
+- **`doctor` always exits 0**, including when it found profile errors. It is a report, and a report that
+  exits non-zero gets wrapped in `|| true` by the first person who scripts it. `validate` is the gate.
+- The image now carries `lib/`, and the smoke test asserts `crowdsim validate` works inside it and that
+  `load` reaches the full validation. Without that the same command would validate differently depending on
+  where it ran — the worst kind of drift.
+- The cost of the choice, stated rather than hidden: full validation needs **node**, which the CLI otherwise
+  does not. `validate` exits 5 saying so; `load` prints "only the structural checks ran" and carries on with
+  what the driver checks by itself (pool references, missing pool files, empty pools). The half it cannot
+  check that way is the interesting half.
+
+### Fixed
+- `lib/validate.js` renamed to `.mjs`. Inside the image there is no `package.json` above `lib/`, so a `.js`
+  file with ESM syntax was read as CommonJS and `crowdsim validate` died with a `SyntaxError` — found by the
+  smoke test that was added in the same commit. The extension now states the module system instead of
+  depending on a file that may not be there.
+
 ## [1.3.0] — 2026-08-05
 
 The brake is now proven to fire, and the suites that prove it run on every push. Until this release the

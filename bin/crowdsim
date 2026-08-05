@@ -23,6 +23,7 @@
 #   cache-ab    A/B a candidate cache config: two local nginx legs against the same origin, one with
 #               the tweak under evaluation and one as-is → measured hit ratio and offload
 #   history     one line per run, to see whether the knee moves over time
+#   validate    check a profile against every rule at once, without generating anything (needs node)
 #   serve       the GUI: same gates, same output directory, on http://127.0.0.1:8787 (needs node)
 #
 # Usage:
@@ -34,6 +35,7 @@
 #                     [--rsc-mode repeat|random] [--max-5xx 0.05] [--max-p95 5000]
 #                     [--safe-peak 150] [--i-know-this-breaks-production] [--touch-and-go] [--dry-run]
 #   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10]
+#   crowdsim validate <f.json>
 #   crowdsim serve    [--port 8787] [--bind 127.0.0.1]
 #
 # Environment:
@@ -47,7 +49,7 @@
 #
 # Exit: 0 = executed (a run stopped by the brake is an OUTCOME, not an error) · 2 = usage
 #       3 = safety gate · 4 = target unreachable · 5 = k6 missing
-# Requires: k6, curl, python3 (and node, only for `serve`).
+# Requires: k6, curl, python3 (and node for `validate` and `serve`).
 
 set -eo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -105,7 +107,10 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1; shift;;
     --i-know-this-breaks-production) FORCE=1; shift;;
     -h|--help) usage; exit 0;;
-    *) die "unknown option: $1" 2;;
+    # `crowdsim validate my-site.json` reads better than requiring --profile for a command whose only
+    # argument IS the profile. Everywhere else a bare word is still a mistake worth stopping for.
+    *) if [ "$CMD" = "validate" ] && [ -z "$PROFILE_F" ]; then PROFILE_F="$1"; shift
+       else die "unknown option: $1" 2; fi;;
   esac
 done
 
@@ -173,6 +178,39 @@ with open(dst, 'w') as f: json.dump(p, f)
 for d in dropped:
     print(f"  ⚠️  class skipped: {d} — the mix is renormalised over the rest", file=sys.stderr)
 PY
+}
+
+# ─────────────────────────────── profile validation (shared with the GUI) ───────────────────────────
+# The rules live once, in lib/validate.js, and the GUI's editor applies exactly these. Reaching them from
+# bash means node, which the CLI otherwise does not need — so its absence is stated rather than hidden, and
+# what remains is the structural checking resolve_profile does anyway (pool references, missing pool files,
+# empty pools). Two rule sets would drift, and the day they drift the one that matters is whichever the
+# operator did not run.
+#   $1 = gate    errors abort the command (exit 2)
+#   $1 = report  errors are printed, the command carries on (doctor is a report, not a gate)
+VALIDATOR="$ROOT/lib/validate-cli.mjs"
+validate_profile() {
+  local mode="$1" out rc=0
+  if ! command -v node >/dev/null 2>&1 || [ ! -f "$VALIDATOR" ]; then
+    warn "full profile validation needs node — only the structural checks ran (see docs/profile.md)"
+    return 0
+  fi
+  out="$(node "$VALIDATOR" "$PROFILE_F" --brief 2>&1)" || rc=$?
+  if [ -n "$out" ]; then printf '%s\n' "$out"; fi
+  if [ "$rc" != "0" ] && [ "$mode" = "gate" ]; then
+    die "the profile has errors: fix them, or run 'crowdsim validate $PROFILE_F' for the full report" 2
+  fi
+  return 0
+}
+
+cmd_validate() {
+  need_profile
+  if ! command -v node >/dev/null 2>&1; then
+    die "crowdsim validate needs node (18+). Without it, 'crowdsim doctor --profile <f>' still does the
+  structural checks: pool references, missing pool files, empty pools." 5
+  fi
+  say "▶ validating $PROFILE_F"
+  exec node "$VALIDATOR" "$PROFILE_F"
 }
 
 # jq is deliberately not a dependency: python3 is already required and is present on every host that
@@ -297,6 +335,7 @@ cmd_doctor() {
   ok "output directory: $OUT_DIR"
   if [ -n "$PROFILE_F" ]; then
     resolve_profile && ok "profile '$PROFILE_F' parses, pools resolved"
+    validate_profile report
   fi
 }
 
@@ -374,7 +413,11 @@ print(p[0] if isinstance(p,list) and p else "/")' "$RESOLVED" 2>/dev/null || ech
 
 # ─────────────────────────────── load ───────────────────────────────────────────────────────────────
 cmd_load() {
-  need_profile; resolve_profile; resolve_target
+  need_profile
+  # Before the gates and before k6: a profile with errors produces a run that fails in the init context, or
+  # worse, one that runs and measures something other than what was asked for.
+  validate_profile gate
+  resolve_profile; resolve_target
   gate_allowlist
   gate_peak
   k6_bin
@@ -540,6 +583,7 @@ case "$CMD" in
   load)     cmd_load;;
   cache-ab) cmd_cache_ab;;
   history)  cmd_history;;
+  validate) cmd_validate;;
   serve)    cmd_serve;;
   *)        die "unknown subcommand: $CMD (try --help)" 2;;
 esac

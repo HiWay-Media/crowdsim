@@ -29,6 +29,7 @@ Why crowdsim is built out of these pieces, and where each decision lives.
 
   gui/server (express) ── spawns ──▶ bin/crowdsim        gui/ui (react)
         └── reads out/ and profiles/, stores nothing of its own
+        └── lib/validate.mjs ◀── also used by `crowdsim validate`, doctor and load (one rule set)
 ```
 
 ## Why a bash driver and a JS generator
@@ -70,7 +71,9 @@ Both gates are in `bin/crowdsim`, and nothing else re-implements them:
 - the **image** ships no `CROWDSIM_ALLOW_TARGETS` default, and CI asserts that on every build.
 
 A second code path that builds k6 arguments would be a second place for the gates to be wrong. That is the
-one architectural rule this project will not trade.
+one architectural rule this project will not trade. The same reasoning put the profile rules in
+`lib/validate.mjs` rather than one copy per entry point: two rule sets drift, and the day they do, the one
+that matters is whichever the operator did not run.
 
 There is no interactive confirmation anywhere, on purpose: on a scheduler a prompt either hangs or is
 auto-answered. Gates are explicit arguments.
@@ -135,7 +138,8 @@ for. See [Docker](docker.md).
 bin/crowdsim              the driver: gates, resolution, reporting  (also its own --help)
 k6/live-event.js          the generator: scenarios, requests, metrics
 k6/lib/                   pure logic, imported by the generator and by the tests
-gui/server/lib/           args (flag composition), validate, profiles, runner, history, app
+lib/                      validate.js (the profile rules) + validate-cli.mjs, shared by CLI and GUI
+gui/server/lib/           args (flag composition), profiles, runner, history, app
 gui/ui/src/               React: RunPanel, ProfilePanel, HistoryPanel, MixBars, SummaryCard
 profiles/example.json     the only profile in this repo, documented inline
 cache-ab/                 two-leg reverse-proxy A/B harness

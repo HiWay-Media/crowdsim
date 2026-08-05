@@ -57,6 +57,18 @@ case "$dry" in
   *) bad "the dry run does not reference /crowdsim/k6/live-event.js"; printf '%s\n' "$dry" | sed 's/^/      /' ;;
 esac
 
+# The shared profile rules must be in the image too: without lib/ the driver falls back to the structural
+# checks and says so, which means the same command validates differently depending on where it runs.
+val="$(run "$IMAGE" crowdsim validate /crowdsim/profiles/example.json 2>&1 || true)"
+case "$val" in
+  *"validating"*) ok "crowdsim validate works in the image" ;;
+  *) bad "crowdsim validate is broken in the image"; printf '%s\n' "$val" | sed 's/^/      /' ;;
+esac
+case "$dry" in
+  *"needs node"*) bad "load fell back to structural validation: lib/ is missing from the image" ;;
+  *) ok "load reaches the full profile validation" ;;
+esac
+
 # ── the gates survived the build ─────────────────────────────────────────────────────────────────────
 # No allowlist in the image's environment. This is the one that must never regress.
 env_allow="$(docker image inspect "$IMAGE" --format '{{range .Config.Env}}{{println .}}{{end}}' \

@@ -126,6 +126,7 @@ crowdsim doctor                                          # what is missing on th
 crowdsim discover --profile p.json --limit 400            # build a URL pool from the sitemap
 crowdsim probe    --profile p.json --target edge          # reachability + cache headers hop by hop
 crowdsim load     --profile p.json --target edge --peak 60
+crowdsim validate p.json                                  # every rule at once, before anything runs
 crowdsim history                                          # one line per run: does the knee move?
 crowdsim serve                                            # the same thing with a GUI, on loopback
 ```

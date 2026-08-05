@@ -29,9 +29,12 @@ resolved() { cat "$CROWDSIM_OUT"/profile-*.json; }
 }
 
 @test "a class referencing a pool that does not exist is an error" {
+  # Caught twice, deliberately: by the shared validator before anything runs (which is what reports it
+  # now), and by resolve_profile on a machine with no node. Either way the pool is named.
   run "$CROWDSIM" load --profile "$FIXTURES/unknown-pool.json" --peak 10 --dry-run
   [ "$status" -ne 0 ]
-  [[ "$output" == *"references unknown pool 'nowhere'"* ]]
+  [[ "$output" == *"unknown pool"* ]]
+  [[ "$output" == *"nowhere"* ]]
 }
 
 @test "a class with an empty pool is dropped loudly and the mix renormalised" {

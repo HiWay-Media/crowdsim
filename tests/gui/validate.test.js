@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { validateProfile } from '../../gui/server/lib/validate.js';
+import { validateProfile } from '../../lib/validate.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const example = JSON.parse(fs.readFileSync(path.join(root, 'profiles/example.json'), 'utf8'));
@@ -105,13 +105,23 @@ test('a default target that does not exist is an error', () => {
   assert.ok(validateProfile(p).errors.some((e) => e.path === 'targets.default'));
 });
 
-test('a target without base_url is an error, and a pool that is neither list nor @file too', () => {
+test('a target without base_url is a warning; a pool that is neither list nor @file is an error', () => {
+  // The distinction is what makes it safe for `load` to refuse on errors: a target nobody selects breaks
+  // nothing (and selecting it already fails with exit 2), while a malformed pool breaks every run.
   const p = clone(example);
   p.targets.list.broken = { host_header: 'x.test' };
   p.pools.weird = 42;
   const v = validateProfile(p);
-  assert.ok(v.errors.some((e) => e.path === 'targets.list.broken'));
+  assert.ok(v.warnings.some((w) => w.path === 'targets.list.broken'));
   assert.ok(v.errors.some((e) => e.path === 'pools.weird'));
+});
+
+test('no named targets at all is a warning: a profile can be driven entirely by --base-url', () => {
+  const p = clone(example);
+  p.targets = {};
+  const v = validateProfile(p);
+  assert.ok(v.ok, JSON.stringify(v.errors));
+  assert.ok(v.warnings.some((w) => /--base-url/.test(w.message)));
 });
 
 test('an unresolved @file pool is accepted: the driver inlines it at run time', () => {

@@ -40,3 +40,17 @@ path_without_k6() {
   rm -f "$dir/k6"
   printf '%s' "$dir"
 }
+
+# A PATH with the tools the driver needs and NO node, to test the degraded validation path. Same symlink
+# approach as path_without_k6, and for the same reason: filtering $PATH would take python3 with it.
+path_without_node() {
+  local dir="$BATS_TEST_TMPDIR/nonode" tool p
+  mkdir -p "$dir"
+  for tool in bash sh python3 curl sed tr date mkdir cat grep tee cut wc column rm env k6 docker; do
+    p="$(command -v "$tool" 2>/dev/null)" && ln -sf "$p" "$dir/$tool"
+  done
+  # the stub k6 must still be reachable: this tests missing node, not missing k6
+  ln -sf "$BATS_TEST_TMPDIR/stub/k6" "$dir/k6"
+  rm -f "$dir/node"
+  printf '%s' "$dir"
+}

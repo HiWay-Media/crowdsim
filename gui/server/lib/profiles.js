@@ -8,7 +8,9 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { validateProfile } from './validate.js';
+// The rules live in lib/validate.js, one level above the GUI: the CLI validates with the same module
+// (see bin/crowdsim validate), and two validators would be worse than one late one.
+import { validateProfile } from '../../../lib/validate.mjs';
 
 const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}\.json$/;
 

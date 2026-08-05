@@ -70,9 +70,11 @@ setup() { crowdsim_setup; }
   [[ "$output" == *"parses, pools resolved"* ]]
 }
 
-@test "doctor surfaces a broken profile instead of reporting it as fine" {
+@test "doctor surfaces a broken profile but still exits 0: it is a report, not a gate" {
+  # `validate` and `load` are the gates (exit 2). doctor's job is to tell you what it found, and a report
+  # that exits non-zero gets wrapped in `|| true` by the first person who scripts it.
   run "$CROWDSIM" doctor --profile "$FIXTURES/unknown-pool.json"
-  [ "$status" -ne 0 ]
+  [ "$status" -eq 0 ]
   [[ "$output" == *"unknown pool"* ]]
 }
 

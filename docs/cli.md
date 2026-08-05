@@ -9,6 +9,7 @@ crowdsim discover --profile p.json --limit 400            # build a URL pool fro
 crowdsim probe    --profile p.json --target edge          # reachability + cache headers hop by hop
 crowdsim load     --profile p.json --target edge --peak 60
 crowdsim cache-ab --profile p.json --ttl 10               # two proxy legs, one origin
+crowdsim validate p.json                                  # every rule at once, before anything runs
 crowdsim history                                          # one line per run: does the knee move?
 crowdsim serve                                            # the GUI, on loopback
 ```
@@ -17,9 +18,10 @@ crowdsim serve                                            # the GUI, on loopback
 
 ### `doctor`
 
-Checks prerequisites and prints what is missing. With `--profile`, also resolves the profile — pools
-inlined, referenced files checked — which is the cheapest way to find out a profile is broken. Exits 0
-even when things are missing: it is a report, not a gate.
+Checks prerequisites and prints what is missing. With `--profile`, also resolves the profile (pools inlined,
+referenced files checked) **and runs the full validation** — the cheapest way to find out a profile is
+broken. Always exits 0, even when it found errors: it is a report, not a gate, and a report that exits
+non-zero gets wrapped in `|| true` by the first person who scripts it. Use `validate` when you want a gate.
 
 ### `discover`
 
@@ -53,6 +55,38 @@ Brings up two nginx legs against the same origin, one as-is and one with your ca
 load both with the same pool in the same window and get a hit ratio and offload factor you can defend.
 Needs docker (exit 5 without it), so it does not work from inside the container image. See
 [`cache-ab/README.md`](../cache-ab/README.md).
+
+### `validate`
+
+```bash
+crowdsim validate my-site.json          # or --profile my-site.json
+```
+
+Checks the profile against every rule at once and exits 2 if any of them is an error. Generates nothing.
+
+It reports **errors** (the profile would fail, or produce a meaningless run) separately from **warnings**
+(it will run, but not necessarily mean what the author thinks):
+
+```
+▶ validating my-site.json
+  ❌ classes[0].pool     unknown pool "nowhere"
+  ❌ slo.brake_class     "gone" is not a class in this profile: nothing would abort the run
+  ⚠️  pools.static        pool is empty: every class using it will be dropped from the mix
+  2 errors · 1 warning — errors must be fixed before a run means anything
+```
+
+Everything at once, and errors first: a validator that stops at the first problem turns one fix into a
+sequence of round trips.
+
+**One implementation, two entry points.** The rules live in `lib/validate.mjs` and the GUI's editor applies
+exactly these, so validation cannot drift from what a run requires. `load` runs them before the safety
+gates and refuses on errors; `doctor --profile` runs them and reports without failing.
+
+Reaching them from bash means **node**, which the CLI otherwise does not need. Its absence is stated, not
+hidden: `validate` exits 5 saying so, and `load` prints *"full profile validation needs node — only the
+structural checks ran"* and carries on with what `resolve_profile` checks by itself (pool references,
+missing pool files, empty pools). What it cannot catch that way is exactly the interesting half — a brake
+class that does not exist, an allowlist of `*`, a read timeout below the p95 SLO.
 
 ### `history`
 

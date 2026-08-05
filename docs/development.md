@@ -91,6 +91,20 @@ is the brake class's p95 against its SLO, and that is what is checked.
 - `JOURNEY` is passed only in journey shape; otherwise k6 would open a file it never uses, and a profile
   naming a missing journey would die in the init context with a stack trace instead of a load test.
 
+## Changing the profile rules
+
+They live in `lib/validate.mjs` — one implementation, used by `crowdsim validate` (through
+`lib/validate-cli.mjs`, which `doctor` and `load` also call) and by the GUI's editor. Adding a rule means
+deciding which side of a line it falls on:
+
+- **error** — fatal to *any* run of the profile. `load` refuses on these, before the safety gates.
+- **warning** — it will run, but perhaps not mean what the author thinks.
+
+Getting that wrong has a cost in both directions. Too strict and `load` starts rejecting profiles that work
+today (a target nobody selects, declared without a `base_url`, was an error for exactly one commit before
+this was noticed); too lenient and the rule is decoration. The rules are tested in
+`tests/gui/validate.test.js`, the wiring in `tests/cli/validate.bats`.
+
 ## Changing the GUI
 
 - `gui/server/lib/args.js` is the security-critical file: known flags, validated values, no shell, no

@@ -243,14 +243,31 @@ would otherwise abort the run in k6's init context with a stack trace instead of
 ## Validating a profile
 
 ```bash
-crowdsim doctor --profile my-site.json      # does it parse, do the pools resolve
-crowdsim load --profile my-site.json --peak 10 --dry-run   # what the generator would receive
+crowdsim validate my-site.json                              # every rule at once, exit 2 on errors
+crowdsim doctor --profile my-site.json                      # the same, as a report (always exits 0)
+crowdsim load --profile my-site.json --peak 10 --dry-run    # what the generator would receive
 ```
 
-The GUI validates continuously while you edit and reports both errors (would fail or be meaningless) and
-warnings (would run, but not mean what you think): an empty pool, a brake class that is not in the mix, a
-read timeout below the p95 SLO, an allowlist of `*`, a bypass that is not `host=address`. See
-[GUI](gui.md).
+`validate` reports **errors** and **warnings** separately, and the distinction is deliberate:
+
+| | Meaning | Effect on `load` |
+|---|---|---|
+| **error** | the profile would fail, or produce a run that means nothing | refused, exit 2, before the safety gates |
+| **warning** | it will run, but perhaps not mean what the author thinks | printed, the run proceeds |
+
+An error is reserved for what is fatal to *any* run of this profile: a class pointing at a pool that does
+not exist, weights that add to zero, duplicate class names (the metrics would merge), a brake class that is
+not in the mix (nothing would abort the run), an allowlist of `*`, a malformed `bypass`, an invalid `hit`
+regex. A target declared without a `base_url` is only a **warning** — nobody has to select it, and selecting
+it already fails with a precise exit 2.
+
+**One implementation.** The rules live in `lib/validate.mjs`; the CLI reaches them through
+`lib/validate-cli.mjs` and the GUI's editor imports the same module, so validation cannot drift from what a
+run requires. The cost, stated rather than hidden: that module is JavaScript, so full validation needs
+**node** — which the CLI otherwise does not. Without it, `validate` exits 5 and `load` says *"full profile
+validation needs node — only the structural checks ran"* before carrying on with what the driver checks by
+itself while resolving the profile: pool references, missing pool files, empty pools. The half it cannot
+check that way is the interesting half.
 
 ## See also
 
