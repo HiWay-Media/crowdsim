@@ -20,6 +20,7 @@ make image-smoke     # the built image: still the tool, gates intact
 | `tests/gui/` | `node --test` | the API over a real socket: traversal, the override confirmation, one-run-at-a-time, refusals passed through, read-only mounts | no |
 | `tests/e2e/` | shell + docker | two legs: a fast nginx (chain works, healthy target does *not* abort) and a slow single-worker origin (**the brake does abort**, early, generator still holding). Skips (exit 0) without docker or k6 | **yes**, on loopback |
 | `tests/image/` | shell + docker | the published artefact: driver finds generator, GUI starts, gates survived the build, no allowlist default | no |
+| `tests/k8s/` | shell + kubectl | `ci/kubernetes` rendered client-side (no cluster): never-retried Job, cluster-enforced deadline, one GUI replica, ClusterIP only, no CronJob, no committed override, pinned image | no |
 
 Two properties hold this together, and both are load-bearing:
 

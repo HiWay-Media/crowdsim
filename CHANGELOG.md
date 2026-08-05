@@ -4,6 +4,44 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] — 2026-08-05
+
+Kubernetes gets the same treatment Nomad already had: manifests whose defaults are the safe ones, with the
+reasoning next to each value, and a checker so the reasoning cannot be edited away by accident.
+
+### Added
+- **`ci/kubernetes/`** — a **Job** for one load run, a **Deployment + Service** for the GUI, and a
+  kustomization, all on the published image. Five values in there are safety properties rather than
+  preferences, and each is explained where it sits:
+  - `backoffLimit: 0` + `restartPolicy: Never` — Kubernetes retries a failed Job by default, and here a
+    "failure" can mean *the brake tripped on the way to a real answer*. A retry is a second uncontrolled run
+    against a system you just bent.
+  - `activeDeadlineSeconds` — the cluster's own dead-man switch, for a run that hangs where the brake cannot
+    see it.
+  - `replicas: 1` and `strategy: Recreate` — **the one-run-at-a-time rule lives in the server's memory**, so
+    a second replica (or a rolling update's overlap) means two generators against one target: twice the load
+    nobody agreed to, and two invalid results.
+  - `ClusterIP`, no Ingress — a page that can start a load generator gets no public address; reach it with
+    `kubectl port-forward`, authenticated by your kubeconfig and visible in the audit log.
+  - no `CronJob` — recurring load belongs somewhere attributable, not in a schedule nobody reads.
+  - The production override is deliberately absent from the manifests, `hostNetwork` is commented with its
+    trade-off, requests equal limits (a throttled generator becomes the bottleneck being measured), and the
+    profile arrives as a ConfigMap you create from your own private copy.
+- **`tests/k8s/check.sh`** (`make test-k8s`, and a CI step) asserts all of the above. It renders the
+  manifests with `kubectl kustomize` — entirely client-side, no cluster, nothing applied — which both proves
+  the YAML parses and strips the comments, so an assertion cannot be satisfied by a commented-out line.
+  Verified in both directions: flipping `replicas`, the Service type and `backoffLimit` makes it fail.
+- `ci/kubernetes/README.md`: the five decisions, why `generateName` means `kubectl create` and not `apply`,
+  placement and the `hostNetwork` trade-off, how to read results (and how to keep the archive on a PVC), and
+  what is deliberately missing — no Helm chart, no HPA (autoscaling a load generator means unbounded load),
+  no ServiceMonitor.
+
+### Changed
+- `ci/README.md` covers both schedulers, and the CI link check now includes `ci/**/README.md`, so the new
+  guides cannot rot unnoticed.
+- `docs/install.md` gains a Kubernetes path, and the suite table in `docs/development.md` and the README
+  gains `tests/k8s/`.
+
 ## [1.4.1] — 2026-08-05
 
 ### Changed

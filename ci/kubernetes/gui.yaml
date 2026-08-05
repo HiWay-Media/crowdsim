@@ -1,0 +1,154 @@
+# The crowdsim GUI in a cluster: a Deployment, a ClusterIP Service, and a PVC for the run archive.
+#
+#   kubectl create secret generic crowdsim-gui --from-literal=token="$(openssl rand -hex 16)"
+#   kubectl create configmap crowdsim-profile --from-file=profile.json=./my-site.json
+#   kubectl apply -f ci/kubernetes/gui.yaml
+#   kubectl port-forward svc/crowdsim-gui 8787:8787      # then http://127.0.0.1:8787
+#
+# Three decisions in here are safety properties, not preferences. They are in ci/kubernetes/README.md too,
+# and the manifest checker in tests/k8s/ asserts them so they cannot be lost in a refactor:
+#
+#   replicas: 1     The "one run at a time" rule lives in the server's memory. Two replicas means two
+#                   generators can be started against the same target at once — twice the load nobody
+#                   agreed to, and two results that are each invalid.
+#   ClusterIP       No LoadBalancer, no NodePort, no Ingress. A page that can start a load generator does
+#                   not get a public address; reach it with `kubectl port-forward`, which is authenticated
+#                   by your kubeconfig and leaves an audit trail.
+#   a token         The server refuses any non-loopback bind without one, and in a pod every bind is
+#                   non-loopback. It comes from a Secret, never from this file.
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: crowdsim-out
+  labels:
+    app.kubernetes.io/name: crowdsim
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: crowdsim-gui
+  labels:
+    app.kubernetes.io/name: crowdsim
+    app.kubernetes.io/component: gui
+spec:
+  # Exactly one. See the note at the top of this file.
+  replicas: 1
+  strategy:
+    # Recreate, not RollingUpdate: during a rolling update two pods exist at once, which is the same
+    # problem as replicas: 2 — and one of them could be holding a running generator.
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: crowdsim
+      app.kubernetes.io/component: gui
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crowdsim
+        app.kubernetes.io/component: gui
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 12345
+        runAsGroup: 12345
+        fsGroup: 12345          # so the PVC is writable by the image's user
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: gui
+          image: ghcr.io/hiway-media/crowdsim:1.4.1
+          imagePullPolicy: IfNotPresent
+          args: ["crowdsim", "serve"]
+          ports:
+            - name: http
+              containerPort: 8787
+          env:
+            # In a pod, binding loopback would mean "reachable by nobody" — the loopback in question is the
+            # pod's own. The reachability decision moves to the Service (ClusterIP) and to port-forward.
+            - name: CROWDSIM_GUI_BIND
+              value: "0.0.0.0"
+            - name: CROWDSIM_GUI_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: crowdsim-gui
+                  key: token
+            # Inherited by every run the page starts. No default anywhere: without it, runs fall back to
+            # each profile's safety.allow_hosts, and a profile without one cannot run at all.
+            - name: CROWDSIM_ALLOW_TARGETS
+              value: "www.example.test"
+            - name: CROWDSIM_PROFILES
+              value: /profiles
+            - name: CROWDSIM_OUT
+              value: /out
+          # The page is served without a token; /api needs one. So the probes ask for the page: they check
+          # the server is up without holding a copy of the credential.
+          readinessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              # The GUI itself is a page. It is the RUNS it starts that need CPU, and they are children of
+              # this process — so a tight limit here would throttle the generator. Size it for a run.
+              cpu: "2"
+              memory: 2Gi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: profiles
+              mountPath: /profiles
+              readOnly: true
+            - name: out
+              mountPath: /out
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        # Mounted read-only: the editor then reports that it cannot save (409, with an explanation) instead
+        # of pretending to. Profiles are a map of your infrastructure — a read-only mount is a reasonable
+        # default for them. Drop `readOnly` above and use a PVC if you want to edit them from the page.
+        - name: profiles
+          configMap:
+            name: crowdsim-profile
+        - name: out
+          persistentVolumeClaim:
+            claimName: crowdsim-out
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: crowdsim-gui
+  labels:
+    app.kubernetes.io/name: crowdsim
+    app.kubernetes.io/component: gui
+spec:
+  # ClusterIP on purpose. Do not "improve" this into a LoadBalancer.
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: crowdsim
+    app.kubernetes.io/component: gui
+  ports:
+    - name: http
+      port: 8787
+      targetPort: http

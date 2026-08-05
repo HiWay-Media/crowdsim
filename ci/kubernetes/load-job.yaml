@@ -1,0 +1,154 @@
+# One load run, as a Kubernetes Job.
+#
+#   kubectl create configmap crowdsim-profile --from-file=profile.json=./my-site.json
+#   kubectl create -f ci/kubernetes/load-job.yaml      # create, not apply: see generateName below
+#   kubectl logs -f job/<name>
+#
+# Read ci/kubernetes/README.md before the first run. The short version of what matters here:
+#
+#   backoffLimit: 0 + restartPolicy: Never   a load test is NEVER retried. A retry is a second
+#                                            uncontrolled run against a system you just bent.
+#   activeDeadlineSeconds                    a hard stop the cluster enforces, in case the run hangs
+#                                            somewhere the emergency brake cannot see.
+#   a pinned image tag                       a load test you cannot reproduce is an anecdote.
+#   no CronJob                               recurring load against production is a decision that
+#                                            belongs somewhere auditable, not in a schedule nobody reads.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  # generateName, not name: every run is its own object, so a second run does not collide with the first
+  # and the archive of what ran stays in the cluster until you clear it. Use `kubectl create`, not `apply`.
+  generateName: crowdsim-load-
+  labels:
+    app.kubernetes.io/name: crowdsim
+    app.kubernetes.io/component: generator
+spec:
+  # Never retried. This is the single most important line in the file: Kubernetes' default is to retry a
+  # failed Job, and a "failure" here can simply mean the brake tripped on the way to a real answer.
+  backoffLimit: 0
+
+  # The cluster's own dead-man switch. Size it to the ramp plus the hold plus a margin — the run below is
+  # 4 x 60s + 120s = 360s, so 600s leaves room without leaving a generator running for an hour.
+  activeDeadlineSeconds: 600
+
+  # Keep the finished Job (and its logs) around for a day, then let the cluster clean up.
+  ttlSecondsAfterFinished: 86400
+
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: crowdsim
+        app.kubernetes.io/component: generator
+    spec:
+      restartPolicy: Never
+
+      # ── placement: near the target, but NOT on it ────────────────────────────────────────────────────
+      # Co-located, you measure the generator and the target competing for the same CPU. Uncomment and
+      # adapt: the nodeAffinity puts the pod in the right zone, the podAntiAffinity keeps it off the nodes
+      # running the thing under test.
+      #
+      # affinity:
+      #   nodeAffinity:
+      #     requiredDuringSchedulingIgnoredDuringExecution:
+      #       nodeSelectorTerms:
+      #         - matchExpressions:
+      #             - key: topology.kubernetes.io/zone
+      #               operator: In
+      #               values: ["eu-west-1a"]
+      #   podAntiAffinity:
+      #     requiredDuringSchedulingIgnoredDuringExecution:
+      #       - labelSelector:
+      #           matchLabels:
+      #             app.kubernetes.io/name: my-frontend      # ← the target's own pods
+      #         topologyKey: kubernetes.io/hostname
+
+      # ⚠️ hostNetwork: true removes the CNI hop between the generator and the target, which matters at a
+      #    few hundred req/s — an overlay can saturate before the target does, and crowdsim would report
+      #    generator_ok: false. It also puts the pod on the node's network namespace, which most clusters
+      #    restrict. Turn it on deliberately, when the numbers say the network is the bottleneck.
+      # hostNetwork: true
+
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 12345          # the uid the image already runs as
+        runAsGroup: 12345
+        fsGroup: 12345
+        seccompProfile:
+          type: RuntimeDefault
+
+      containers:
+        - name: crowdsim
+          # Pinned, never :latest — see README.
+          image: ghcr.io/hiway-media/crowdsim:1.4.1
+          imagePullPolicy: IfNotPresent
+
+          # The gates behave exactly as they do on a command line. There is no allowlist default anywhere,
+          # including here: without this value (or safety.allow_hosts in the profile) the run exits 3.
+          env:
+            - name: CROWDSIM_ALLOW_TARGETS
+              value: "www.example.test"          # ← the hosts this run may generate load against
+            - name: CROWDSIM_OUT
+              value: /out
+
+          args:
+            - crowdsim
+            - load
+            - --profile
+            - /profile/profile.json
+            - --target
+            - edge
+            - --peak
+            - "60"
+            - --start
+            - "15"
+            - --steps
+            - "4"
+            - --step-dur
+            - 60s
+            - --hold
+            - 120s
+            # --i-know-this-breaks-production belongs on a command line typed by a human who warned people
+            # first. Committing it into a manifest is how an override becomes a habit, so it is not here.
+
+          # The generator is CPU-bound at high rates: too little CPU and it silently fails to deliver the
+          # requested rate, which crowdsim reports as generator_ok: false — an invalid run, not a slow one.
+          # Requests == limits so the kubelet cannot throttle it mid-ramp and turn the generator into the
+          # bottleneck being measured.
+          resources:
+            requests:
+              cpu: "2"
+              memory: 2Gi
+            limits:
+              cpu: "2"
+              memory: 2Gi
+
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+
+          volumeMounts:
+            - name: profile
+              mountPath: /profile
+              readOnly: true
+            - name: out
+              mountPath: /out
+            # readOnlyRootFilesystem means anything that writes outside /out needs its own volume. Nothing
+            # in a run does today; this is here so a future need does not get "fixed" by dropping the flag.
+            - name: tmp
+              mountPath: /tmp
+
+      volumes:
+        # The profile is NOT in this file and NOT in the image: it holds your hostnames, URL pools and
+        # measured mix. Create it from your own private copy:
+        #   kubectl create configmap crowdsim-profile --from-file=profile.json=./my-site.json
+        - name: profile
+          configMap:
+            name: crowdsim-profile
+        # emptyDir: the summary and the log die with the pod. `kubectl logs` has the run report, which is
+        # usually enough for one run — swap in a PVC when you want the archive to accumulate (README).
+        - name: out
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}

@@ -51,6 +51,13 @@ jobs:
       - name: CLI tests (safety gates, exit codes, release helper)
         run: make test-cli
 
+      # kubectl is client-side here: the manifests are rendered with `kubectl kustomize`, never applied.
+      # No cluster is involved, and nothing is deployed.
+      - uses: azure/setup-kubectl@v4
+
+      - name: Kubernetes manifests (safety invariants)
+        run: make test-k8s
+
       # Cheap guard against the docs drifting from the code they describe: every relative link in the
       # README and in docs/ must resolve. A broken link in an install guide is a support request.
       - name: Documentation links resolve
@@ -58,7 +65,7 @@ jobs:
           python3 - <<'PY'
           import glob, os, re, sys
           bad = []
-          for f in ['README.md'] + sorted(glob.glob('docs/*.md')):
+          for f in ['README.md'] + sorted(glob.glob('docs/*.md')) + sorted(glob.glob('ci/**/README.md', recursive=True)):
               base = os.path.dirname(f)
               for m in re.finditer(r'\[[^\]]+\]\(([^)#]+)(#[^)]*)?\)', open(f).read()):
                   t = m.group(1)

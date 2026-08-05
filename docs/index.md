@@ -40,6 +40,7 @@ caching would actually buy you — instead of estimating it from logs after the 
 | look up a flag or an exit code | [CLI reference](cli.md) |
 | change the code, or cut a release | [Development](development.md) |
 | dispatch runs on Nomad | [`ci/README.md`](../ci/README.md) |
+| run it on Kubernetes | [`ci/kubernetes/README.md`](../ci/kubernetes/README.md) |
 
 ## The three things worth knowing before you start
 

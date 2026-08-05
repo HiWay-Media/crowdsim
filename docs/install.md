@@ -7,6 +7,7 @@ Three ways in, for three different jobs.
 | **Docker** | seeing it work, the GUI anywhere, the generator on a Linux host near the target | generating load from a macOS/Windows laptop against a remote target |
 | **Native** | running the generator from your own machine, development | nothing — this is the reference installation |
 | **Nomad** | recurring or remote runs, attributable to whoever dispatched them | a first look |
+| **Kubernetes** | a run as a Job, or the GUI in a cluster you already operate | a first look |
 
 ## Docker (nothing to install)
 
@@ -92,6 +93,24 @@ attributable; the profile is fetched at dispatch time from your own private repo
 
 Place the generator **near** the target but not **on** it: co-located, you measure the two competing for
 the same CPU. Watch bandwidth too — ~45 KB per page at 380 req/s is ~17 MB/s sustained.
+
+## Kubernetes
+
+```bash
+kubectl create configmap crowdsim-profile --from-file=profile.json=./my-site.json
+kubectl create -f ci/kubernetes/load-job.yaml        # one run
+kubectl logs -f job/<name>
+
+kubectl create secret generic crowdsim-gui --from-literal=token="$(openssl rand -hex 16)"
+kubectl apply -k ci/kubernetes                       # the GUI
+kubectl port-forward svc/crowdsim-gui 8787:8787
+```
+
+A **Job** for a run and a **Deployment** for the GUI, on the published image. Five values in there are safety
+properties rather than preferences — never retried, a cluster-enforced deadline, exactly one GUI replica
+(the one-run-at-a-time rule lives in the server's memory), `ClusterIP` only, and no `CronJob`. All five are
+asserted by `make test-k8s`, and all five are explained in
+[`ci/kubernetes/README.md`](../ci/kubernetes/README.md).
 
 ## Your first profile
 

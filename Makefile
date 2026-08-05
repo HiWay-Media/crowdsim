@@ -7,7 +7,7 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help install test test-unit test-cli test-gui test-e2e lint gui gui-dev gui-build \
+.PHONY: help install test test-unit test-cli test-gui test-e2e test-k8s lint gui gui-dev gui-build \
         image image-smoke image-run clean
 
 IMAGE ?= crowdsim:dev
@@ -31,6 +31,9 @@ test-gui: ## GUI API: profiles, run launching, path traversal, gate propagation 
 
 test-e2e: ## REAL run against a local nginx (needs docker + k6) — the only suite that loads anything
 	tests/e2e/run.sh
+
+test-k8s: ## ci/kubernetes manifests: rendered client-side, safety invariants asserted (needs kubectl)
+	tests/k8s/check.sh
 
 lint: ## syntax-check the shell driver and the k6 script
 	bash -n bin/crowdsim

@@ -1,0 +1,26 @@
+# So the manifests can be rendered and applied as a set:
+#
+#   kubectl kustomize ci/kubernetes            # render, no cluster needed — this is what the checker uses
+#   kubectl apply -k ci/kubernetes             # the GUI and its PVC
+#
+# The load Job is deliberately NOT in `resources`: kustomize requires a metadata.name, and the Job uses
+# generateName so that every run is its own object and a second run cannot collide with the first. Launch
+# one with:
+#
+#   kubectl create -f ci/kubernetes/load-job.yaml
+#
+# It is checked by tests/k8s/check.sh alongside these, so leaving it out of the render costs nothing.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+resources:
+  - gui.yaml
+
+commonLabels:
+  app.kubernetes.io/part-of: crowdsim
+
+# The image tag lives here as well as in the manifests, so a release can be rolled out in one place:
+#   kubectl kustomize ci/kubernetes | ...      after editing newTag
+images:
+  - name: ghcr.io/hiway-media/crowdsim
+    newTag: 1.4.1

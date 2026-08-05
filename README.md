@@ -188,6 +188,7 @@ launched from the page are the same kind of object, and appear in the same histo
 
 ```bash
 make test         # unit + GUI + CLI — generates no load whatsoever
+make test-k8s     # ci/kubernetes: safety invariants on the manifests (needs kubectl, no cluster)
 make test-e2e     # a real 12 req/s run against an nginx container on loopback (needs docker + k6)
 make image-smoke  # the built image: still the tool, gates intact (needs docker + make image)
 ```
@@ -199,6 +200,7 @@ make image-smoke  # the built image: still the tool, gates intact (needs docker 
 | `tests/gui/` (`node --test`) | the API over a real socket: path traversal out of the profile directory, the override confirmation, one-run-at-a-time, gate refusals passed through with their exit code, no webhook leakage. |
 | `tests/e2e/` | two legs on loopback: a fast nginx (the chain works, and a healthy target does **not** trip the brake) and a slow single-worker origin (**the brake does abort a run**, early, with the generator still holding the rate). Skips cleanly without docker or k6. |
 | `tests/image/` | the published artefact: the driver finds the generator, the GUI starts, and the gates survived the build — including that no allowlist default was baked in. Runs in CI before anything is pushed. |
+| `tests/k8s/` | the Kubernetes manifests, rendered client-side: the Job is never retried, the GUI is one replica behind a `ClusterIP`, there is no `CronJob`, and no override is committed. |
 
 Two things the suites are built around, because they are how a load test lies to you:
 
@@ -300,7 +302,7 @@ Full documentation lives in **[docs/](docs/index.md)**:
 
 Alongside them: [`profiles/example.json`](profiles/example.json) documents every field inline,
 [`cache-ab/README.md`](cache-ab/README.md) covers the A/B harness,
-[`ci/README.md`](ci/README.md) how a run is dispatched on Nomad, `crowdsim --help` every flag, and
+[`ci/README.md`](ci/README.md) how a run is dispatched on Nomad or [Kubernetes](ci/kubernetes/README.md), `crowdsim --help` every flag, and
 [CHANGELOG.md](CHANGELOG.md) what changed in each release.
 
 ## License

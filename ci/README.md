@@ -6,6 +6,12 @@ tool — none of it ends up in the container image.
 | Path | What |
 |---|---|
 | [`nomad/crowdsim.nomad.hcl`](nomad/crowdsim.nomad.hcl) | Parameterized **batch** job for dispatching a run on a Nomad client near the target. |
+| [`kubernetes/`](kubernetes/README.md) | A **Job** for one run and a **Deployment + Service** for the GUI, plus a kustomization. |
+
+Both schedulers get the same treatment, because the same things go wrong on both: a run that gets retried is
+a second outage, a control surface with a public address is an invitation, and a generator co-located with
+its target measures the two fighting over a CPU. `make test-k8s` asserts those properties on the manifests;
+the Nomad job carries them in `restart`/`reschedule` stanzas.
 
 The GitHub Actions workflows are not here: they have to live in `.github/workflows/`, which GitHub owns.
 They are `ci.yml` (lint plus the suites that generate no load), `image.yml` (build → smoke test → publish to
