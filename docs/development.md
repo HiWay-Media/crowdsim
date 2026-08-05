@@ -89,6 +89,10 @@ infrastructure and is never a target.
 - The k6 call sits inside `set +e` with `PIPESTATUS[0]`, so a tripped brake still writes the summary and the
   history row. Do not "simplify" it into `if k6 run …`.
 - `die()` takes `"$1"` and an exit code as `$2` — not `"$*"`.
+- **`python3 - args <<'PY'` takes the PROGRAM from stdin.** A pipe into it is silently discarded and
+  `sys.stdin.read()` returns `""`. That is not a hypothetical: `discover` wrote an empty pool from 1.0.0 to
+  1.6.0 because of it, with nothing failing, because no test called the command. Pass data as a file
+  argument, or use `python3 -c` and keep the pipe.
 - Adding a flag touches, at minimum: the arg parser, the env passed to k6, the usage header, `docs/cli.md`,
   and a CLI test. If the GUI should expose it too: `gui/server/lib/args.js` (validated, never passed
   through) and the run form.
@@ -177,6 +181,38 @@ exist.
 Explain the trap, not the feature. The docs in this repo have caught real bugs — a `500` where a `409`
 belonged, a profile key the driver silently ignored — precisely because every documented command was
 executed first.
+
+### The documentation site
+
+`docs/` is published at [hiway-media.github.io/crowdsim](https://hiway-media.github.io/crowdsim/) by
+`.github/workflows/pages.yml`, built with [Material for MkDocs](https://squidfunk.github.io/mkdocs-material/).
+
+```bash
+make docs-serve      # http://127.0.0.1:8000, live reload
+make docs            # build into site/ exactly as CI does, with --strict
+```
+
+Both targets create `.venv-docs/` on first use from the pinned `docs/requirements.txt`. The toolchain is
+Python and is deliberately not a dependency of the tool: nothing in `bin/crowdsim`, the generator or the
+GUI needs it, and neither does `make test`.
+
+Three things to know before editing:
+
+- **The markdown stays readable on GitHub.** Pages link to files outside `docs/` with ordinary relative
+  paths (`../ci/README.md`, `../profiles/example.json`); `scripts/mkdocs_hooks.py` rewrites those to
+  github.com URLs at build time, and `../CHANGELOG.md` to the site's own Changelog page. Never rewrite a
+  link by hand to suit the site — that breaks the repository view.
+- **The Changelog page is generated** from the root `CHANGELOG.md` by the same hook. There is no
+  `docs/changelog.md` to edit, and the release script keeps working on the file it already knows.
+- **A new page needs a `nav:` entry in `mkdocs.yml`** as well as the two indexes. The build runs with
+  `--strict`, so a broken link, an unlisted page or a missing asset fails the workflow rather than
+  shipping a 404. On a pull request the site is built and *not* published, which is where those failures
+  should surface.
+
+The palette and the logo live in `docs/assets/` (`logo.svg`, `favicon.svg`, `wordmark.svg`,
+`extra.css`). The mark is the tool's own behaviour: load ramped in steps toward the peak, the SLO line,
+and the overshoot past it in the colour of the brake. Red is reserved throughout for things that stop a
+run, so keep it that way.
 
 ## The roadmap
 

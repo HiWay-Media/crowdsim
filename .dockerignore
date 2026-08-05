@@ -11,6 +11,14 @@ journey*.json
 
 node_modules/
 gui/ui/dist/
+
+# The documentation site: sources, build output and its Python virtualenv. The image
+# serves the tool, not the docs.
+docs/
+site/
+.venv-docs/
+mkdocs.yml
+
 .git/
 .github/
 ci/

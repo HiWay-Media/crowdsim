@@ -51,11 +51,12 @@ Prerequisites, and whether the profile parses with its pools resolved. Cheapest 
 ### 2. `discover` — a pool that renders
 
 ```bash
-crowdsim discover --profile my-site.json --limit 400
-# → out/pool-20260805T093710Z.json
+crowdsim discover --profile my-site.json --limit 400 --verify
+# → out/pool-20260805T093710Z.json          (only the paths that answered 2xx)
+# → out/pool-20260805T093710Z.report.txt    (what was dropped, and why)
 ```
 
-Then **check the URLs render** and point a pool at the file:
+`--verify` is the step nobody performs by hand at 400 URLs. Then point a pool at the file:
 
 ```json
 "pools": { "pages": "@pool-20260805T093710Z.json" }
@@ -86,7 +87,8 @@ What to get out of it:
   that never shows up will report `n/a` for that layer all run long — usually a wrong name in the profile,
   not a cold cache.
 - **The page weight.** 46 KB at 380 req/s is ~17 MB/s sustained; if the generator's link cannot do that,
-  the run will be invalid before it starts.
+  the run will be invalid before it starts. `probe` records it, and `load` states the implied bandwidth
+  before every run — declare `safety.generator_mbps` and it is checked rather than merely reported.
 
 ### 4. `--dry-run` — see the command, send nothing
 

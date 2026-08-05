@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
+     role="img" aria-label="crowdsim">
+  <title>crowdsim</title>
+  <!-- The mark: load ramped in steps toward the peak, an SLO line, and the
+       overshoot past it drawn in the colour of the brake. -->
+  <defs>
+    <linearGradient id="cs-ramp" x1="0" y1="60" x2="60" y2="4" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4CC9F0"/>
+      <stop offset="0.55" stop-color="#6D5EF7"/>
+      <stop offset="1" stop-color="#8B7BFF"/>
+    </linearGradient>
+    <clipPath id="cs-overshoot">
+      <rect x="45" y="8" width="9" height="13"/>
+    </clipPath>
+  </defs>
+
+  <g fill="url(#cs-ramp)">
+    <rect x="6"  y="42" width="9" height="14" rx="4.5"/>
+    <rect x="19" y="34" width="9" height="22" rx="4.5"/>
+    <rect x="32" y="23" width="9" height="33" rx="4.5"/>
+    <rect x="45" y="8"  width="9" height="48" rx="4.5"/>
+  </g>
+
+  <!-- the step that crossed the threshold -->
+  <g clip-path="url(#cs-overshoot)">
+    <rect x="45" y="8" width="9" height="48" rx="4.5" fill="#FF4D4F"/>
+  </g>
+
+  <!-- The SLO. Not currentColor: the theme loads this file in an <img>, where it
+       would resolve to the SVG's own default (black) and vanish into the dark
+       header rather than inheriting it. -->
+  <path d="M3 21 H61" stroke="#E7EAF6" stroke-width="2.2" stroke-linecap="round"
+        stroke-dasharray="4 4" opacity="0.92"/>
+</svg>

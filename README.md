@@ -1,10 +1,13 @@
-# crowdsim
+<img src="docs/assets/wordmark.svg" alt="crowdsim — load simulator for live events" height="72">
 
 [![ci](https://github.com/HiWay-Media/crowdsim/actions/workflows/ci.yml/badge.svg)](https://github.com/HiWay-Media/crowdsim/actions/workflows/ci.yml)
 [![image](https://github.com/HiWay-Media/crowdsim/actions/workflows/image.yml/badge.svg)](https://github.com/HiWay-Media/crowdsim/actions/workflows/image.yml)
+[![pages](https://github.com/HiWay-Media/crowdsim/actions/workflows/pages.yml/badge.svg)](https://hiway-media.github.io/crowdsim/)
 
 Replay a **live-event traffic mix** against a web frontend, find the knee, and measure what caching
 would actually buy you — instead of estimating it from logs after the outage.
+
+**Documentation: [hiway-media.github.io/crowdsim](https://hiway-media.github.io/crowdsim/)**
 
 ```
                  ┌──────────────┐
@@ -123,7 +126,7 @@ duration go in the dispatch call, and the profile is fetched at dispatch time fr
 
 ```bash
 crowdsim doctor                                          # what is missing on this machine
-crowdsim discover --profile p.json --limit 400            # build a URL pool from the sitemap
+crowdsim discover --profile p.json --limit 400 --verify    # a URL pool, minus what does not render
 crowdsim probe    --profile p.json --target edge          # reachability + cache headers hop by hop
 crowdsim load     --profile p.json --target edge --peak 60
 crowdsim validate p.json                                  # every rule at once, before anything runs
@@ -134,7 +137,7 @@ crowdsim serve                                            # the same thing with 
 “How far are we from the knee, without breaking anything”:
 
 ```bash
-crowdsim discover --profile p.json && crowdsim probe --profile p.json
+crowdsim discover --profile p.json --verify && crowdsim probe --profile p.json
 crowdsim load --profile p.json --peak 60          # stays under the profile's safe ceiling
 ```
 
@@ -285,7 +288,8 @@ it. A cron button on a web page is not.
 
 ## Documentation
 
-Full documentation lives in **[docs/](docs/index.md)**:
+Full documentation is published at **[hiway-media.github.io/crowdsim](https://hiway-media.github.io/crowdsim/)**
+and is the same markdown you can read here in **[docs/](docs/index.md)**:
 
 | Page | What |
 |---|---|
@@ -298,7 +302,8 @@ Full documentation lives in **[docs/](docs/index.md)**:
 | [CLI reference](docs/cli.md) | subcommands, flags, environment, exit codes, output files |
 | [GUI](docs/gui.md) | the browser interface, its safety properties and its deliberate limits |
 | [Architecture](docs/architecture.md) | why bash + k6, where the gates live, why `k6/lib` exists |
-| [Development](docs/development.md) | the five test suites, how to change things safely, how to cut a release |
+| [Development](docs/development.md) | the five test suites, how to change things safely, how to cut a release, how to preview the docs site |
+| [Changelog](CHANGELOG.md) | what changed in each release (also a page on the docs site) |
 
 Alongside them: [`profiles/example.json`](profiles/example.json) documents every field inline,
 [`cache-ab/README.md`](cache-ab/README.md) covers the A/B harness,

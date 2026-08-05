@@ -1,0 +1,4 @@
+# Documentation site toolchain. Pinned: a docs build that breaks on a theme
+# release is a broken site, not a broken test.
+mkdocs==1.6.1
+mkdocs-material==9.6.21

@@ -4,6 +4,48 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] — 2026-08-05
+
+Two of the three ways a run quietly measures the wrong thing now get answered before the run, not after.
+And writing the test for the first of them found that `discover` had been producing an empty pool since
+1.0.0.
+
+### Added
+- **`discover --verify`** requests each discovered path and keeps only what answers 2xx, reporting what it
+  dropped and why (`out/pool-<run>.report.txt`, which also records when it was verified). A 404 is cheap for
+  the app tier — or is itself rendered — and a 307 measures a redirect: a pool of either yields a flattering
+  capacity number for a load that never reached the renderer. The previous instruction was "verify them
+  before using them", which for 400 URLs means nobody did.
+  - Sequential, paced by `CROWDSIM_VERIFY_DELAY` (0.05s): building a pool must not itself be a load test.
+  - It goes through the same allowlist gate as everything else, and refuses to leave you with nothing —
+    if every path is dropped it exits 4 rather than writing an empty pool.
+- **The bandwidth a peak implies, before the run.** `probe` now also writes `out/probe-<run>.json` with the
+  page weight, and `load` and `doctor --profile` state what the requested rate needs:
+  `380 req/s × 45 KB ≈ 17.6 MB/s (140 Mbit/s) sustained`. Declare the optional
+  **`safety.generator_mbps`** and it is compared, loudly:
+  *THAT IS MORE THAN THE 100 Mbit/s THIS GENERATOR IS DECLARED TO SUSTAIN. Expect generator_ok: false.*
+  - `generator_ok: false` is otherwise diagnosed after the window was agreed and the run burned, and most
+    of those runs were predictable beforehand. `probe` had already measured the number; nothing was using it.
+  - A **warning and never a gate**: the estimate assumes every request weighs what that one page weighed,
+    which is wrong in both directions, and a wrong estimate must never stop a run somebody needs. The one
+    thing it must not do is stay silent.
+- `tests/cli/discover.bats` — the sitemap is read through a `file://` URL, so parsing is covered without
+  sending a request: distinct paths, locale stripping, `--limit`, and the two loud failures. Plus four CLI
+  tests over the bandwidth estimate, and an e2e leg (`1b`) that runs `--verify` against an nginx serving a
+  sitemap with a 404 and a redirect in it: 5 discovered, 3 kept, both dropped with reasons.
+
+### Fixed
+- **`discover` wrote an empty pool from 1.0.0 to 1.6.0.** `python3 - args <<'PY'` takes the *program* from
+  stdin, so the piped sitemap was discarded and `sys.stdin.read()` returned `""` — zero `<loc>` entries,
+  every time, silently. Nothing failed because nothing checked: the CLI suite only asserted that the command
+  passes the allowlist gate, and the e2e suite never called it. The sitemap now goes to a file which python
+  reads, a document with no `<loc>` entries exits 4 with an explanation instead of writing `[]`, and both are
+  tested. The lesson is in `docs/development.md`, because the same shape appears elsewhere in the driver.
+- The release workflow passed the CHANGELOG through a shell string, so a section written in this project's
+  voice — full of backticks and `$( )` — was **executed** rather than published. That is why 1.5.2 has no
+  GitHub Release. The notes now go to a file and are handed over with `--notes-file`, every `${{ }}` value
+  reaches `run:` through `env:`, and the image name in the notes is lowercased to match what GHCR accepts.
+
 ## [1.5.2] — 2026-08-05
 
 Two CI failures, both of the same family: a suite that passed on every developer machine and could not

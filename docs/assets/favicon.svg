@@ -1,0 +1,32 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64"
+     role="img" aria-label="crowdsim">
+  <title>crowdsim</title>
+  <!-- Same mark as logo.svg, on an opaque plate so it holds up in a browser tab
+       against both a light and a dark toolbar. -->
+  <defs>
+    <linearGradient id="fv-ramp" x1="4" y1="58" x2="58" y2="8" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#4CC9F0"/>
+      <stop offset="0.55" stop-color="#7B6BFF"/>
+      <stop offset="1" stop-color="#9D8FFF"/>
+    </linearGradient>
+    <clipPath id="fv-overshoot">
+      <rect x="44" y="11" width="10" height="12"/>
+    </clipPath>
+  </defs>
+
+  <rect width="64" height="64" rx="14" fill="#0B1020"/>
+
+  <g fill="url(#fv-ramp)">
+    <rect x="10" y="41" width="10" height="13" rx="5"/>
+    <rect x="21" y="34" width="10" height="20" rx="5"/>
+    <rect x="33" y="25" width="10" height="29" rx="5"/>
+    <rect x="44" y="11" width="10" height="43" rx="5"/>
+  </g>
+
+  <g clip-path="url(#fv-overshoot)">
+    <rect x="44" y="11" width="10" height="43" rx="5" fill="#FF4D4F"/>
+  </g>
+
+  <path d="M7 23 H57" stroke="#E7EAF6" stroke-width="2.4" stroke-linecap="round"
+        stroke-dasharray="4.5 4.5" opacity="0.9"/>
+</svg>

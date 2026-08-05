@@ -1,0 +1,95 @@
+/* crowdsim — documentation theme.
+ *
+ * Palette taken from the logo: the ramp is violet-to-cyan, the brake is red.
+ * Red is reserved for things that stop a run (safety gates, an invalid result)
+ * so it keeps meaning something when it appears in prose.
+ */
+
+:root {
+  --cs-violet: #5b4bd6;
+  --cs-violet-bright: #6d5ef7;
+  --cs-cyan: #0e9ec4;
+  --cs-brake: #d92d20;
+  --cs-ink: #0b1020;
+}
+
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--cs-violet);
+  --md-primary-fg-color--light: var(--cs-violet-bright);
+  --md-primary-fg-color--dark: #3f33a8;
+  --md-accent-fg-color: var(--cs-cyan);
+  --md-typeset-a-color: var(--cs-violet);
+  --md-code-bg-color: #f4f5fb;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-hue: 244;
+  --md-primary-fg-color: #1a1f38;
+  --md-primary-fg-color--light: #2a3152;
+  --md-primary-fg-color--dark: #11152a;
+  --md-accent-fg-color: #4cc9f0;
+  --md-typeset-a-color: #9d8fff;
+  --md-default-bg-color: var(--cs-ink);
+}
+
+/* The mark carries its own colour; the dashed SLO line uses currentColor so it
+   picks up the header's foreground in either theme. */
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 1.6rem;
+  width: 1.6rem;
+}
+
+/* Headings: tighter, so a long reference page still scans as a hierarchy. */
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.md-typeset h2 {
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  margin-top: 2.2em;
+  padding-top: 0.4em;
+  border-top: 1px solid var(--md-default-fg-color--lightest);
+}
+
+/* Tables are used heavily for flag and field references — let them breathe and
+   keep the header row readable when the page scrolls. */
+.md-typeset table:not([class]) th {
+  background: var(--md-default-fg-color--lightest);
+  font-weight: 650;
+}
+
+.md-typeset table:not([class]) td code {
+  white-space: nowrap;
+}
+
+/* The ASCII architecture diagrams are wide by design: never let them force the
+   page body to scroll sideways. */
+.md-typeset pre > code {
+  overflow-x: auto;
+}
+
+/* Exit codes and env-var names read better with a little more weight. */
+.md-typeset code {
+  font-size: 0.82em;
+  border-radius: 3px;
+}
+
+/* Admonitions: a "danger" block on these pages means a real accident is
+   possible, so it gets the brake colour. */
+.md-typeset .admonition.danger,
+.md-typeset details.danger {
+  border-color: var(--cs-brake);
+}
+
+.md-typeset .danger > .admonition-title,
+.md-typeset .danger > summary {
+  background-color: color-mix(in srgb, var(--cs-brake) 12%, transparent);
+}
+
+/* Footer nav on a docs set this small is more useful than a wall of links. */
+.md-footer-meta {
+  background-color: var(--md-primary-fg-color--dark);
+}

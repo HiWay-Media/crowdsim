@@ -8,7 +8,11 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 .PHONY: help install test test-unit test-cli test-gui test-e2e test-k8s lint gui gui-dev gui-build \
-        image image-smoke image-run clean
+        image image-smoke image-run docs docs-serve clean
+
+# The docs toolchain is Python and is not needed to build or test the tool itself, so it lives in a
+# throwaway virtualenv rather than in the repository's dependencies.
+DOCS_VENV ?= .venv-docs
 
 IMAGE ?= crowdsim:dev
 
@@ -66,5 +70,15 @@ image-run: ## run the GUI from the image on http://127.0.0.1:8787 (token printed
 	  -v "$$PWD/profiles:/profiles" -v "$$PWD/out:/out" \
 	  $(IMAGE) crowdsim serve
 
+$(DOCS_VENV)/bin/mkdocs:
+	python3 -m venv $(DOCS_VENV)
+	$(DOCS_VENV)/bin/pip install -q -r docs/requirements.txt
+
+docs: $(DOCS_VENV)/bin/mkdocs ## build the documentation site into site/ (--strict, as CI does)
+	$(DOCS_VENV)/bin/mkdocs build --strict
+
+docs-serve: $(DOCS_VENV)/bin/mkdocs ## preview the docs site with live reload (http://127.0.0.1:8000)
+	$(DOCS_VENV)/bin/mkdocs serve
+
 clean:
-	rm -rf out gui/ui/dist
+	rm -rf out gui/ui/dist site

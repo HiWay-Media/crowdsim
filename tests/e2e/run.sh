@@ -115,6 +115,41 @@ if fail:
 print('  ✅ summary, mix, cache classification and history all consistent')
 PY
 
+# ─────────────────────────────── leg 1b: discover --verify ──────────────────────────────────────────
+# The nginx sitemap advertises five paths, two of which must not survive: /gone 404s and /moved redirects.
+# A pool full of either yields a flattering capacity number for a load that never reached the renderer —
+# and verifying 400 URLs by hand, which the README used to suggest, is something nobody does.
+#
+# This leg also exists because `discover` wrote an EMPTY pool from 1.0.0 to 1.6.0 and no test called it.
+say ""
+say "▶ leg 1b — discover --verify keeps only what renders"
+CROWDSIM_OUT="$OUT" "$ROOT/bin/crowdsim" discover --profile "$FAST_PROFILE" --verify \
+  > "$OUT/discover.log" 2>&1 || die "discover --verify failed (see $OUT/discover.log)"
+
+POOL="$(ls -1 "$OUT"/pool-*.json | tail -1)"
+REPORT="${POOL%.json}.report.txt"
+python3 - "$POOL" "$REPORT" "$OUT/discover.log" <<'PY'
+import json, sys
+paths = json.load(open(sys.argv[1]))
+report = open(sys.argv[2]).read()
+log = open(sys.argv[3]).read()
+fail = []
+def check(cond, msg):
+    if not cond: fail.append(msg)
+
+check(len(paths) == 3, f"kept {len(paths)} paths, expected 3 (/, /news, /news/latest)")
+check('/gone' not in paths, "a 404 survived verification")
+check('/moved' not in paths, "a redirect survived verification")
+check('404' in report and '/gone' in report, "the report does not say why /gone was dropped")
+check('redirect' in report and '/moved' in report, "the report does not record the redirect")
+check('verified_at=' in report, "the report does not record when it was verified")
+check('3 of 5 render' in log, "the summary line does not say how many were kept")
+
+if fail:
+    print('\n'.join('  ❌ ' + f for f in fail)); sys.exit(1)
+print('  ✅ 5 discovered, 3 kept, the 404 and the redirect dropped with reasons')
+PY
+
 # ─────────────────────────────── leg 2: the brake aborts ────────────────────────────────────────────
 # One worker at 300 ms means ~3.3 req/s of capacity; asking for 4 makes the queue grow, so latency crosses
 # the profile's 700 ms p95 SLO within a few seconds while requests still complete. That distinction is the
@@ -143,6 +178,11 @@ ok "stopped after ${ELAPSED}s of a planned ${PLANNED}s"
 
 SLOW_SUMMARY="$(ls -1 "$OUT"/summary-*.json | tail -1)"
 [ "$SLOW_SUMMARY" != "$FAST_SUMMARY" ] || die "the brake leg wrote no summary of its own"
+
+# leg 1 probed, so the page weight is on disk: a run must now say what bandwidth its peak implies. The
+# point of that line is to be there BEFORE the run, not to be reconstructed from generator_ok afterwards.
+grep -q 'bandwidth:' "$OUT/slow.log" || die "the run did not state the bandwidth its peak implies"
+ok "the run stated its bandwidth requirement up front"
 
 python3 - "$SLOW_SUMMARY" "$SLOW_PROFILE" "$OUT/history.tsv" <<'PY'
 import json, sys

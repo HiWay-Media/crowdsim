@@ -122,7 +122,9 @@
   "safety": {
     "safe_peak_rps": 150,
     "allow_hosts": ["www.example.test", "10.0.0.*", "127.0.0.1"],
-    "_comment": "allow_hosts is a hard gate: crowdsim refuses any target whose host does not match. safe_peak_rps is the ceiling above which --i-know-this-breaks-production is mandatory. Set safe_peak_rps to a level you have already proven harmless, not to what you hope is harmless."
+    "generator_mbps": 1000,
+    "_comment": "allow_hosts is a hard gate: crowdsim refuses any target whose host does not match. safe_peak_rps is the ceiling above which --i-know-this-breaks-production is mandatory. Set safe_peak_rps to a level you have already proven harmless, not to what you hope is harmless.",
+    "_generator_mbps_comment": "Optional: what the GENERATOR's link can actually sustain, in Mbit/s. `probe` measures the weight of one page, so `load` and `doctor` can tell you what the requested peak implies (45 KB at 380 req/s is ~17 MB/s = ~140 Mbit/s) and warn before a run comes back with generator_ok: false. It is a warning, never a gate: the estimate assumes every request weighs what that page weighed, which is wrong in both directions."
   },
 
   "discover": {

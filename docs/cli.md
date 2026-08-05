@@ -29,25 +29,59 @@ Fetches `discover.sitemap` from the profile, extracts `<loc>` entries, strips
 `discover.strip_prefix_regex` (locale prefixes the site would redirect), de-duplicates, truncates to
 `--limit`, and writes `out/pool-<run>.json`. Point a pool at it with `"pages": "@pool-<run>.json"`.
 
-Two traps it handles, and one it does not:
+With `--verify` it then requests each path and keeps only those answering 2xx, reporting what it dropped
+and why:
 
-- a 404 is cheap for the app tier, or is itself rendered → it measures the wrong thing;
-- sitemaps advertise locale-prefixed paths that 307 → you would measure redirects, not renders;
-- **it does not verify that the URLs render.** Do that before using the pool. Regenerate after every
-  deploy: static-asset pools contain build hashes.
+```
+▶ verifying 400 paths render (sequential, 0.05s apart — this is not a load test)
+  ⚠️  383 of 400 render — 17 dropped (why, per path: out/pool-<run>.report.txt)
+      status   404  /news/2019-archive
+      redirect 301  /es/teams
+```
+
+Use it. A 404 is cheap for the app tier — or is itself rendered — and a 307 measures a redirect: a pool of
+either yields a flattering capacity number for a load that never reached the renderer. The alternative was
+"verify them by hand", which for 400 URLs means nobody does.
+
+Verification is sequential with a pause between requests (`CROWDSIM_VERIFY_DELAY`, default 0.05s): building
+a pool must not itself be a load test. It goes through the same allowlist gate as everything else, and the
+report records when it was verified — regenerate after every deploy, since static-asset pools contain build
+hashes.
+
+If the document has no `<loc>` entries at all, `discover` exits 4 and says so, rather than writing an empty
+pool that surfaces much later as "every class was dropped for want of a non-empty pool".
 
 ### `probe`
 
 Preflight against one target: status, TTFB, page size, and every cache-relevant response header, saved to
-`out/probe-<run>.log`. Run it before every load test. Exits 4 if the target answers ≥400 — a load test
-against something that does not serve is not a capacity measurement.
+`out/probe-<run>.log` — and, machine-readably, to `out/probe-<run>.json`. Run it before every load test.
+Exits 4 if the target answers ≥400 — a load test against something that does not serve is not a capacity
+measurement.
+
+The JSON is what makes `load` able to tell you the bandwidth a peak implies (below). Prose in a log is for
+whoever reads this run; the number is for the run somebody starts next week.
 
 ### `load`
 
-The load test. Resolves the profile and the target, passes both gates, then runs k6 with one scenario per
-class. Exits 0 whenever it executed — **including when the brake tripped**, because finding the knee is
+The load test. Validates the profile, resolves the target, passes both gates, then runs k6 with one scenario
+per class. Exits 0 whenever it executed — **including when the brake tripped**, because finding the knee is
 the intended outcome. Writes `out/summary-<run>.json`, `out/load-<run>.log`, and appends to
 `out/history.tsv`.
+
+Before starting it states the bandwidth the requested peak implies, from the newest `probe` of that target:
+
+```
+  ℹ️  bandwidth: 380 req/s × 45 KB ≈ 17.6 MB/s (140 Mbit/s) sustained, from probe 20260805T120000Z
+  ⚠️  THAT IS MORE THAN THE 100 Mbit/s THIS GENERATOR IS DECLARED TO SUSTAIN.
+     Expect generator_ok: false. Move the generator closer to the target, or lower the peak —
+     do not lower the SLO.
+```
+
+`generator_ok: false` is otherwise diagnosed *after* the window was agreed and the run burned, and most of
+those runs were predictable beforehand. Declare `safety.generator_mbps` to have the comparison made; without
+it the estimate is still printed. It is a **warning and never a gate**: the estimate assumes every request
+weighs what that one page weighed, which is wrong in both directions, and a wrong estimate must never stop a
+run somebody needs. The one thing it must not do is stay silent.
 
 ### `cache-ab`
 
@@ -125,6 +159,7 @@ Only `load` uses most of them; unknown flags are an error (exit 2) rather than b
 | `--slack` | off | load | Post a recap to `CROWDSIM_SLACK_WEBHOOK`. |
 | `--dry-run` | off | load | Print the exact k6 invocation and stop. Sends nothing. |
 | `--limit <n>` | `400` | discover | Maximum URLs in the pool. |
+| `--verify` | off | discover | Request each discovered path and keep only those answering 2xx. Sequential, paced by `CROWDSIM_VERIFY_DELAY`. |
 | `--ttl <s>` | `10` | cache-ab | Cache TTL for the candidate leg. |
 | `--port <n>` | `8787` | serve | GUI port. |
 | `--bind <addr>` | `127.0.0.1` | serve | GUI bind address. Anything but loopback needs a token. |
@@ -142,6 +177,7 @@ Only `load` uses most of them; unknown flags are an error (exit 2) rather than b
 | `CROWDSIM_K6_SCRIPT` | `$CROWDSIM_ROOT/k6/live-event.js` | The generator script. |
 | `CROWDSIM_GUI_PORT` / `_BIND` / `_TOKEN` | `8787` / `127.0.0.1` / unset | See [GUI](gui.md). |
 | `CROWDSIM_BIN` | `$CROWDSIM_ROOT/bin/crowdsim` | Which driver the GUI spawns. |
+| `CROWDSIM_VERIFY_DELAY` | `0.05` | Seconds between requests during `discover --verify`. Building a pool must not be a load test. |
 
 ## Exit codes
 
@@ -162,7 +198,9 @@ out/
   summary-<run_id>.json    the result — see Reading results
   load-<run_id>.log        the full run log
   probe-<run_id>.log       the preflight
+  probe-<run_id>.json      the same, machine-readable (the page weight feeds the bandwidth estimate)
   pool-<run_id>.json       what discover found
+  pool-<run_id>.report.txt what --verify dropped, and why
   profile-<run_id>.json    the profile as resolved for that run (pools inlined)
   history.tsv              one appended line per run
 ```

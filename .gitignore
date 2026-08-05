@@ -27,3 +27,7 @@ tests/e2e/.out/
 
 # Local compose environment: token, hostnames.
 .env
+
+# Documentation site built by mkdocs (published by .github/workflows/pages.yml)
+site/
+.venv-docs/

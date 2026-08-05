@@ -39,6 +39,7 @@ caching would actually buy you — instead of estimating it from logs after the 
 | use the browser interface | [GUI](gui.md) |
 | look up a flag or an exit code | [CLI reference](cli.md) |
 | change the code, or cut a release | [Development](development.md) |
+| see what changed between releases | [Changelog](../CHANGELOG.md) |
 | dispatch runs on Nomad | [`ci/README.md`](../ci/README.md) |
 | run it on Kubernetes | [`ci/kubernetes/README.md`](../ci/kubernetes/README.md) |
 

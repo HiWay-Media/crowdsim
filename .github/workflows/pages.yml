@@ -1,0 +1,72 @@
+name: pages
+
+# Publishes docs/ to https://hiway-media.github.io/crowdsim/.
+#
+# The repository's Pages source is "GitHub Actions", so this workflow is the
+# only thing that can produce a site: without it the URL answers 404, which is
+# exactly what it did until this file existed.
+#
+# A pull request builds with --strict and publishes nothing, so a broken link
+# or a missing nav entry fails the check instead of the site.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - scripts/mkdocs_hooks.py
+      - CHANGELOG.md
+      - .github/workflows/pages.yml
+  pull_request:
+    paths:
+      - docs/**
+      - mkdocs.yml
+      - scripts/mkdocs_hooks.py
+      - .github/workflows/pages.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: docs/requirements.txt
+
+      - name: Install the docs toolchain
+        run: pip install -r docs/requirements.txt
+
+      - name: Build the site
+        run: mkdocs build --strict
+
+      - name: Upload the artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    if: github.event_name != 'pull_request'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

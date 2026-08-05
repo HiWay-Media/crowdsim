@@ -145,3 +145,17 @@ test('documentation keys in pools are ignored, not validated as pools', () => {
   p.pools._note = 'free text';
   assert.ok(validateProfile(p).ok);
 });
+
+test('generator_mbps is optional, but must be a positive number when present', () => {
+  // It feeds the bandwidth estimate that warns before a run comes back generator_ok: false. A string or a
+  // zero there would silently disable the warning, which is worse than not declaring it at all.
+  const p = clone(example);
+  assert.equal(validateProfile(p).summary.generator_mbps, 1000);
+  delete p.safety.generator_mbps;
+  assert.ok(validateProfile(p).ok);
+  assert.equal(validateProfile(p).summary.generator_mbps, null);
+  for (const bad of [0, -10, 'fast']) {
+    p.safety.generator_mbps = bad;
+    assert.ok(validateProfile(p).errors.some((e) => e.path === 'safety.generator_mbps'), String(bad));
+  }
+});

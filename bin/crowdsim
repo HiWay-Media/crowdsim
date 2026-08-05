@@ -28,7 +28,7 @@
 #
 # Usage:
 #   crowdsim doctor
-#   crowdsim discover --profile <f.json> [--limit 400]
+#   crowdsim discover --profile <f.json> [--limit 400] [--verify]
 #   crowdsim probe    --profile <f.json> [--target <name>]
 #   crowdsim load     --profile <f.json> [--target <name>] [--shape mix|journey]
 #                     [--peak 120] [--start 30] [--steps 4] [--step-dur 60s] [--hold 120s]
@@ -63,6 +63,7 @@ OUT_DIR="${CROWDSIM_OUT:-$PWD/out}"
 PROFILE_F=""; TARGET=""; SHAPE="mix"; PEAK=60; START=15; STEPS=4; STEP_DUR="60s"; HOLD="120s"
 RSC_MODE="repeat"; MAX_5XX=""; MAX_P95=""; SAFE_PEAK=""; ABORT_DELAY="30s"; TOUCH_AND_GO=0
 BASE_URL_OVERRIDE=""; SLACK=0; DRY=0; FORCE=0; LIMIT=400; TTL=10; INSECURE=0; SKIP_CLASSES=""
+VERIFY=0
 GUI_PORT=""; GUI_BIND=""
 
 usage() { sed -n '1,60p' "$0" | grep -E '^#' | sed 's/^# \{0,1\}//'; }
@@ -101,6 +102,7 @@ while [ $# -gt 0 ]; do
     --abort-delay) ABORT_DELAY="$2"; shift 2;;
     --port) GUI_PORT="$2"; shift 2;;
     --bind) GUI_BIND="$2"; shift 2;;
+    --verify) VERIFY=1; shift;;
     --touch-and-go) TOUCH_AND_GO=1; shift;;
     --insecure) INSECURE=1; shift;;
     --slack) SLACK=1; shift;;
@@ -336,6 +338,10 @@ cmd_doctor() {
   if [ -n "$PROFILE_F" ]; then
     resolve_profile && ok "profile '$PROFILE_F' parses, pools resolved"
     validate_profile report
+    # At the profile's own ceiling: the question "can this machine even generate that" deserves an answer
+    # before anybody agrees a window, not after the run comes back invalid.
+    local safe; safe="$(pf safety.safe_peak_rps)"
+    if [ -n "$safe" ] && resolve_target >/dev/null 2>&1; then bandwidth_note "$safe"; fi
   fi
 }
 
@@ -351,12 +357,24 @@ cmd_discover() {
   local strip; strip="$(pf discover.strip_prefix_regex)"
   local out="$OUT_DIR/pool-$RUN_ID.json"
   say "▶ discovering URLs from $sitemap (limit $LIMIT)"
-  curl -sS --max-time 30 --retry 1 --retry-connrefused "$sitemap" \
-    | python3 - "$LIMIT" "${strip:-}" "$out" <<'PY'
+  # The sitemap goes to a FILE, and python reads the file. It must not arrive on stdin: `python3 - <<PY`
+  # takes the PROGRAM from stdin, so a pipe into it is silently discarded and sys.stdin.read() returns the
+  # empty string. That is not hypothetical — it is how this command wrote an empty pool from 1.0.0 until
+  # 1.6.0, with nothing failing and nobody noticing, because no test ever called discover.
+  local raw="$OUT_DIR/.sitemap-$RUN_ID.xml"
+  if ! curl -sS --max-time 30 --retry 1 --retry-connrefused "$sitemap" -o "$raw"; then
+    rm -f "$raw"
+    die "the sitemap did not answer: $sitemap" 4
+  fi
+  python3 - "$LIMIT" "${strip:-}" "$out" "$raw" <<'PY'
 import json, re, sys
-limit, strip, out = int(sys.argv[1]), sys.argv[2], sys.argv[3]
-raw = sys.stdin.read()
+limit, strip, out, src = int(sys.argv[1]), sys.argv[2], sys.argv[3], sys.argv[4]
+raw = open(src, encoding='utf-8', errors='replace').read()
 locs = re.findall(r'<loc>\s*([^<\s]+)\s*</loc>', raw)
+if not locs:
+    # Loudly, because the alternative is an empty pool, which surfaces much later as "every class was
+    # dropped for want of a non-empty pool" and sends you looking in the wrong place.
+    sys.exit(f"no <loc> entries in {len(raw)} bytes from the sitemap — is that URL really a sitemap?")
 paths = []
 for u in locs:
     p = re.sub(r'^[a-z]+://[^/]+', '', u) or '/'
@@ -366,10 +384,78 @@ paths = paths[:limit]
 json.dump(paths, open(out, 'w'), indent=1)
 print(f"  {len(locs)} <loc> entries → {len(paths)} distinct paths → {out}")
 PY
+  rm -f "$raw"
+  if [ "$VERIFY" = "1" ]; then verify_pool "$out"; fi
+
   say ""
-  say "  Verify they render before using them, then point a pool at the file:"
+  if [ "$VERIFY" = "1" ]; then
+    say "  Point a pool at the file:"
+  else
+    say "  Verify they render before using them (--verify does it), then point a pool at the file:"
+  fi
   say "      \"pools\": { \"pages\": \"@$(basename "$out")\" }"
   say "  ⚠️  Regenerate after every deploy: static-asset pools contain build hashes."
+}
+
+# Keep only the paths that actually render, and say what was dropped and why.
+#
+# Why this is not optional in spirit: a 404 is cheap for the app tier — or is itself rendered — and a 307
+# measures a redirect. Either way a pool full of them yields a flattering capacity number for a load that
+# never reached the renderer. The README used to say "verify them before using them", which for 400 URLs
+# means nobody did.
+#
+# Sequential, with a pause between requests: building a pool must not itself be a load test. That is also
+# why there is no --verify-concurrency.
+VERIFY_DELAY="${CROWDSIM_VERIFY_DELAY:-0.05}"
+verify_pool() {
+  local pool="$1"
+  local report="${pool%.json}.report.txt"
+  local -a curl_opts=(-sS -o /dev/null --max-time 10 --retry 0)
+  if [ "$INSECURE" = "1" ]; then curl_opts+=(-k); fi
+  if [ -n "$HOST_HEADER" ]; then curl_opts+=(-H "Host: $HOST_HEADER"); fi
+  if [ -n "$BYPASS" ]; then curl_opts+=(--resolve "${BYPASS/=/:443:}"); fi
+
+  local total kept=0 dropped=0 path code
+  total="$(python3 -c 'import json,sys; print(len(json.load(open(sys.argv[1]))))' "$pool")"
+  say ""
+  say "▶ verifying $total paths render (sequential, ${VERIFY_DELAY}s apart — this is not a load test)"
+  : > "$report"
+  printf 'verified_at=%s\nbase_url=%s\n\n' "$RUN_ID" "$BASE_URL" >> "$report"
+
+  local keep_file="$OUT_DIR/.verified-$RUN_ID.json"
+  : > "$keep_file.tmp"
+  while IFS= read -r path; do
+    [ -n "$path" ] || continue
+    # -o /dev/null still transfers the body: a HEAD would be cheaper but plenty of frameworks do not
+    # implement it, and a 405 would drop a page that renders perfectly well.
+    code="$(curl "${curl_opts[@]}" -w '%{http_code}' "$BASE_URL$path" 2>/dev/null || echo 000)"
+    case "$code" in
+      2*)  kept=$((kept + 1)); printf '%s\n' "$path" >> "$keep_file.tmp" ;;
+      3*)  dropped=$((dropped + 1)); printf 'redirect %s  %s\n' "$code" "$path" >> "$report" ;;
+      000) dropped=$((dropped + 1)); printf 'timeout  --- %s\n' "$path" >> "$report" ;;
+      *)   dropped=$((dropped + 1)); printf 'status   %s  %s\n' "$code" "$path" >> "$report" ;;
+    esac
+    sleep "$VERIFY_DELAY"
+  done < <(python3 -c 'import json,sys
+for p in json.load(open(sys.argv[1])): print(p)' "$pool")
+
+  python3 - "$keep_file.tmp" "$pool" <<'PY'
+import json, sys
+paths = [l.rstrip('\n') for l in open(sys.argv[1]) if l.strip()]
+json.dump(paths, open(sys.argv[2], 'w'), indent=1)
+PY
+  rm -f "$keep_file.tmp"
+
+  if [ "$dropped" = "0" ]; then
+    ok "all $kept paths render"
+  else
+    warn "$kept of $total render — $dropped dropped (why, per path: $report)"
+    sed -n '4,8p' "$report" | sed 's/^/      /'
+    if [ "$dropped" -gt 3 ] 2>/dev/null; then say "      … full list in $report"; fi
+  fi
+  if [ "$kept" = "0" ]; then
+    die "every discovered path was dropped: a pool of nothing measures nothing" 4
+  fi
 }
 
 # ─────────────────────────────── probe ──────────────────────────────────────────────────────────────
@@ -396,6 +482,16 @@ print(p[0] if isinstance(p,list) and p else "/")' "$RESOLVED" 2>/dev/null || ech
       -w '%{http_code} %{time_starttransfer} %{size_download}\n' \
       "$BASE_URL$first" 2>/dev/null) || true
     say "status=$code  ttfb=${ttfb}s  bytes=$size"
+    # Also written as JSON: `load` reads it back to say what bandwidth the requested peak implies. Prose in
+    # a log is for a human reading this run; the number is for the run somebody starts next week.
+    python3 - "$OUT_DIR/probe-$RUN_ID.json" "$RUN_ID" "$BASE_URL" "$first" \
+             "${code:-0}" "${ttfb:-0}" "${size:-0}" <<'PY'
+import json, sys
+dst, run_id, base, path, code, ttfb, size = sys.argv[1:8]
+json.dump({'run_id': run_id, 'base_url': base, 'path': path,
+           'status': int(code or 0), 'ttfb_s': float(ttfb or 0), 'bytes': int(size or 0)},
+          open(dst, 'w'), indent=1)
+PY
     if [ "${code:-0}" -ge 400 ] 2>/dev/null || [ -z "${code:-}" ]; then
       say "⛔ target does not answer 2xx/3xx on the first pool entry"
     fi
@@ -411,6 +507,63 @@ print(p[0] if isinstance(p,list) and p else "/")' "$RESOLVED" 2>/dev/null || ech
   ok "probe log: $log"
 }
 
+# ─────────────────────────────── bandwidth: the run you cannot sustain ──────────────────────────────
+# generator_ok: false is diagnosed AFTER the window was agreed, the alerting silenced and the run burned —
+# and most of those runs were predictable beforehand. A page weight of ~45 KB at 380 req/s is ~17 MB/s
+# sustained, which a generator behind a slow link cannot deliver no matter how many VUs k6 provisions.
+#
+# `probe` already measures the weight of one page. The arithmetic was available before the run and nothing
+# was doing it. It is a WARNING and never a gate: the estimate assumes every request weighs what that one
+# page weighed, which is wrong in both directions (assets are smaller, search results larger), and a wrong
+# estimate must never be able to stop a run somebody needs. The one thing it must not do is stay silent.
+bandwidth_note() {
+  local peak="$1" declared
+  declared="$(pf safety.generator_mbps)"
+  python3 - "$OUT_DIR" "$BASE_URL" "$peak" "${declared:-}" <<'PY'
+import glob, json, os, sys
+out_dir, base, peak, declared = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+try:
+    peak = float(peak)
+except ValueError:
+    raise SystemExit
+found = []
+for f in sorted(glob.glob(os.path.join(out_dir, 'probe-*.json'))):
+    try:
+        d = json.load(open(f))
+    except Exception:
+        continue
+    if d.get('base_url') == base and d.get('bytes'):
+        found.append(d)
+if not found:
+    print("  ℹ️  bandwidth: unknown — run 'crowdsim probe' against this target and this becomes a number")
+    raise SystemExit
+d = found[-1]                      # newest, since probe-<run_id> sorts chronologically
+weight = int(d['bytes'])
+mbytes = peak * weight / 1_000_000
+mbits = mbytes * 8
+# Scale the units to the number. A 46-byte test page printed as "0 KB ≈ 0.0 MB/s" reads like a broken
+# calculation, and a reader who distrusts the format distrusts the warning underneath it.
+size = f"{weight/1024:.0f} KB" if weight >= 1024 else f"{weight} B"
+rate = f"{mbytes:.1f} MB/s" if mbytes >= 1 else f"{peak * weight / 1000:.1f} KB/s"
+link = f"{mbits:.0f} Mbit/s" if mbits >= 1 else f"{mbits:.3g} Mbit/s"
+print(f"  ℹ️  bandwidth: {peak:g} req/s × {size} ≈ {rate} ({link}) sustained, from probe {d['run_id']}")
+if not declared:
+    print("     A generator that cannot sustain that will report generator_ok: false — an invalid run, not")
+    print("     a slow one. Declare safety.generator_mbps to have this checked.")
+    raise SystemExit
+try:
+    have = float(declared)
+except ValueError:
+    raise SystemExit
+if mbits > have:
+    print(f"  ⚠️  THAT IS MORE THAN THE {have:g} Mbit/s THIS GENERATOR IS DECLARED TO SUSTAIN.")
+    print("     Expect generator_ok: false. Move the generator closer to the target, or lower the peak —")
+    print("     do not lower the SLO.")
+elif mbits > 0.8 * have:
+    print(f"  ⚠️  that is within 20% of the declared {have:g} Mbit/s: watch generator_ok on this run")
+PY
+}
+
 # ─────────────────────────────── load ───────────────────────────────────────────────────────────────
 cmd_load() {
   need_profile
@@ -420,6 +573,7 @@ cmd_load() {
   resolve_profile; resolve_target
   gate_allowlist
   gate_peak
+  bandwidth_note "$PEAK"
   k6_bin
 
   local summary="$OUT_DIR/summary-$RUN_ID.json"

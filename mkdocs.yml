@@ -1,0 +1,123 @@
+site_name: crowdsim
+site_description: Load simulator for live events — replays a measured traffic mix, finds the knee, brakes at the SLO.
+site_url: https://hiway-media.github.io/crowdsim/
+repo_url: https://github.com/HiWay-Media/crowdsim
+repo_name: HiWay-Media/crowdsim
+edit_uri: edit/main/docs/
+copyright: MIT-licensed. Numbers in these pages come from real runs, never from estimates.
+
+docs_dir: docs
+site_dir: site
+
+# The pinned toolchain lives next to the pages it builds, but it is not a page.
+exclude_docs: |
+  requirements.txt
+
+# Links to files outside docs/ (../ci/README.md, ../profiles/example.json, …) are
+# deliberate: they resolve when the same markdown is read on GitHub. The hook
+# rewrites them to github.com URLs at build time, so they resolve here too.
+hooks:
+  - scripts/mkdocs_hooks.py
+
+theme:
+  name: material
+  language: en
+  logo: assets/logo.svg
+  favicon: assets/favicon.svg
+  icon:
+    repo: fontawesome/brands/github
+  font:
+    text: Inter
+    code: JetBrains Mono
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Follow the system theme
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.footer
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - content.tabs.link
+
+extra_css:
+  - assets/extra.css
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/HiWay-Media/crowdsim
+      name: Source on GitHub
+    - icon: fontawesome/brands/docker
+      link: https://github.com/HiWay-Media/crowdsim/pkgs/container/crowdsim
+      name: Container image on GHCR
+  generator: false
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+      permalink_title: Link to this section
+  - pymdownx.details
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.snippets
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+
+nav:
+  - Overview: index.md
+  - Getting started:
+      - Install: install.md
+      - Docker: docker.md
+      - GUI: gui.md
+  - Using it:
+      - Running a test: running-a-test.md
+      - Reading results: reading-results.md
+      - Profile reference: profile.md
+      - CLI reference: cli.md
+  - Internals:
+      - Architecture: architecture.md
+      - Development: development.md
+      - Changelog: changelog.md
+
+validation:
+  omitted_files: warn
+  absolute_links: warn
+  unrecognized_links: warn

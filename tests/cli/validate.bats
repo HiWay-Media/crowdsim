@@ -126,3 +126,72 @@ PY2
   [[ "$output" == *"full profile validation needs node"* ]]
   [[ "$output" == *"only the structural checks ran"* ]]
 }
+
+@test "the bandwidth estimate appears, and warns when the declared link cannot sustain it" {
+  # #19: generator_ok: false is diagnosed after the window is burned. probe measured a page; the estimate
+  # is arithmetic that was available before the run and that nothing was doing.
+  mkdir -p "$CROWDSIM_OUT"
+  python3 - "$CROWDSIM_OUT/probe-20260805T120000Z.json" <<'PY2'
+import json, sys
+json.dump({'run_id': '20260805T120000Z', 'base_url': 'http://127.0.0.1:8099',
+           'path': '/', 'status': 200, 'ttfb_s': 0.18, 'bytes': 46231}, open(sys.argv[1], 'w'))
+PY2
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 380 --safe-peak 400 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bandwidth: 380 req/s × 45 KB"* ]]
+  [[ "$output" == *"17.6 MB/s"* ]]
+  [[ "$output" == *"140 Mbit/s"* ]]
+  [[ "$output" == *"safety.generator_mbps"* ]]      # not declared: says how to have it checked
+
+  # declared, and not enough: loud, and it names the two honest fixes
+  python3 - "$FIXTURES/minimal.json" "$BATS_TEST_TMPDIR/slow-link.json" <<'PY2'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d['safety']['generator_mbps'] = 100
+json.dump(d, open(sys.argv[2], 'w'))
+PY2
+  run "$CROWDSIM" load --profile "$BATS_TEST_TMPDIR/slow-link.json" --peak 380 --safe-peak 400 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MORE THAN THE 100 Mbit/s"* ]]
+  [[ "$output" == *"generator_ok: false"* ]]
+  [[ "$output" == *"do not lower the SLO"* ]]
+}
+
+@test "the estimate is a warning and never a gate: the run still goes ahead" {
+  mkdir -p "$CROWDSIM_OUT"
+  python3 - "$CROWDSIM_OUT/probe-20260805T120000Z.json" <<'PY2'
+import json, sys
+json.dump({'run_id': '20260805T120000Z', 'base_url': 'http://127.0.0.1:8099',
+           'path': '/', 'status': 200, 'ttfb_s': 0.18, 'bytes': 999999}, open(sys.argv[1], 'w'))
+PY2
+  python3 - "$FIXTURES/minimal.json" "$BATS_TEST_TMPDIR/tiny-link.json" <<'PY2'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d['safety']['generator_mbps'] = 1
+json.dump(d, open(sys.argv[2], 'w'))
+PY2
+  # A wrong estimate must never be able to stop a run somebody needs.
+  run "$CROWDSIM" load --profile "$BATS_TEST_TMPDIR/tiny-link.json" --peak 40 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"MORE THAN"* ]]
+  [[ "$output" == *"(dry run) k6 run"* ]]
+}
+
+@test "with no probe for this target, the estimate says it does not know" {
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 40 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bandwidth: unknown"* ]]
+  [[ "$output" == *"crowdsim probe"* ]]
+}
+
+@test "doctor states the requirement at the profile's own safe peak" {
+  mkdir -p "$CROWDSIM_OUT"
+  python3 - "$CROWDSIM_OUT/probe-20260805T120000Z.json" <<'PY2'
+import json, sys
+json.dump({'run_id': '20260805T120000Z', 'base_url': 'http://127.0.0.1:8099',
+           'path': '/', 'status': 200, 'ttfb_s': 0.18, 'bytes': 46231}, open(sys.argv[1], 'w'))
+PY2
+  run "$CROWDSIM" doctor --profile "$FIXTURES/minimal.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"bandwidth: 50 req/s"* ]]        # the fixture's safe_peak_rps
+}
