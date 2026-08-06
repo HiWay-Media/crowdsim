@@ -36,9 +36,9 @@ in questo repository.
   `ci/nomad/crowdsim.nomad.hcl`, `cache-ab/README.md`, `CHANGELOG.md`. Un flag nuovo tocca almeno: parsing
   args + env passato a k6 + header usage + README + **test** (+ `gui/server/lib/args.js` e form della GUI
   se va esposto anche li).
-- **`make test` verde prima di ogni commit** (unit + gui + cli: non genera traffico). Logica nuova nel
-  generatore -> va in `k6/lib/` con test in `tests/unit/`, non dentro `live-event.js`. Ogni bug corretto
-  parte da un test che lo riproduce. `make test-e2e` (docker + k6, carico reale su loopback) quando si
+- **`make test` verde prima di ogni commit** (unit + ui + gui + cli: non genera traffico). Logica nuova
+  nel generatore -> va in `k6/lib/` con test in `tests/unit/`, non dentro `live-event.js`. Una decisione del **front end** va in `gui/ui/src/lib/` con test in `tests/ui/`, e il componente resta cablaggio; il testo che non si può ammorbidire (safe-peak, rifiuto, `unknown` ≠ `MISS`) sta in `lib/messages.js`. Unica eccezione: una modifica puramente visiva (spaziatura, un colore) non prende un test.
+  Ogni bug corretto parte da un test che lo riproduce. `make test-e2e` (docker + k6, carico reale su loopback) quando si
   toccano driver, generatore o API.
 - **I gate di sicurezza non si toccano** (vedi sotto): non indebolirli, non aggiungere default, non
   aggiungere prompt interattivi.

@@ -326,5 +326,51 @@ aborted = [r for r in runs if r["aborted"]]
 assert len(aborted) == 2, "the GUI does not distinguish the aborted runs"
 print(f"  ✅ GUI lists {len(runs)} runs, {len(aborted)} of them aborted")'
 
+# ── the page itself, in a real browser ───────────────────────────────────────────────────────────────
+# tests/ui asserts the front end's decisions as plain modules, which is fast and covers the reasoning — and
+# cannot prove that a component renders any of it. This does: one real browser, the real bundle, the real
+# server, asserting the things whose absence would be silent.
+#
+# Skipped, loudly, when there is no browser: a check that quietly disappears is worse than one that is
+# missing on purpose.
+CHROME=""
+for c in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" google-chrome-stable google-chrome chromium; do
+  if [ -x "$c" ] || command -v "$c" >/dev/null 2>&1; then CHROME="$c"; break; fi
+done
+if [ -z "$CHROME" ]; then
+  warn "SKIPPED: the rendered-page check needs Chrome or Chromium, and neither is on this machine"
+else
+  say ""
+  say "▶ the page renders what the archive says"
+  if [ ! -f "$ROOT/gui/ui/dist/index.html" ]; then
+    warn "SKIPPED: gui/ui/dist is missing — run: npm run gui:build"
+  else
+    "$CHROME" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=6000 \
+      --dump-dom "http://127.0.0.1:18787/#history" > "$OUT/page.html" 2>/dev/null || true
+    python3 - "$OUT/page.html" <<'PY2' || die "the rendered page is not showing the archive (see $OUT/page.html)"
+import re, sys
+html = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+fail = []
+def check(cond, msg):
+    if not cond: fail.append(msg)
+
+check(len(html) > 4000, "the page rendered almost nothing: the bundle or the server is broken")
+check('crowdsim' in html, "the page did not render the application shell")
+# One row per run in the archive, rendered — not just served as JSON.
+ids = set(re.findall(r'\b\d{8}T\d{6}Z\b', html))
+check(len(ids) >= 3, f"the page shows {len(ids)} run ids, expected the 3 in the archive")
+# The outcome must be visible where somebody reads it, not only in the file. This suite produces one clean
+# run and two the brake aborted, so the page has to distinguish them — an archive rendered as three
+# identical rows is the failure this assertion exists for. (The first version of this check looked for
+# "invalid" and failed: nothing here is generator-bound. The page was right and the assertion was wrong.)
+check('>clean<' in html, "no run is marked clean, though leg 1 completed without crossing the SLO")
+check('>knee<' in html, "no run is marked as a knee, though the brake aborted two of them")
+if fail:
+    print("\n".join("  ❌ " + f for f in fail)); sys.exit(1)
+print(f"  ✅ the page rendered {len(ids)} runs from the archive, clean and knee told apart")
+PY2
+  fi
+fi
+
 say ""
 ok "end-to-end suite passed"

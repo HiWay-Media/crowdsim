@@ -7,7 +7,7 @@
 SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
-.PHONY: help install test test-unit test-cli test-gui test-e2e test-k8s lint gui gui-dev gui-build \
+.PHONY: help install test test-unit test-cli test-gui test-ui test-e2e test-k8s lint gui gui-dev gui-build \
         image image-smoke image-run docs docs-serve clean
 
 # The docs toolchain is Python and is not needed to build or test the tool itself, so it lives in a
@@ -35,7 +35,7 @@ help: ## show this help
 install: ## install dev + GUI dependencies (bats, express, vite, react)
 	npm install
 
-test: test-unit test-gui test-cli ## everything that does not generate load
+test: test-unit test-ui test-gui test-cli ## everything that does not generate load
 
 # The glob is expanded by the shell, not by node: `node --test` only learned to glob in v22, and CI runs
 # the LTS. A quoted pattern reaches node verbatim there and it fails with "Could not find".
@@ -54,6 +54,12 @@ test-cli: ## bin/crowdsim behaviour: safety gates, args, profile resolution — 
 
 test-gui: ## GUI API: profiles, run launching, path traversal, gate propagation — node:test
 	node --test tests/gui/*.test.js
+
+# The front end's decisions live in gui/ui/src/lib as plain ES modules — no JSX, no React import — so the
+# same runner as everything else loads them directly. What needs a browser is named in docs/development.md
+# and asserted by the e2e suite, not skipped quietly.
+test-ui: ## the front end's decisions and its safety wording — node:test
+	node --test tests/ui/*.test.js
 
 test-e2e: ## REAL run against a local nginx (needs docker + k6) — the only suite that loads anything
 	tests/e2e/run.sh

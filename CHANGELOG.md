@@ -4,6 +4,49 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.12.0] — 2026-08-06
+
+Milestone [v1.6.0](https://github.com/HiWay-Media/crowdsim/milestone/7): the front end had 1415 lines and no
+test of any kind. The rule "every fixed bug starts with a test that reproduces it" had held everywhere except
+the one place with nowhere to put such a test — and it showed, in bugs found by screenshotting the page.
+
+### Added
+- **`tests/ui/`, and `make test-ui` inside `make test`**
+  ([#37](https://github.com/HiWay-Media/crowdsim/issues/37)). The runner is `node --test`, the same one the
+  rest of the repository uses, because the decisions under test are plain ES modules with no JSX and no React
+  import — verified, not assumed, before choosing. That keeps one runner and adds **no dependency** to a UI
+  that carries react and vite and nothing else; a testing framework larger than the app would have been a
+  poor trade. What the choice costs is written down rather than discovered later, and `tests/ui/00-harness`
+  proves the suite can fail and that it is loading the app's own modules, the way
+  `tests/cli/00-environment.bats` does for the CLI.
+- **The front end's decisions live in `gui/ui/src/lib/`**
+  ([#38](https://github.com/HiWay-Media/crowdsim/issues/38)), the way `k6/lib/` holds the generator's: which
+  run to show on load, when a result stops belonging to the form, the tab and comparison pair in the URL
+  fragment, which of two runs is A, how a delta is painted, whether a host matches the allowlist. The
+  components read as wiring, and the states nobody clicks through by hand — an empty archive, a run with no
+  summary, a refusal, a header that never appeared — are covered.
+- **A test per front-end bug that actually shipped**
+  ([#39](https://github.com/HiWay-Media/crowdsim/issues/39)), named after the trap rather than the function:
+  the reload that discarded a finished run, the comparison pair with no defined direction, the tab that lived
+  only in React state, and the run-id shape that made a probe's result unreachable.
+- **Safety-surface tests** ([#40](https://github.com/HiWay-Media/crowdsim/issues/40)) for the three parts of
+  the page that are not conveniences: the safe-peak block (two deliberate acts, nothing remembered, and
+  reading the armed command is not arming it), the refusal card (the reason and **no numbers**), and
+  `unknown` never being painted as `MISS` or as 0%. The sentences they assert now live in
+  `gui/ui/src/lib/messages.js`, because wording inside JSX has no reviewer but the diff.
+- **A rendered-page check in the e2e suite**, because none of the above can prove a component renders any of
+  it: one real browser, the real bundle, the real server, asserting the archive is on screen and that a clean
+  run and a knee are told apart. It skips loudly without Chrome — a check that quietly disappears is worse
+  than one that is missing on purpose. It earned its place immediately by failing on a wrong assertion of
+  mine (it looked for an "invalid" run in an archive that has none); the page was right.
+
+### Changed
+- `docs/development.md` gains the suite, what the layer cannot cover, and the rule: **a UI change starts with
+  a failing test**, with one stated exception so it is not argued about per commit — a purely visual change
+  (spacing, a colour) does not get one. The same rule is in `AGENTS.md` and `CLAUDE.md`, where it is read
+  before a change rather than after.
+- CI runs the new suite alongside the others.
+
 ## [1.11.0] — 2026-08-05
 
 The backlog, cleared. Both items are the same shape: the tool knew something and was not saying it.

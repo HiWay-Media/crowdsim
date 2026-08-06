@@ -3,35 +3,29 @@ import { api, ApiError, getToken, setToken } from './api.js';
 import RunPanel from './components/RunPanel.jsx';
 import ProfilePanel from './components/ProfilePanel.jsx';
 import HistoryPanel from './components/HistoryPanel.jsx';
+import { parseHash, formatHash, TAB_IDS } from './lib/hash.js';
 
-const TABS = [
-  { id: 'run', label: 'New run', hint: 'pick a target and a rate, watch it climb' },
-  { id: 'profiles', label: 'Profiles', hint: 'the mix, the pools, the SLO, the allowlist' },
-  { id: 'history', label: 'History', hint: 'does the knee move?' },
-];
-
-const TAB_IDS = TABS.map((t) => t.id);
+// Rendered from TAB_IDS so the nav and the vocabulary of the URL fragment are literally the same list: a
+// tab you cannot link to, or a link to a tab that is not rendered, is a bug in either direction.
+const TAB_META = {
+  run: { label: 'New run', hint: 'pick a target and a rate, watch it climb' },
+  profiles: { label: 'Profiles', hint: 'the mix, the pools, the SLO, the allowlist' },
+  history: { label: 'History', hint: 'does the knee move?' },
+};
+const TABS = TAB_IDS.map((id) => Object.assign({ id }, TAB_META[id]));
 
 export default function App() {
   // The tab lives in the URL fragment, so a reload keeps you where you were and a link can point at
-  // "#history" — which is also how the documentation screenshots are taken.
-  // `#history=<a>,<b>` selects the History tab AND the comparison in it, so a delta can be sent to
-  // somebody as a link. The tab id is the part before the '='.
-  const tabOf = (hash) => String(hash || '').replace('#', '').split('=')[0];
-  const [tab, setTab] = useState(() => {
-    const fromHash = tabOf(window.location.hash);
-    return TAB_IDS.indexOf(fromHash) === -1 ? 'run' : fromHash;
-  });
+  // "#history" — or at one comparison, "#history=<a>,<b>". Parsing it is a decision with edge cases, so it
+  // lives in lib/hash.js with its tests; this component only reacts to it.
+  const [tab, setTab] = useState(() => parseHash(window.location.hash).tab);
 
   useEffect(() => {
-    if (tabOf(window.location.hash) !== tab) window.location.hash = tab;
+    if (parseHash(window.location.hash).tab !== tab) window.location.hash = formatHash(tab, null);
   }, [tab]);
 
   useEffect(() => {
-    const onHash = () => {
-      const id = tabOf(window.location.hash);
-      if (TAB_IDS.indexOf(id) !== -1) setTab(id);
-    };
+    const onHash = () => setTab(parseHash(window.location.hash).tab);
     window.addEventListener('hashchange', onHash);
     return () => window.removeEventListener('hashchange', onHash);
   }, []);

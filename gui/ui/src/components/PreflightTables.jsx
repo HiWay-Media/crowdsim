@@ -1,4 +1,5 @@
 import React from 'react';
+import { LAYER, layerVerdict } from '../lib/messages.js';
 
 /*
  * probe and discover, read as data.
@@ -54,13 +55,11 @@ export function ProbeTable({ probe }) {
               <tr key={l.label}>
                 <td>{l.label}</td>
                 <td className="mono">{l.header}</td>
-                <td className="mono">{l.value === null ? <span className="note">not present</span> : l.value}</td>
+                <td className="mono">
+                  {l.value === null ? <span className="note">{LAYER.absent}</span> : l.value}
+                </td>
                 <td>
-                  {l.hit === null
-                    ? <span className="warn">unknown</span>
-                    : l.hit
-                      ? <span className="ok">HIT</span>
-                      : <span className="note">MISS</span>}
+                  <span className={layerVerdict(l.hit).tone}>{layerVerdict(l.hit).text}</span>
                   <span className="note"> /{l.hit_pattern}/i</span>
                 </td>
               </tr>
@@ -73,13 +72,7 @@ export function ProbeTable({ probe }) {
 
       {absent.length ? (
         <div className="banner warn">
-          <strong>{absent.length} declared header{absent.length > 1 ? 's' : ''} never appeared
-            ({absent.map((l) => l.header).join(', ')}).</strong>
-          <p>
-            That is usually the wrong header <em>name</em> in the profile rather than a cold cache. A layer
-            that never speaks is reported as unknown and never as a miss, so it cannot quietly drag a hit
-            ratio to zero — but it also means this run measures nothing about that layer.
-          </p>
+          <p>{LAYER.absentExplained(absent.map((l) => l.header))}</p>
         </div>
       ) : null}
     </section>

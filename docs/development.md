@@ -6,7 +6,7 @@ a result.
 ```bash
 npm install          # bats, express, vite, react
 make lint            # bash -n on the driver, node --check on every JS file
-make test            # unit + GUI + CLI — 150 tests, and not one request sent
+make test            # unit + UI + GUI + CLI — and not one request sent
 make test-e2e        # a real ~12 req/s run against an nginx container on loopback
 make image-smoke     # the built image: still the tool, gates intact
 ```
@@ -18,6 +18,7 @@ make image-smoke     # the built image: still the tool, gates intact
 | `tests/unit/` | `node --test` | `k6/lib/`: mix renormalisation, ramp, VU provisioning, RSC modes, cache classification, the three verdicts | no |
 | `tests/cli/` | `bats` (**bash ≥ 4**) | `bin/crowdsim` against a stub k6: both gates, exit codes, profile and target resolution, empty pools, `--touch-and-go`, history, and `scripts/new-release.sh` | no |
 | `tests/gui/` | `node --test` | the API over a real socket: traversal, the override confirmation, one-run-at-a-time, refusals passed through, read-only mounts | no |
+| `tests/ui/` | `node --test` | the front end's decisions and its safety wording, as plain modules from `gui/ui/src/lib` | no |
 | `tests/e2e/` | shell + docker | three legs, one per conclusion the tool produces: a fast nginx (chain works, healthy target does *not* abort), a slow single-worker origin (**the brake does abort**, early, generator still holding), and an unreachable target (**connectivity, not capacity**). Skips (exit 0) without docker or k6 | **yes**, on loopback |
 | `tests/image/` | shell + docker | the published artefact: driver finds generator, GUI starts, gates survived the build, no allowlist default | no |
 | `tests/k8s/` | shell + kubectl | `ci/kubernetes` rendered client-side (no cluster): never-retried Job, cluster-enforced deadline, one GUI replica, ClusterIP only, no CronJob, no committed override, pinned image | no |
@@ -41,6 +42,22 @@ printing `141`). A suite that cannot fail is worse than no suite, so `make test-
 can fail and stops with instructions if there is none — `brew install bash`; `bin/crowdsim` itself keeps
 working on 3.2. `tests/cli/00-environment.bats` is the canary for anyone invoking `npx bats` directly: it
 asserts with `[ ]` and proves, in a subshell, that a failing `[[ ]]` really does fail a test here.
+
+**The front end is tested as decisions, not as a rendered page.** `gui/ui/src/lib/*.js` holds what can be
+wrong — which run to show on load, when a result stops belonging to the form, the tab and comparison pair in
+the URL fragment, which of two runs is A, how a delta is painted, whether a host matches the allowlist, and
+the sentences that must not be softened — as plain ES modules with no JSX and no React import. `node --test`
+loads them directly, so the whole repository keeps one runner and the UI adds no dependency: `gui/ui` carries
+react and vite and nothing else, and a testing framework larger than the app would have been a poor trade.
+
+The cost is stated rather than hidden: **this layer cannot prove that a component renders any of it.** Two
+things close that gap — `tests/ui/00-harness.test.js` asserts that the components actually import these
+modules (a suite testing a copy passes while the app is broken), and the e2e suite loads the real page in a
+real browser and asserts the archive is on screen, skipping loudly when no Chrome is present.
+
+**A UI change starts with a failing test**, like everything else here. The exception, so it is not argued
+about per commit: a purely visual change — spacing, a colour, a border — does not get one. The moment a
+change decides *what* is shown rather than how it looks, it does.
 
 **The unhappy summaries are fixtures.** `tests/cli/fixtures/summary-invalid.json` and
 `summary-unreachable.json` are asserted to be reported as *invalid* and as *unreachable* — never as capacity
@@ -83,6 +100,10 @@ infrastructure and is never a target.
   a directory of symlinks rather than filtering `$PATH`: on macOS k6 and python3 live in the same brew
   directory, and filtering would remove python3 too — making the test pass for the wrong reason at the wrong
   exit code.
+- Front-end tests go in `tests/ui/`, and the thing being tested goes in `gui/ui/src/lib/` first. A component
+  that decides something is a component with an untestable decision in it: move the decision out, leave the
+  wiring. Wording that must not be softened — the safe-peak block, a refusal, `unknown` vs `MISS` — belongs
+  in `lib/messages.js` for the same reason: a sentence inside JSX has no reviewer but the diff.
 - GUI tests boot the app on an ephemeral port against `tests/gui/fixtures/fake-crowdsim`, which records its
   argv instead of sending anything.
 - Every bug fix starts from a test that reproduces it.

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { api } from '../api.js';
+import { SAFE_PEAK } from '../lib/messages.js';
 
 /*
  * The command about to be authorised, as the server itself renders it.
@@ -68,8 +69,8 @@ export default function CommandPreview({ body, disabled }) {
 
       {state.armed ? (
         <div className="banner warn">
-          <strong>This line carries <code>--i-know-this-breaks-production</code>.</strong> You are reading it
-          armed; starting it still requires the profile name typed by hand, for this run only.
+          <strong>This line carries <code>--i-know-this-breaks-production</code>.</strong>{' '}
+          {SAFE_PEAK.previewArmed}
         </div>
       ) : null}
     </section>

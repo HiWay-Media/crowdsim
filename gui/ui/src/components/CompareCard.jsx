@@ -1,4 +1,5 @@
 import React from 'react';
+import { valueCell, deltaCell, mayRenderNumbers } from '../lib/compare.js';
 
 /*
  * Two runs, compared.
@@ -13,6 +14,7 @@ import React from 'react';
 export default function CompareCard({ result, onClose }) {
   if (!result) return null;
   const refused = result.refused || [];
+  const withNumbers = mayRenderNumbers(result);
 
   return (
     <section className="card wide">
@@ -47,7 +49,7 @@ export default function CompareCard({ result, onClose }) {
       {(result.warnings || []).map((w) => <div key={w} className="banner warn">{w}</div>)}
       {(result.notes || []).map((n) => <div key={n} className="banner warn">{n}</div>)}
 
-      {refused.length ? null : (
+      {withNumbers ? (
         <>
           <h3>Overall</h3>
           <DeltaTable rows={result.overall} />
@@ -94,7 +96,7 @@ export default function CompareCard({ result, onClose }) {
             quote the change, not the number.
           </p>
         </>
-      )}
+      ) : null}
     </section>
   );
 }
@@ -134,23 +136,13 @@ function DeltaTable({ rows, naNote }) {
   );
 }
 
-/** The verdict is the server's; this only paints it. */
+/** The verdict is the server's and the wording is lib/compare.js's; this only paints it. */
 function Change({ row }) {
-  if (row.change === null || row.change === undefined) return <span className="note">—</span>;
-  const { change, unit, relative, verdict } = row;
-  const shown = unit === 'ms'
-    ? `${change >= 0 ? '+' : ''}${Math.abs(change) < 10 ? change.toFixed(2) : change.toFixed(0)} ms`
-    : unit === 'ratio'
-      ? `${change >= 0 ? '+' : ''}${(change * 100).toFixed(2)} pp`
-      : `${change >= 0 ? '+' : ''}${change.toFixed(0)}`;
-  const rel = relative ? ` (${relative >= 0 ? '+' : ''}${(relative * 100).toFixed(0)}%)` : '';
-  const cls = verdict === 'better' ? 'ok' : verdict === 'worse' ? 'bad' : 'note';
-  return <span className={cls}>{shown}{rel}</span>;
+  const cell = deltaCell(row);
+  return <span className={cell.tone}>{cell.text}</span>;
 }
 
 function fmt(v, unit) {
-  if (v === null || v === undefined) return <span className="note">n/a</span>;
-  if (unit === 'ms') return `${Math.abs(v) < 10 ? v.toFixed(2) : v.toFixed(0)} ms`;
-  if (unit === 'ratio') return `${(v * 100).toFixed(2)}%`;
-  return String(v);
+  const text = valueCell(v, unit);
+  return text === 'n/a' ? <span className="note">n/a</span> : text;
 }

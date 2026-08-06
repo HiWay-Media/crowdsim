@@ -48,6 +48,9 @@ jobs:
       - name: GUI API tests
         run: make test-gui
 
+      - name: front end — the decisions and the safety wording
+        run: make test-ui
+
       - name: CLI tests (safety gates, exit codes, release helper)
         run: make test-cli
 

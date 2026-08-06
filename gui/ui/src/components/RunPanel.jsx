@@ -4,6 +4,9 @@ import MixBars from './MixBars.jsx';
 import SummaryCard from './SummaryCard.jsx';
 import CommandPreview from './CommandPreview.jsx';
 import { ProbeTable, DiscoverTable } from './PreflightTables.jsx';
+import { runToShow, shouldClearResult } from '../lib/runs.js';
+import { allowlistVerdict } from '../lib/allowlist.js';
+import { SAFE_PEAK } from '../lib/messages.js';
 
 /*
  * The run launcher. Everything expensive to get wrong is shown BEFORE the button: which host will be hit,
@@ -67,7 +70,7 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
   useEffect(() => {
     let alive = true;
     api.runs().then(async (r) => {
-      const last = r.active || (r.runs && r.runs[0]) || null;
+      const { run: last, follow } = runToShow(r);
       if (!alive || !last) return;
       setRun(last);
       try {
@@ -77,7 +80,7 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
         setSummary(full.summary || null);
         setArtifacts(full.artifacts || null);
       } catch (e) { /* the run record is enough */ }
-      if (!r.active) return;
+      if (!follow) return;
       onActiveRun(r.active);
       streamRun(r.active.id, (line) => setLog((l) => [...l, line]), async (ended) => {
         setRun(ended);
@@ -102,13 +105,12 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
     try { return new URL(chosen.base_url).hostname; } catch (e) { return null; }
   }, [chosen]);
 
-  const allowed = useMemo(() => {
-    if (!host) return null;
-    const patterns = (env && env.allow_targets ? env.allow_targets.split(',') : (sum ? sum.allow_hosts : []))
-      .map((s) => String(s).trim()).filter(Boolean);
-    if (!patterns.length) return false;
-    return patterns.some((p) => new RegExp('^' + p.replace(/[.+^${}()|[\]\\]/g, '\\$&')
-      .replace(/\*/g, '.*').replace(/\?/g, '.') + '$').test(host));
+  // CROWDSIM_ALLOW_TARGETS overrides the profile's list, exactly as it does in the driver.
+  const verdict = useMemo(() => {
+    const patterns = env && env.allow_targets
+      ? env.allow_targets.split(',')
+      : ((sum && sum.allow_hosts) || []);
+    return allowlistVerdict(host, patterns);
   }, [host, env, sum]);
 
   const set = (k) => (e) => setForm((f) => ({ ...f, [k]: e.target.type === 'checkbox' ? e.target.checked : e.target.value }));
@@ -150,8 +152,10 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
   async function launch(kind, extra) {
     setError(null);
     setLog([]);
-    setSummary(null);
-    setArtifacts(null);
+    if (shouldClearResult({ reason: 'run-started' })) {
+      setSummary(null);
+      setArtifacts(null);
+    }
     try {
       const body = buildBody(kind, extra);
       const started = await api.startRun(body);
@@ -187,9 +191,11 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
               onChange={(e) => {
                 // A result belongs to the profile it came from: keeping it on screen next to a different
                 // profile's form is how somebody reads last week's number as today's.
+                if (shouldClearResult({ reason: 'profile-selected', from: profileName, to: e.target.value })) {
+                  setSummary(null);
+                  setArtifacts(null);
+                }
                 setProfileName(e.target.value);
-                setSummary(null);
-                setArtifacts(null);
               }}
             >
               {usable.map((p) => <option key={p.name} value={p.name}>{p.name}{p.title ? ` — ${p.title}` : ''}</option>)}
@@ -213,9 +219,9 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
               <tr>
                 <th>allowlist</th>
                 <td>
-                  {allowed === null ? '—' : allowed
-                    ? <span className="ok">{host} is authorised</span>
-                    : <span className="bad">{host} is NOT in the allowlist — the run will be refused (exit 3)</span>}
+                  <span className={verdict.state === 'authorised' ? 'ok' : verdict.state === 'refused' ? 'bad' : 'note'}>
+                    {verdict.text}
+                  </span>
                 </td>
               </tr>
             </tbody>
@@ -259,24 +265,20 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
         <div className={pastSafe ? 'gate danger' : 'gate'}>
           {pastSafe ? (
             <>
-              <strong>{form.peak} req/s is above this profile's safe ceiling of {safePeak} req/s.</strong>
-              <p>
-                Past this point the run is expected to serve 5xx to real users of {host || 'the target'}, and to
-                degrade any co-tenant on the same nodes. Agree a window, tell whoever watches the uptime
-                alerts, and be ready to stop. Then type the profile name to confirm.
-              </p>
+              <strong>{SAFE_PEAK.consequence(form.peak, safePeak, host)}</strong>
+              <p>{SAFE_PEAK.explain(host)}</p>
               <div className="row">
                 <label className="check">
-                  <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> I know this breaks production
+                  <input type="checkbox" checked={force} onChange={(e) => setForce(e.target.checked)} /> {SAFE_PEAK.checkbox}
                 </label>
                 <label>
-                  Profile name
+                  {SAFE_PEAK.confirmLabel}
                   <input className="mono" value={confirm} placeholder={sum.name || ''} onChange={(e) => setConfirm(e.target.value)} />
                 </label>
               </div>
             </>
           ) : (
-            <span>Within the profile's safe ceiling{safePeak !== null ? ` (${safePeak} req/s)` : ''}.</span>
+            <span>{SAFE_PEAK.within(safePeak)}</span>
           )}
         </div>
 

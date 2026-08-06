@@ -2,6 +2,8 @@ import React, { useEffect, useState } from 'react';
 import { api, ApiError } from '../api.js';
 import SummaryCard from './SummaryCard.jsx';
 import CompareCard from './CompareCard.jsx';
+import { orderPair } from '../lib/compare.js';
+import { parseHash, formatHash } from '../lib/hash.js';
 
 /*
  * The archive, read from out/history.tsv and out/summary-*.json — the files the driver writes. Runs
@@ -20,11 +22,11 @@ export default function HistoryPanel() {
   const [picked, setPicked] = useState([]);
   const [comparison, setComparison] = useState(null);
 
-  // A comparison is a thing people quote to each other, so it has an address: #history=<a>,<b>.
+  // A comparison is a thing people quote to each other, so it has an address: #history=<a>,<b>. Parsing it
+  // (and refusing anything that is not two run ids) is lib/hash.js, with its tests.
   useEffect(() => {
-    const pair = String(window.location.hash || '').split('=')[1];
-    const ids = (pair ? pair.split(',') : []).filter((x) => /^\d{8}T\d{6}Z$/.test(x));
-    if (ids.length !== 2) return;
+    const { pair: ids } = parseHash(window.location.hash);
+    if (!ids) return;
     setPicked(ids);
     api.compare(ids[0], ids[1])
       .then(setComparison)
@@ -39,8 +41,10 @@ export default function HistoryPanel() {
 
   async function compareNow() {
     setError(null);
-    const [a, b] = order(picked, rows);
-    window.location.hash = `history=${a},${b}`;
+    const pair = orderPair(picked, rows);
+    if (!pair) return;
+    const [a, b] = pair;
+    window.location.hash = formatHash('history', pair);
     try {
       setComparison(await api.compare(a, b));
     } catch (e) {
@@ -73,8 +77,8 @@ export default function HistoryPanel() {
               Compare the two ticked runs
             </button>
             <span className="note">
-              {picked.length === 2
-                ? `A ${order(picked, rows)[0]} → B ${order(picked, rows)[1]} (oldest first)`
+              {orderPair(picked, rows)
+                ? `A ${orderPair(picked, rows)[0]} → B ${orderPair(picked, rows)[1]} (oldest first)`
                 : `tick two runs (${picked.length}/2). The comparison, and every refusal, comes from crowdsim compare.`}
             </span>
             {picked.length ? <button onClick={() => { setPicked([]); setComparison(null); }}>clear</button> : null}
@@ -131,12 +135,6 @@ export default function HistoryPanel() {
         : null}
     </div>
   );
-}
-
-/** A before/after reads in one direction: the older run is A. */
-function order(picked, rows) {
-  const at = (id) => rows.findIndex((r) => r.run_id === id);   // rows are newest first
-  return picked.slice().sort((x, y) => at(y) - at(x));
 }
 
 /** Inline SVG: no chart dependency for one scatter plot with 20 points. */
