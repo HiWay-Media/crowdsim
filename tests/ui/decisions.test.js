@@ -12,6 +12,7 @@ import { runToShow, shouldClearResult } from '../../gui/ui/src/lib/runs.js';
 import { parseHash, formatHash, TAB_IDS } from '../../gui/ui/src/lib/hash.js';
 import { orderPair, deltaCell, valueCell, mayRenderNumbers } from '../../gui/ui/src/lib/compare.js';
 import { hostAllowed, allowlistVerdict } from '../../gui/ui/src/lib/allowlist.js';
+import { activatesOn } from '../../gui/ui/src/lib/keys.js';
 
 // ── which run the page shows when it loads ───────────────────────────────────────────────────────────
 test('the active run wins, because something is happening right now', () => {
@@ -140,4 +141,22 @@ test('no allowlist is not an allowlist, and the page says so rather than guessin
   assert.equal(allowlistVerdict('www.example.test', ['www.example.test']).state, 'authorised');
   assert.match(allowlistVerdict('nope.test', ['www.example.test']).text, /exit 3/,
     'the consequence, not just the verdict');
+});
+
+// ── keyboard activation (#33) ────────────────────────────────────────────────────────────────────────
+test('Enter and Space activate a row; other keys do not', () => {
+  // History rows and knee-plot points carried onClick and nothing else, so selecting a run was mouse-only —
+  // while the compare checkboxes beside them were focusable. Half a panel reachable is worse than either.
+  assert.equal(activatesOn({ key: 'Enter' }), true);
+  assert.equal(activatesOn({ key: ' ' }), true);
+  assert.equal(activatesOn({ key: 'Spacebar' }), true, 'the old name, still sent by some browsers');
+  assert.equal(activatesOn({ key: 'a' }), false);
+  assert.equal(activatesOn({ key: 'Tab' }), false, 'Tab moves focus and must keep doing so');
+  assert.equal(activatesOn(null), false);
+});
+
+test('a modified key press is the browser being asked to do something else', () => {
+  assert.equal(activatesOn({ key: 'Enter', metaKey: true }), false);
+  assert.equal(activatesOn({ key: 'Enter', ctrlKey: true }), false);
+  assert.equal(activatesOn({ key: ' ', shiftKey: true }), false);
 });

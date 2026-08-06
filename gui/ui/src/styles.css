@@ -187,6 +187,39 @@ table { width: 100%; border-collapse: collapse; }
   .sidenav { width: 190px; }
 }
 
+/* Below this the navigation stops holding a column of its own. (#35)
+   The screens this page is actually read on are a laptop half-covered by a terminal, and a phone during an
+   incident. At 600px the sidebar was still taking 190 of them, the brand wrapped onto three lines, and the
+   mix rows broke mid-cell — nothing overflowed, it was just not usable.
+   What must not shrink here is the safety block: the allowlist verdict and the safe-peak warning are the
+   last things to lose room, so they keep their size and their colour. */
+@media (max-width: 760px) {
+  .body { flex-direction: column; }
+  .sidenav { width: auto; border-right: none; border-bottom: 1px solid var(--line);
+             display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px; }
+  .navitem { flex: 1 1 auto; min-width: 120px; }
+  .navitem-hint { display: none; }          /* the label carries it; the hint is for a wide screen */
+  .sidenav-foot { flex: 1 1 100%; margin-top: 4px; padding-top: 8px; }
+  .running-badge { flex: 1 1 100%; }
+
+  .topbar { flex-direction: column; align-items: flex-start; gap: 8px; padding: 10px 12px; }
+  .brand { display: flex; align-items: baseline; gap: 8px; }
+  .brand-sub { font-size: 11px; }
+  .chips { font-size: 11px; }
+  .chip-value { max-width: 52vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  .content { padding: 12px; }
+  .card { padding: 12px; }
+  .row > label { flex: 1 1 100%; }          /* one field per line beats two half-legible ones */
+  .mix-row { grid-template-columns: 92px 1fr 74px; row-gap: 2px; }
+  .mix-row .mix-pct, .mix-row .mix-pool { display: none; }
+  .data { font-size: 11.5px; }
+  .data th, .data td { padding: 5px 4px; }
+
+  /* deliberately unchanged: the gate block keeps its size, its colour and every word */
+  .gate.danger { padding: 12px; }
+}
+
 /* ── the command preview ─────────────────────────────────────────────────────────────────────────── */
 /* Rendered by the server (POST /api/preview), never assembled in the page: see CommandPreview.jsx. */
 .preview h2 { display: flex; gap: 10px; flex-wrap: wrap; align-items: baseline; }
@@ -204,3 +237,11 @@ button.linkish { background: none; border: none; color: var(--dim); font-size: 1
                  text-decoration: underline; cursor: pointer; }
 .data td input[type="checkbox"] { cursor: pointer; }
 .banner.bad ul { margin: 6px 0 0; padding-left: 18px; }
+.state.unknown { color: var(--warn); border-color: var(--warn); border-style: dashed; }
+
+/* ── focus (#33) ─────────────────────────────────────────────────────────────────────────────────── */
+/* Mostly-dark, mostly-grey: a default focus ring disappears here, and an invisible ring is the same as
+   not being focusable at all for anyone who needs it. */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.data tr:focus-visible { outline-offset: -2px; }
+.knee .pt:focus-visible { outline: none; stroke: var(--accent); stroke-width: 3; }

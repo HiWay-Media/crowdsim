@@ -62,13 +62,46 @@ export const api = {
  * Live log. EventSource cannot send an Authorization header, so when a token is configured it goes in the
  * query string — acceptable only because that mode is for a trusted network behind TLS, and the token is
  * a run-launching credential either way. Loopback (the default) needs no token at all.
+ *
+ * It used to end with `es.onerror = () => es.close()`: one line that threw away EventSource's own
+ * reconnection AND said nothing, so a server that went away looked exactly like a run that had gone quiet.
+ * Now the error is reported and the retry is left to the browser, which is what EventSource is for.
+ *
+ * handlers:
+ *   onSnapshot(lines)  everything the server has for this run — REPLACES what the page holds
+ *   onLine(line)       one new line
+ *   onEnd(run)         the run finished; the stream is closed and will not retry
+ *   onState({phase, attempts})  'open' | 'retrying' | 'ended'
  */
-export function streamRun(id, onLine, onEnd) {
+export function streamRun(id, handlers) {
+  const h = handlers || {};
+  const noop = () => {};
+  const onSnapshot = h.onSnapshot || noop;
+  const onLine = h.onLine || noop;
+  const onEnd = h.onEnd || noop;
+  const onState = h.onState || noop;
+
   const token = getToken();
   const url = `/api/runs/${encodeURIComponent(id)}/stream${token ? `?token=${encodeURIComponent(token)}` : ''}`;
   const es = new EventSource(url);
+  let attempts = 0;
+
+  es.addEventListener('open', () => { attempts = 0; onState({ phase: 'open', attempts: 0 }); });
+  es.addEventListener('snapshot', (e) => onSnapshot(JSON.parse(e.data).lines || []));
   es.addEventListener('line', (e) => onLine(JSON.parse(e.data).line));
-  es.addEventListener('end', (e) => { onEnd(JSON.parse(e.data)); es.close(); });
-  es.onerror = () => es.close();
+  es.addEventListener('end', (e) => {
+    onState({ phase: 'ended', attempts: 0 });
+    onEnd(JSON.parse(e.data));
+    es.close();
+  });
+  es.onerror = () => {
+    // readyState CLOSED means it will not come back on its own; anything else is the browser retrying.
+    attempts += 1;
+    if (es.readyState === 2) {
+      onState({ phase: 'retrying', attempts, willRetry: false });
+      return;
+    }
+    onState({ phase: 'retrying', attempts, willRetry: true });
+  };
   return () => es.close();
 }

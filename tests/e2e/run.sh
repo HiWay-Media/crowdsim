@@ -365,6 +365,16 @@ check(len(ids) >= 3, f"the page shows {len(ids)} run ids, expected the 3 in the 
 # "invalid" and failed: nothing here is generator-bound. The page was right and the assertion was wrong.)
 check('>clean<' in html, "no run is marked clean, though leg 1 completed without crossing the SLO")
 check('>knee<' in html, "no run is marked as a knee, though the brake aborted two of them")
+
+# Reachable without a mouse. tests/ui can assert that Enter activates; only a rendered page can show that
+# there is something to put focus on in the first place.
+rows = re.findall(r'<tr[^>]*>', html)
+focusable = [r for r in rows if 'tabindex' in r.lower()]
+check(len(focusable) >= 3, f"{len(focusable)} of {len(rows)} run rows are focusable: the archive is mouse-only")
+check('role="button"' in html, "the focusable rows do not announce themselves as activatable")
+points = re.findall(r'<circle[^>]*class="pt[^>]*>', html)
+check(not points or all('tabindex' in p.lower() for p in points),
+      "the knee-plot points are clickable but not reachable")
 if fail:
     print("\n".join("  ❌ " + f for f in fail)); sys.exit(1)
 print(f"  ✅ the page rendered {len(ids)} runs from the archive, clean and knee told apart")

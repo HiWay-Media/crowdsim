@@ -197,8 +197,13 @@ export function createApp(opts) {
       'X-Accel-Buffering': 'no',
     });
     const send = (event, data) => res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-    let sent = 0;
-    for (const line of runner.logOf(id) || []) { send('line', { line }); sent++; }
+
+    // Everything this server has for the run, as ONE snapshot event. A client that reconnects already has
+    // lines: replaying them as individual `line` events gives it no way to tell a replay from new output,
+    // and the log doubles on every reconnect. A snapshot replaces.
+    const existing = runner.logOf(id) || [];
+    send('snapshot', { lines: existing });
+    let sent = existing.length;
     const onLine = (e) => { if (e.id === id) { send('line', { line: e.line }); sent++; } };
     const onEnd = (e) => { if (e.id === id) { send('end', e); res.end(); } };
     runner.on('line', onLine);

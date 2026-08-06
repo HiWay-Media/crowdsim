@@ -4,6 +4,57 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.0] — 2026-08-06
+
+Milestone [v1.5.0](https://github.com/HiWay-Media/crowdsim/milestone/6): the five defects the GUI audit found,
+fixed test-first — which is the rule 1.12.0 wrote down, applied for the first time.
+
+### Fixed
+- **The page no longer goes silent when it loses the live log**
+  ([#31](https://github.com/HiWay-Media/crowdsim/issues/31)). It used to be one line —
+  `es.onerror = () => es.close()` — which threw away EventSource's own reconnection *and* said nothing, so a
+  server that went away looked exactly like a run that had gone quiet while the pill still read *running*.
+  Now the retry is left to the browser, a banner says the log was lost and that it is reconnecting, and after
+  enough failed attempts it says the server is not answering and points at `out/`, where the driver's own log
+  and summary are. **The run's status stops being asserted while the connection is down**: it reads *not
+  known*, because the state of the connection and the state of the run are two different things.
+  - A reconnect now receives one `snapshot` event with everything the server has, replacing the log instead
+    of appending a second copy of it. The old protocol replayed individual `line` events, which a
+    reconnecting client cannot tell from new output.
+  - Verified by reproducing the audit's own scene: a run in flight, the server killed, the page screenshotted.
+- **The run log no longer costs more to render than the run costs to produce**
+  ([#32](https://github.com/HiWay-Media/crowdsim/issues/32)). It was `join('\n')` on every appended line:
+  measured at 760 MB of strings and 215 ms of join time over the 4000 lines the server keeps, before React
+  reconciles a 371 KB text node — once per line, on the machine generating the load. Lines are batched now
+  and published on a 200 ms tick, and the buffer says how many earlier lines it dropped and where the whole
+  log lives.
+- **The archive is reachable without a mouse** ([#33](https://github.com/HiWay-Media/crowdsim/issues/33)).
+  History rows and knee-plot points carried `onClick` and nothing else, while the comparison checkboxes
+  beside them were focusable — half a panel reachable is worse than either whole answer. They are focusable
+  and activatable with Enter or Space now, they announce themselves, and focus is visible in a page that is
+  mostly dark and mostly grey. A modified key press is left to the browser.
+- **`crowdsim serve` explains a startup failure instead of dumping a stack**
+  ([#34](https://github.com/HiWay-Media/crowdsim/issues/34)). A busy port printed an `EADDRINUSE` object, a
+  syscall name and a Node banner, and exited 1. It now names the port, names the likely cause — another
+  `crowdsim serve` — and exits 2. The same for an address this host does not have, a privileged port, and a
+  profile directory that does not exist. This was found by accident during the audit, and it is how a
+  three-release-old server went unnoticed: the new one died quietly and the stale page looked current.
+- **The page is usable on a small screen** ([#35](https://github.com/HiWay-Media/crowdsim/issues/35)). Below
+  760 px the navigation stops holding a column of its own, the brand stops wrapping onto three lines, and the
+  form gives one field per line instead of two half-legible ones. The safety block is deliberately unchanged
+  at every width: the allowlist verdict and the safe-peak warning are the last things that should lose room.
+
+### Added
+- The new behaviour has tests before it had code, per suite: `tests/ui/stream.test.js` for the connection
+  states and the line buffer, `tests/gui/startup.test.js` for the startup messages and the snapshot contract,
+  and a keyboard-reachability assertion in the e2e browser pass — which can see what a DOM-less suite cannot.
+
+### Changed
+- `docs/gui.md` documents what a lost stream looks like, and gains two troubleshooting rows for the failures
+  that now explain themselves.
+- One existing GUI test changed with the protocol it pinned: the stream's replay is asserted as a snapshot,
+  not as `line` events. It failed for the right reason, which is what a contract test is for.
+
 ## [1.12.0] — 2026-08-06
 
 Milestone [v1.6.0](https://github.com/HiWay-Media/crowdsim/milestone/7): the front end had 1415 lines and no

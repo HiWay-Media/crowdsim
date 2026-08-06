@@ -7,6 +7,8 @@ import { ProbeTable, DiscoverTable } from './PreflightTables.jsx';
 import { runToShow, shouldClearResult } from '../lib/runs.js';
 import { allowlistVerdict } from '../lib/allowlist.js';
 import { SAFE_PEAK } from '../lib/messages.js';
+import { LineBuffer } from '../lib/logbuffer.js';
+import { streamState, describeStream } from '../lib/stream.js';
 
 /*
  * The run launcher. Everything expensive to get wrong is shown BEFORE the button: which host will be hit,
@@ -29,6 +31,10 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
   const [force, setForce] = useState(false);
   const [run, setRun] = useState(null);
   const [log, setLog] = useState([]);
+  // Lines accumulate in a buffer and are published on a timer. Joining the log on every appended line cost
+  // 760 MB of strings and 215 ms over the 4000 the server keeps — spent on the machine generating the load.
+  const bufRef = useRef(new LineBuffer());
+  const [stream, setStream] = useState(streamState({ phase: 'ended', attempts: 0 }));
   const [error, setError] = useState(null);
   const [summary, setSummary] = useState(null);
   const [artifacts, setArtifacts] = useState(null);
@@ -60,6 +66,16 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
     if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
   }, [log]);
 
+  // One render per tick, not one per line. The tick is short enough to read as live and long enough that a
+  // few hundred req/s of output does not become the busiest thing on this machine.
+  useEffect(() => {
+    const t = setInterval(() => {
+      const lines = bufRef.current.flush();
+      if (lines.length) setLog(lines.slice());
+    }, 200);
+    return () => clearInterval(t);
+  }, []);
+
   // What this page shows on load is what the server says is going on — not an empty form.
   //
   // Two cases, and neither used to be handled. A generator may still be RUNNING that this page did not
@@ -82,15 +98,7 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
       } catch (e) { /* the run record is enough */ }
       if (!follow) return;
       onActiveRun(r.active);
-      streamRun(r.active.id, (line) => setLog((l) => [...l, line]), async (ended) => {
-        setRun(ended);
-        onActiveRun(null);
-        try {
-          const full = await api.run(ended.id);
-          setSummary(full.summary || null);
-          setArtifacts(full.artifacts || null);
-        } catch (e) { /* the run record is enough */ }
-      });
+      follow_(r.active.id);
     }).catch(() => { /* an empty run list is the normal case */ });
     return () => { alive = false; };
   }, []);
@@ -149,6 +157,28 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
     return b;
   }, [profileName, target, form, force]);
 
+  // Attaching to a run's live log. A reconnect arrives as a snapshot and REPLACES what is on screen: the
+  // server sends everything it has, and appending that would show every line twice.
+  function follow_(id) {
+    bufRef.current = new LineBuffer();
+    setLog([]);
+    streamRun(id, {
+      onSnapshot: (lines) => { bufRef.current.snapshot(lines); setLog(bufRef.current.flush().slice()); },
+      onLine: (line) => bufRef.current.push(line),
+      onState: (st) => setStream(streamState(st)),
+      onEnd: async (ended) => {
+        setLog(bufRef.current.flush().slice());
+        setRun(ended);
+        onActiveRun(null);
+        try {
+          const full = await api.run(ended.id);
+          setSummary(full.summary || null);
+          setArtifacts(full.artifacts || null);
+        } catch (e) { /* the run record is enough */ }
+      },
+    });
+  }
+
   async function launch(kind, extra) {
     setError(null);
     setLog([]);
@@ -161,15 +191,7 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
       const started = await api.startRun(body);
       setRun(started);
       onActiveRun(started);
-      streamRun(started.id, (line) => setLog((l) => [...l, line]), async (ended) => {
-        setRun(ended);
-        onActiveRun(null);
-        try {
-          const full = await api.run(ended.id);
-          setSummary(full.summary || null);
-          setArtifacts(full.artifacts || null);
-        } catch (e) { /* the run record is enough */ }
-      });
+      follow_(started.id);
     } catch (e) {
       onActiveRun(null);
       if (e instanceof ApiError && e.active) setError(`${e.message}`);
@@ -305,8 +327,18 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
         <section className="card wide">
           <h2>
             Run <span className="mono">{run.run_id || run.id}</span>
-            <span className={`state ${run.status}`}>{run.status}{run.exit_code !== null && run.exit_code !== undefined ? ` · exit ${run.exit_code}` : ''}</span>
+            {stream.runStateKnown
+              ? (
+                <span className={`state ${run.status}`}>
+                  {run.status}{run.exit_code !== null && run.exit_code !== undefined ? ` · exit ${run.exit_code}` : ''}
+                </span>
+              )
+              : <span className="state unknown" title="the live log was lost: this page cannot see the run">not known</span>}
           </h2>
+          {describeStream(stream) ? (
+            <div className={stream.tone === 'bad' ? 'banner bad' : 'banner warn'}>{describeStream(stream)}</div>
+          ) : null}
+          {bufRef.current.note() ? <div className="note">{bufRef.current.note()}</div> : null}
           {run.adopted && run.interrupted ? (
             <div className="banner warn">
               <strong>This run was interrupted: the server it was started from stopped while it was in

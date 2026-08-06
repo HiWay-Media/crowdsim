@@ -4,6 +4,7 @@ import SummaryCard from './SummaryCard.jsx';
 import CompareCard from './CompareCard.jsx';
 import { orderPair } from '../lib/compare.js';
 import { parseHash, formatHash } from '../lib/hash.js';
+import { activatesOn } from '../lib/keys.js';
 
 /*
  * The archive, read from out/history.tsv and out/summary-*.json — the files the driver writes. Runs
@@ -99,6 +100,12 @@ export default function HistoryPanel() {
                 key={r.run_id}
                 className={`${selected === r.run_id ? 'sel' : ''} ${r.generator_ok === false ? 'invalid' : ''}`}
                 onClick={() => setSelected(r.run_id)}
+                // Reachable without a mouse: a row that only answers a click is a run somebody cannot open.
+                tabIndex={0}
+                role="button"
+                aria-pressed={selected === r.run_id}
+                aria-label={`open run ${r.run_id}`}
+                onKeyDown={(e) => { if (activatesOn(e)) { e.preventDefault(); setSelected(r.run_id); } }}
               >
                 <td onClick={(e) => e.stopPropagation()}>
                   <input
@@ -160,6 +167,10 @@ function KneePlot({ rows, onPick, selected }) {
           r={selected === p.run_id ? 6 : 4}
           className={`pt ${p.generator_ok === false ? 'invalid' : (p.aborted ? 'knee' : 'clean')}`}
           onClick={() => onPick(p.run_id)}
+          tabIndex={0}
+          role="button"
+          aria-label={`run ${p.run_id}: peak ${p.peak} req/s, p95 ${p.p95} ms`}
+          onKeyDown={(e) => { if (activatesOn(e)) { e.preventDefault(); onPick(p.run_id); } }}
         >
           <title>{`${p.run_id} · peak ${p.peak} · p95 ${p.p95} ms${p.generator_ok === false ? ' · INVALID' : ''}`}</title>
         </circle>

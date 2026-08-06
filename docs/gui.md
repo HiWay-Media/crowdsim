@@ -133,6 +133,18 @@ Press **Run**. The log streams live, and **Stop** appears:
 Stop sends `SIGINT`, so k6 winds down and **still writes the summary** — a killed run is a window burned for
 no data. `SIGKILL` follows only after 10 seconds, and the log says so when it happens.
 
+**If the page loses the live log it says so**, rather than going quiet:
+
+```
+Lost the live log, reconnecting… Whether the run is still going is not known from here until it comes back.
+```
+
+and, once the server has stopped answering altogether, that the driver's own log and summary in `out/` are
+where the truth is. While the connection is down the run's status reads **not known** instead of continuing
+to assert *running*: the state of the connection and the state of the run are two different things, and only
+one of them is visible from here. A reconnect replaces the log with the server's copy rather than appending
+a second one.
+
 When it ends you get the verdict, in the order that keeps you honest:
 
 ![The result: the driver's recap, the per-class table, and the run's own files](assets/screens/gui-result.png)
@@ -335,6 +347,8 @@ the profile directory — a profile path is user input, and a profile is a map o
 | `400 confirm: going past the safe peak requires typing the profile name` | the override needs both acts | tick the box **and** type the profile's `name` (not the file name) |
 | `409 a run is already in progress` right after a restart | correct: a live run was adopted | Stop it, or wait. If the pid is gone the page will say the run was interrupted instead. |
 | The command preview says `building…` and stays there | the server is unreachable, or the form is mid-edit | check the browser console; a field error appears in red instead when the form is invalid |
+| `port 8787 is already in use` | another `crowdsim serve` is running | stop it, or `CROWDSIM_GUI_PORT=8788 crowdsim serve`. A server left from earlier keeps serving the page it was built with, which is how a stale version goes unnoticed |
+| The log stops and a banner says the live log was lost | the server went away, or the network blipped | it reconnects on its own; the run itself is unaffected, and `out/` has the driver's own log |
 | Probe shows every layer as **unknown** | the profile's `cache_headers` name headers this stack does not send | compare against the raw headers printed in the run log, and fix the names |
 | Discover says `verified: no` | verification was not asked for | run it again with verification before pointing a pool at the file |
 | A run's result vanished after a reload | it did not: only a *different profile* being selected clears it | reselect the profile, or open the run from **History** |
@@ -347,6 +361,10 @@ the profile directory — a profile path is user input, and a profile is a map o
   and the override are attributable to whoever asked. That is the Nomad dispatch; a cron button on a page is
   not.
 - **No user accounts.** One token, or loopback. This is a console, not a portal.
+- **Keyboard and small screens are supported, not perfected.** Runs, the comparison and the knee-plot points
+  are reachable and activatable with Enter or Space, focus is visible, and below 760 px the navigation stops
+  holding a column of its own. The safety block keeps its size at every width: it is the last thing that
+  should lose room.
 - **No results of its own.** Everything shown comes from the driver's files. A second version of the truth is
   always the wrong one.
 - **No results of its own** — including the comparison: the page asks `crowdsim compare` and renders the

@@ -53,7 +53,43 @@ const app = createApp({
   version,
 });
 
-app.listen(port, bind, () => {
+// Every refusal in this tool names the problem in a sentence and says what to do. Startup was the
+// exception: a busy port printed an EADDRINUSE object, a syscall name and a Node banner, and exited 1 —
+// and it is the first thing a new user can hit. Worse, it is quiet enough to miss: during the audit an old
+// server kept the port while the new one died, and the page being served looked current when it was three
+// releases old.
+if (!fs.existsSync(profilesDir)) {
+  console.error(`the profile directory does not exist: ${profilesDir}
+
+  Point CROWDSIM_PROFILES at the directory holding your profiles, or create that one. The GUI reads and
+  writes profiles there; it does not invent a directory on your behalf.`);
+  process.exit(2);
+}
+
+const server = app.listen(port, bind);
+
+server.on('error', (e) => {
+  if (e.code === 'EADDRINUSE') {
+    console.error(`port ${port} is already in use — another crowdsim serve is the usual reason.
+
+  Stop that one, or choose another port: CROWDSIM_GUI_PORT=8788 crowdsim serve
+  (a server left running from earlier keeps serving the page it was built with, which is how a stale
+  version goes unnoticed.)`);
+  } else if (e.code === 'EADDRNOTAVAIL') {
+    console.error(`cannot bind ${bind}: it is not an address on this machine.
+
+  CROWDSIM_GUI_BIND takes an address this host actually has — 127.0.0.1 for yourself, 0.0.0.0 for every
+  interface (which needs CROWDSIM_GUI_TOKEN).`);
+  } else if (e.code === 'EACCES') {
+    console.error(`not allowed to bind ${bind}:${port}. Ports below 1024 need privileges the GUI should not
+  have: choose a high port and publish it with whatever terminates TLS in front.`);
+  } else {
+    console.error(`the GUI server could not start: ${e.message}`);
+  }
+  process.exit(2);
+});
+
+server.on('listening', () => {
   console.log(`crowdsim GUI  http://${bind}:${port}`);
   console.log(`  profiles  ${profilesDir}`);
   console.log(`  output    ${outDir}`);

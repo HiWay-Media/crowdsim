@@ -267,14 +267,18 @@ test('the summary written by the driver is attached to the finished run', async 
   });
 });
 
-test('the live log stream replays what happened and then closes on end', async () => {
+test('the live log stream replays what happened as a snapshot, then closes on end', async () => {
+  // The replay is ONE snapshot event, not a series of `line` events: a client that reconnects already holds
+  // lines, and a replay it cannot tell from new output doubles the log every time. See tests/gui/startup.
   await withServer({}, async ({ api, base }) => {
     const r = await api('POST', '/api/runs', { profile: 'site.json', peak: 10, dryRun: true });
     await settle(api, r.json.id);
     const res = await fetch(`${base}/api/runs/${r.json.id}/stream`);
     assert.equal(res.headers.get('content-type'), 'text/event-stream');
     const body = await res.text();                       // a finished run closes the stream immediately
-    assert.match(body, /event: line/);
+    assert.match(body, /event: snapshot/);
+    const lines = JSON.parse(/event: snapshot\ndata: (.*)/.exec(body)[1]).lines;
+    assert.ok(lines.some((l) => l.includes('ARGV:')), lines);
     assert.match(body, /event: end/);
   });
 });
