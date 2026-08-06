@@ -39,6 +39,10 @@
       "description": "Test-first for the front end, which currently has no tests at all: 1415 lines of it, nothing importing a component, no runner, and `make test` not touching it. Every other part of this repo starts from a failing test — the driver, the generator, the API, the manifests — and the rule 'every fixed bug starts with a test that reproduces it' has been honoured everywhere except the one place where there is nowhere to put such a test. It shows: the UI bugs found in 1.7.0 and 1.10.0 were all caught by screenshotting the page and reading the DOM, one of them a reload that silently discarded a finished run. This milestone builds the place, moves the decisions somewhere they can be tested, and writes the rule down."
     },
     {
+      "title": "v1.7.0",
+      "description": "Four features, one theme: the tool knows things it does not yet hand over. It measures a page, verifies a pool and records a fan-out, then asks you to write the profile from scratch. It judges an HTML document and a static asset against one threshold. It reports a cold cache's numbers as the system's. And it produces a result that somebody retypes into an incident document, losing every caveat on the way. Each item closes one of those gaps without loosening anything: no default allowlist, no weaker brake, no invented number."
+    },
+    {
       "title": "Backlog",
       "description": "Accepted but unscheduled. Nothing here blocks a release."
     }
@@ -656,6 +660,77 @@
         "- `docs/development.md` states, for `gui/ui`, where a test goes and what it is expected to cover, alongside the other suites in the layout table.",
         "- `CLAUDE.md`/`AGENTS.md` carry the same rule in one line, since that is what gets read before a change.",
         "- The rule names the honest exception: a purely visual change (spacing, a colour) does not get a test, and the boundary is written down rather than argued about per commit."
+      ]
+    },
+    {
+      "key": "init-first-profile",
+      "title": "crowdsim init: assemble the first profile from what the tool already measured",
+      "milestone": "v1.7.0",
+      "labels": ["area:cli"],
+      "body": [
+        "The profile is the whole configuration, and writing the first one is the highest step in this tool. Today it means copying `profiles/example.json` and guessing: which classes, what weights, which pool, what the page weighs, what the SLO should be.",
+        "",
+        "Most of that has already been measured by the time somebody asks. `probe` knows the page weight and which cache layers answered. `discover --verify` has a pool of URLs that actually render. `record` has a real fan-out. Those three artefacts sit in `out/` and nothing assembles them.",
+        "",
+        "**Done when**",
+        "- `crowdsim init` writes a starter profile from the artefacts in `out/`, and says which run each part came from — a profile whose provenance is unknown is a profile nobody can defend.",
+        "- **The two safety fields are left empty, deliberately, and the file says why.** `safety.allow_hosts` and `safety.safe_peak_rps` are decisions about somebody else's production; a generated default would be the tool authorising a host on your behalf, which is the one thing it never does. `validate` must refuse the file until they are filled in.",
+        "- The class weights are presented as what they are: a starting point to be replaced with what the edge log says. The tool does not read logs, and a mix nobody measured is a guess wearing a number.",
+        "- It never overwrites an existing profile, and never writes into the profile directory unless told to — a profile is a map of somebody's infrastructure.",
+        "- What it could not derive is listed in the file as TODOs rather than filled with plausible values."
+      ]
+    },
+    {
+      "key": "per-class-slo",
+      "title": "An SLO per class, so the brake stops judging an image like a document",
+      "milestone": "v1.7.0",
+      "labels": ["area:generator", "safety", "validity"],
+      "body": [
+        "There is one `slo.max_p95_ms`, one `slo.max_failed_rate`, and one `brake_class`. So a server-rendered document and a static asset are held to the same threshold — which means it is either too strict for the assets or too lax for the renderer, and it is usually the second. The class that actually falls over is the one whose numbers are diluted by everything cheap.",
+        "",
+        "This is the core of what the tool measures, so the change has to make the brake SHARPER, never later.",
+        "",
+        "**Done when**",
+        "- A class can declare its own `max_p95_ms` and `max_failed_rate`, and inherits the profile's when it does not.",
+        "- The brake trips on the FIRST class to cross its own threshold, and the summary says which one and by how much. Today it says a run aborted; it should say what stopped it.",
+        "- A profile with no per-class SLO behaves exactly as it does now — asserted, not assumed.",
+        "- `validate` refuses a per-class threshold that would make the brake later than the profile's own, and warns about one so tight it would abort on a healthy system.",
+        "- The unit tests cover the precedence: a class threshold, an inherited one, and the interaction with `skip_classes` and with a class dropped for an empty pool."
+      ]
+    },
+    {
+      "key": "warmup-phase",
+      "title": "A warm-up that is excluded from the numbers, and said so",
+      "milestone": "v1.7.0",
+      "labels": ["area:generator", "validity"],
+      "body": [
+        "A run against a cold cache measures a cold cache. The number then travels into a document as though it described the system at rest, and the first question in the room — 'was the cache warm?' — has no answer in the summary.",
+        "",
+        "People already work around it by running twice and quietly discarding the first. That is the right instinct with the wrong mechanism: the discarded run is not recorded, so nobody can tell later whether it happened.",
+        "",
+        "**Done when**",
+        "- A warm-up phase can be asked for, runs at a rate that primes rather than tests, and is EXCLUDED from the summary's numbers.",
+        "- The summary states that a warm-up ran, for how long and at what rate. A caveat that is not in the file is a caveat that gets lost.",
+        "- Without the flag nothing changes — including the fact that a cold-cache run is a legitimate measurement when that is the question. The tool must not start warming caches on its own.",
+        "- The cache hit ratio keeps the distinction visible: what the warm-up saw is not folded into what the measured phase saw."
+      ]
+    },
+    {
+      "key": "report-subcommand",
+      "title": "crowdsim report <run>: the result, with its caveats attached",
+      "milestone": "v1.7.0",
+      "labels": ["area:cli"],
+      "body": [
+        "Every run ends up in a document — an incident write-up, a ticket, a message to whoever asked. Today that means retyping numbers out of the terminal, and the caveats are exactly what does not survive the retyping: `generator_ok`, that the pool was synthetic and colder than real traffic, that the absolutes travel badly and only the delta is defensible, that a brake abort is a result and not a failure.",
+        "",
+        "The tool knows all of that and hands over a JSON file and a terminal dump.",
+        "",
+        "**Done when**",
+        "- `crowdsim report <run-id>` writes a pasteable report — Markdown, since that is what tickets and runbooks take — with the verdicts in the order `docs/reading-results.md` prescribes.",
+        "- **The caveats are in the report, not in a footnote somebody deletes.** An invalid run produces a report that says so and refuses to present its numbers as a result.",
+        "- Nothing is invented: every figure comes from the summary, and anything the archive does not contain is absent rather than estimated.",
+        "- It can report a comparison too, by reusing `crowdsim compare` rather than recomputing a delta — the same rule that keeps the GUI honest.",
+        "- Hostnames come from the run as it happened; the command does not sanitise them, and the documentation says plainly that a report describes your infrastructure and belongs wherever your run archives already belong."
       ]
     }
   ]
