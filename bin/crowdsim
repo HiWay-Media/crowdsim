@@ -369,6 +369,10 @@ run_bench() {
   say ""
   say "▶ measuring what this machine can generate (loopback, ${BENCH_DUR}, ${BENCH_VUS} VUs)"
   say "  nothing is sent to any target: the server below is started here and thrown away."
+  # Measuring loopback INSIDE a VM produces a number about the VM's own network — the one layer standing
+  # between this generator and any real target. Saying so here, and recording it in the artefact below, is
+  # what stops the number being read back later as reassurance.
+  virtualised_generator_note
 
   # A local server that answers a fixed body. Port 0 lets the kernel pick a free one, which it then prints:
   # hardcoding a port would collide with whatever else the developer is running.
@@ -418,6 +422,21 @@ run_bench() {
     warn "the benchmark produced no result (k6 exit $rc)"
     return 0
   fi
+  # Where it was measured travels with what was measured.
+  python3 - "$out" "$(in_container && echo 1 || echo 0)" "$(virtualised_generator && echo 1 || echo 0)" \
+           "$(uname -r 2>/dev/null || echo unknown)" <<'CTX'
+import json, sys
+path, contained, virtualised, kernel = sys.argv[1], sys.argv[2] == '1', sys.argv[3] == '1', sys.argv[4]
+d = json.load(open(path))
+d['in_container'] = contained
+d['kernel'] = kernel
+d['virtualised'] = virtualised
+if virtualised:
+    d['caveat'] = ("measured on loopback INSIDE A CONTAINER IN A VM: this describes the VM's own network and "
+                   "says nothing about the path to a real target, which is exactly the layer that throttles "
+                   "it. Not a ceiling for any run against a target.")
+json.dump(d, open(path, 'w'), indent=1)
+CTX
   python3 - "$out" "$BENCH_PAGE_BYTES" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -756,19 +775,24 @@ PY
 # nothing; while a false positive — Docker Desktop on a Linux host — is a case where the warning is still
 # correct, because the VM boundary is the problem, not the operating system on the other side of it.
 # A detection that can be wrong must not become a gate.
-virtualised_generator_note() {
+# In a container? Also used by the benchmark, which has to record where its number came from.
+in_container() {
   local marker="${CROWDSIM_CONTAINER_MARKER:-/.dockerenv}"
-  local in_container=0
-  if [ -e "$marker" ] || grep -qE 'docker|containerd|kubepods' /proc/1/cgroup 2>/dev/null; then
-    in_container=1
-  fi
-  [ "$in_container" = "1" ] || return 0
+  [ -e "$marker" ] || grep -qE 'docker|containerd|kubepods' /proc/1/cgroup 2>/dev/null
+}
 
-  local kernel; kernel="$(uname -r 2>/dev/null || echo unknown)"
-  case "$kernel" in
-    *linuxkit*|*microsoft*|*WSL*) ;;
-    *) return 0;;
+# In a container inside a VM: the case where the network path is what gets measured, not the target.
+virtualised_generator() {
+  in_container || return 1
+  case "$(uname -r 2>/dev/null || echo unknown)" in
+    *linuxkit*|*microsoft*|*WSL*) return 0;;
+    *) return 1;;
   esac
+}
+
+virtualised_generator_note() {
+  virtualised_generator || return 0
+  local kernel; kernel="$(uname -r 2>/dev/null || echo unknown)"
 
   warn "THIS GENERATOR IS IN A CONTAINER INSIDE A VM (kernel $kernel)."
   say  "     On macOS and Windows the Docker network layer saturates before your target does: the"
@@ -823,6 +847,13 @@ if not declared:
             continue
         if b.get('mbits_per_second'):
             bench.append(b)
+    if bench and bench[-1].get('virtualised'):
+        # Loopback inside a VM measures the VM. Using it as a ceiling would buy silence in the one place the
+        # warning matters most: a container on a macOS or Windows host.
+        print("     The only measurement available was measured inside a container in a VM, which")
+        print("     says nothing about the path to a real target — that is the layer which throttles it.")
+        print("     Declare safety.generator_mbps, or measure on the host that will generate the load.")
+        raise SystemExit
     if not bench:
         print("     A generator that cannot sustain that will report generator_ok: false — an invalid run,")
         print("     not a slow one. Declare safety.generator_mbps, or measure it: crowdsim doctor --bench")
@@ -1006,6 +1037,19 @@ A, B = runs[a_id], runs[b_id]
 refusals = []
 notes = []
 warnings = []
+
+# out/ is long-lived: it holds runs written by whichever version was installed at the time, and `history`
+# lists them all. A summary from before a field existed must produce a refusal like any other pair that
+# cannot be compared — the alternative was a Python traceback and exit 1, which is not in the exit-code
+# contract the schedulers, the bats suite and the GUI all read.
+NEEDED = ('dur', 'failed_rate', 'generator_ok')
+for run_id in (a_id, b_id):
+    missing = [k for k in NEEDED if runs[run_id].get(k) is None]
+    if missing:
+        refusals.append((
+            f'{run_id} has no {", ".join(missing)}: it was written by an older crowdsim than this one',
+            ['Compare two runs from the same tool version, or re-run the older one. A summary missing the '
+             'fields a comparison reads has nothing to compare.']))
 
 # 1. A run the generator could not deliver has no numbers to compare. Checked first because it is the one
 #    that looks most like a valid result.

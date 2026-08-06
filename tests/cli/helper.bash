@@ -68,3 +68,18 @@ path_without_node() {
   rm -f "$dir/node"
   printf '%s' "$dir"
 }
+
+# k6 is a stub on PATH for this suite; a test that needs the real one says so and skips otherwise, the way
+# the e2e suite skips without docker. A red run that means "you don't have k6" teaches people to ignore red.
+skip_unless_k6() {
+  local real
+  real="$(PATH="$(path_without_stub)" command -v k6 2>/dev/null || true)"
+  if [ -z "$real" ]; then skip "needs the real k6, not the stub"; fi
+  PATH="$(path_without_stub)"
+  export PATH
+}
+
+# The PATH this suite was given, minus the stub directory it prepended.
+path_without_stub() {
+  printf '%s' "${PATH#"$BATS_TEST_TMPDIR/stub:"}"
+}

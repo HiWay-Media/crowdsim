@@ -165,3 +165,53 @@ PY
   [[ "$output" == *"aborted by the brake"* ]]
   [[ "$output" == *"the moment the SLO was crossed"* ]]
 }
+
+@test "a summary that predates the fields compare reads is refused, not a traceback" {
+  # An archive is long-lived: out/ holds runs written by whatever version was installed at the time, and
+  # `crowdsim history` will happily list one from before a field existed. Reading it must produce the same
+  # kind of refusal as any other incomparable pair — never a Python traceback, and never exit 1, which is
+  # not in the exit-code contract at all.
+  python3 - "$CROWDSIM_OUT/summary-$B.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for k in ('dur', 'over_guillotine_rate'):
+    d.pop(k, None)
+json.dump(d, open(sys.argv[1], 'w'))
+PY
+  run "$CROWDSIM" compare "$A" "$B"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" != *"KeyError"* ]]
+  [[ "$output" == *"refusing to compare"* ]]
+  [[ "$output" == *"$B"* ]]
+  [[ "$output" == *"dur"* ]]
+  [[ "$output" == *"written by an older crowdsim"* ]]
+}
+
+@test "the same refusal reaches the GUI as JSON, not as a broken response" {
+  python3 - "$CROWDSIM_OUT/summary-$B.json" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+d.pop('dur', None)
+json.dump(d, open(sys.argv[1], 'w'))
+PY
+  run "$CROWDSIM" compare "$A" "$B" --json
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  python3 - <<PY
+import json
+d = json.loads('''$output''')
+assert d['refused'], d
+assert 'dur' in d['refused'][0]['reason'], d['refused']
+assert 'overall' not in d, 'no numbers are computed for a summary that has none'
+PY
+}
+
+@test "an unreadable summary is a usage error with the path, not a stack" {
+  printf '{ this is not json' > "$CROWDSIM_OUT/summary-$B.json"
+  run "$CROWDSIM" compare "$A" "$B"
+  [ "$status" -eq 2 ]
+  [[ "$output" != *"Traceback"* ]]
+  [[ "$output" == *"does not parse"* ]]
+  [[ "$output" == *"summary-$B.json"* ]]
+}

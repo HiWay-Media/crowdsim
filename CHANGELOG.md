@@ -4,6 +4,37 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.1] — 2026-08-06
+
+Three bugs, none of them on the tracker: found by building the container image for the first time since
+`bin/`, `k6/` and `gui/` all changed, and by running the suite on a clean clone the way CI does.
+
+### Fixed
+- **A generator ceiling measured inside a VM was used as reassurance.** `doctor --bench` in a container on a
+  macOS or Windows host measures loopback *inside the VM* — 16 640 Mbit/s on the machine that found this —
+  and stored it with no record of where it came from. `load` then compared a real peak against that number
+  and said nothing. So the check that exists to predict `generator_ok: false` was silenced by a measurement
+  from the one environment that guarantees it, which is worse than having no measurement at all.
+  - The benchmark now warns while measuring, and the artefact records `in_container`, `kernel` and
+    `virtualised` with a caveat that replaces the ordinary one.
+  - The bandwidth estimate **refuses to use a virtualised measurement as a ceiling** and asks for
+    `safety.generator_mbps`, or for a benchmark taken on the host that will generate the load.
+  - Verified in the real scenario, not a fixture: `--bench` inside the published image on this laptop, then
+    a run that reads it back.
+- **`crowdsim compare` crashed on a summary written by an older version.** A missing `dur` produced a Python
+  traceback and **exit 1** — a code that is not in the contract at all, which schedulers, the bats suite and
+  the GUI all read. Through `--json` it reached the page as unparseable output and a 500. It is a refusal now,
+  like every other pair that cannot be compared: exit 2, the run named, the missing field named, and the
+  reason stated (an archive outlives the version that wrote it).
+- **A GUI test could not run as root**, which is every container, including the clean-checkout run the suite
+  is meant to be safe for: root ignores the `0500` directory the read-only-mount test depends on, so the
+  write succeeded and the test failed for a reason unrelated to the code. It skips as root now, saying why —
+  the same choice the e2e suite makes without docker.
+
+### Changed
+- `docs/cli.md` states the trap plainly: run `doctor --bench` on the host that will generate the load, and
+  what the artefact records about where it was taken.
+
 ## [1.13.0] — 2026-08-06
 
 Milestone [v1.5.0](https://github.com/HiWay-Media/crowdsim/milestone/6): the five defects the GUI audit found,

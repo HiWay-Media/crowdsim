@@ -46,7 +46,14 @@ in `out/bench-<run>.json`, which the estimate reads when the profile declares no
          narrower — a declared safety.generator_mbps you trust still wins over this number.
 ```
 
-Read that caveat as part of the number. Loopback is the best network this generator will ever see; the path
+**Run it on the host that will generate the load.** Inside a container on a macOS or Windows host it measures
+loopback *inside the VM* — 16 Gbit/s on the machine this was written on — which describes the VM's own
+network and says nothing about the path to a target, the very layer that throttles such a run. The artefact
+records where it was taken (`in_container`, `kernel`, `virtualised`), the run warns while measuring, and the
+bandwidth estimate **refuses to use a virtualised measurement as a ceiling**: silence bought with that number
+would be silence in the one place the warning matters.
+
+Read the caveat as part of the number. Loopback is the best network this generator will ever see; the path
 to a real target is narrower, always. What the measurement is genuinely good for is the **req/s ceiling** —
 the limit that produces dropped iterations and `generator_ok: false` — and for telling a laptop apart from a
 runner without anybody guessing.
@@ -400,7 +407,8 @@ out/
   journey-<run_id>.json    what record extracted from a HAR (data about your site: keep it private)
   profile-<run_id>.json    the profile as resolved for that run (pools inlined)
   history.tsv              one appended line per run
-  bench-<run_id>.json      what doctor --bench measured this machine doing (loopback: a ceiling)
+  bench-<run_id>.json      what doctor --bench measured this machine doing, and where it was measured
+                           (loopback: a ceiling — and not one at all if taken inside a VM)
   gui-run.json             written by `serve` only: the run in flight, so a restart can find it
 ```
 

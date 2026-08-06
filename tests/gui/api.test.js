@@ -125,7 +125,15 @@ test('PUT writes a profile, refuses invalid JSON, and refuses one with errors', 
   });
 });
 
-test('a read-only profile directory is explained, not reported as a server error', async () => {
+test('a read-only profile directory is explained, not reported as a server error', {
+  // Root ignores the permission bits this test relies on, so the scenario cannot exist as root: the write
+  // succeeds and the test fails for a reason that has nothing to do with the code. That is how it behaved
+  // in every container — including the clean-checkout run this suite is supposed to be safe for. Skipping
+  // with a reason beats a red run that means "you are root".
+  skip: typeof process.getuid === 'function' && process.getuid() === 0
+    ? 'running as root: a 0500 directory is still writable, so this scenario cannot be reproduced'
+    : false,
+}, async () => {
   // This is what `-v ./profiles:/profiles:ro` gives you, and it is a reasonable way to mount a map of
   // your infrastructure. A 500 would tell the operator the server is broken when it is doing as asked.
   await withServer({}, async ({ api, profilesDir }) => {

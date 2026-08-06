@@ -333,3 +333,61 @@ STUB
   [ "$status" -eq 0 ]
   [[ "$output" != *"CONTAINER INSIDE A VM"* ]]
 }
+
+@test "a ceiling measured inside a VM is not used as reassurance" {
+  # The trap this closes: doctor --bench inside Docker Desktop measures loopback INSIDE the VM — 16 Gbit/s
+  # on the machine that wrote this test — and the estimate then compares a real peak against it and says
+  # nothing. That is silence bought with a number from the one environment #30 exists to warn about.
+  mkdir -p "$CROWDSIM_OUT"
+  python3 - "$CROWDSIM_OUT" <<'PY'
+import json, os, sys
+out = sys.argv[1]
+json.dump({'run_id': '20260805T120000Z', 'base_url': 'http://127.0.0.1:8099', 'path': '/', 'status': 200,
+           'ttfb_s': 0.18, 'bytes': 46231},
+          open(os.path.join(out, 'probe-20260805T120000Z.json'), 'w'))
+json.dump({'measured_at': '20260805T120500Z', 'req_per_second': 45000.0,
+           'mbits_per_second': 16640.0, 'failed_rate': 0.0,
+           'in_container': True, 'kernel': '6.3.13-linuxkit', 'virtualised': True},
+          open(os.path.join(out, 'bench-20260805T120500Z.json'), 'w'))
+PY
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 380 --safe-peak 400 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"measured inside a container in a VM"* ]]
+  [[ "$output" == *"says nothing about the path to a real target"* ]]
+  # It must not present that ceiling as a comparison that passed.
+  [[ "$output" != *"16640 Mbit/s"* ]]
+  [[ "$output" == *"safety.generator_mbps"* ]]     # back to asking for the number that would mean something
+}
+
+@test "a ceiling measured on the host itself is used, as before" {
+  mkdir -p "$CROWDSIM_OUT"
+  python3 - "$CROWDSIM_OUT" <<'PY'
+import json, os, sys
+out = sys.argv[1]
+json.dump({'run_id': '20260805T120000Z', 'base_url': 'http://127.0.0.1:8099', 'path': '/', 'status': 200,
+           'ttfb_s': 0.18, 'bytes': 46231},
+          open(os.path.join(out, 'probe-20260805T120000Z.json'), 'w'))
+json.dump({'measured_at': '20260805T120500Z', 'mbits_per_second': 100.0,
+           'in_container': False, 'kernel': '6.8.0-51-generic', 'virtualised': False},
+          open(os.path.join(out, 'bench-20260805T120500Z.json'), 'w'))
+PY
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 380 --safe-peak 400 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"loopback ceiling measured on this machine"* ]]
+  [[ "$output" == *"WAS MEASURED DOING ON LOOPBACK"* ]]
+}
+
+@test "the benchmark records where it was measured, not just what it measured" {
+  # A number read back next month has to carry its own context: the artefact says whether it was taken
+  # inside a container, and on which kernel.
+  skip_unless_k6
+  CROWDSIM_BENCH_DUR=2s CROWDSIM_BENCH_VUS=4 run "$CROWDSIM" doctor --bench
+  [ "$status" -eq 0 ]
+  python3 - "$(echo "$CROWDSIM_OUT"/bench-*.json)" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1]))
+for k in ('in_container', 'kernel', 'virtualised'):
+    assert k in d, f'the artefact does not record {k}: {list(d)}'
+assert isinstance(d['virtualised'], bool), d
+PY
+}
