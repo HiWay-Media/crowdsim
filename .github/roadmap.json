@@ -35,6 +35,10 @@
       "description": "The GUI, audited. Its one job is to let somebody watch load being generated and read the result honestly, and the audit found four ways it fails at that quietly: it goes silent when it loses the stream, it dies with a stack trace on a busy port, it spends more time rendering the log than the run spends producing it, and half of it cannot be reached without a mouse. Every item here came with evidence — a killed server, a measured 760 MB of string churn, a DOM with no focusable row — not from a wish list."
     },
     {
+      "title": "v1.6.0",
+      "description": "Test-first for the front end, which currently has no tests at all: 1415 lines of it, nothing importing a component, no runner, and `make test` not touching it. Every other part of this repo starts from a failing test — the driver, the generator, the API, the manifests — and the rule 'every fixed bug starts with a test that reproduces it' has been honoured everywhere except the one place where there is nowhere to put such a test. It shows: the UI bugs found in 1.7.0 and 1.10.0 were all caught by screenshotting the page and reading the DOM, one of them a reload that silently discarded a finished run. This milestone builds the place, moves the decisions somewhere they can be tested, and writes the rule down."
+    },
+    {
       "title": "Backlog",
       "description": "Accepted but unscheduled. Nothing here blocks a release."
     }
@@ -558,6 +562,100 @@
         "- The page can show what `doctor` reports about this host, including the measured generator ceiling when one exists, without anybody opening a terminal.",
         "- Running the benchmark from the page is explicit and never automatic: it generates load, locally, and a report that starts generating traffic on its own is not a report.",
         "- The crowdsim version is visible, because a page served by a stale server is indistinguishable from a current one — which is exactly how a three-release-old server survived unnoticed during the audit."
+      ]
+    },
+    {
+      "key": "ui-test-harness",
+      "title": "A place to put a front-end test, inside make test",
+      "milestone": "v1.6.0",
+      "labels": ["area:gui", "area:tests"],
+      "body": [
+        "`gui/ui` is 1415 lines with no test of any kind: nothing imports a component, there is no runner, and `make test` runs unit + gui-API + cli without touching it. Every UI regression this repo has had was found by a human looking at the page.",
+        "",
+        "The choice of runner is the decision, and it has to survive this project's constraints rather than the industry default:",
+        "- it runs inside `make test`, in seconds, generating no load and reaching no network;",
+        "- it works on a clean checkout and on the CI runner, with no browser download step that turns a 40-second job into a five-minute one;",
+        "- it does not drag in a testing framework larger than the app. React is already a devDependency because nothing imports it at runtime, and the CSS is hand-written for the same reason.",
+        "",
+        "The candidates, none of them free: `node --test` with a lightweight DOM (happy-dom, linkedom) keeps one runner for the whole repo and one fewer framework, at the cost of a DOM that is not a browser; vitest + jsdom is the path of least resistance and the most new dependencies; and the headless-Chrome pass this repo already uses to take the documentation screenshots is a real browser with no new dependency at all, but is slow and awkward for anything but whole-page assertions.",
+        "",
+        "**Done when**",
+        "- `make test-ui` exists, is part of `make test`, and runs in CI.",
+        "- Breaking a component on purpose fails it — demonstrated, not assumed, the way `tests/cli/00-environment.bats` proves the CLI suite can fail at all.",
+        "- The choice, and what it costs, is written down in `docs/development.md` next to the other suites.",
+        "- It stays honest about layers: whatever cannot be asserted without a real browser is named, not quietly skipped."
+      ]
+    },
+    {
+      "key": "ui-extract-decisions",
+      "title": "Move the front end's decisions out of the components, the way k6/lib did for the generator",
+      "milestone": "v1.6.0",
+      "labels": ["area:gui", "area:tests"],
+      "body": [
+        "The generator's logic lives in `k6/lib/` precisely so `node --test` can feed it the states you hope never to see, and `live-event.js` only wires it together. The front end has the same shape of logic and none of that separation: nineteen hooks and helpers across `RunPanel.jsx` (335 lines), `HistoryPanel.jsx` (171), `App.jsx` (144) and `CompareCard.jsx` (156), each making a decision that can be wrong.",
+        "",
+        "The decisions, named, because these are the ones that have already been wrong or are one edit away from it:",
+        "- which run the page shows on load — the active one, the last one, or nothing;",
+        "- when a result stops belonging to what is on the form (it is cleared on switching profile, and must NOT be cleared on first load: that bug shipped and was found by dumping the DOM);",
+        "- the tab and the comparison pair parsed out of the URL fragment, including `#history=<a>,<b>`;",
+        "- which of two ticked runs is A — the older one, so a before/after reads in one direction;",
+        "- how a delta is painted: better, worse, same, and the `n/a` that must never be rendered as 0%;",
+        "- whether a host matches the allowlist, which the page previews before the CLI decides it.",
+        "",
+        "**Done when**",
+        "- Those decisions are pure functions with tests, and the components read as wiring.",
+        "- The tests cover the states nobody clicks through by hand: an empty archive, one run, a run with no summary, a refusal, a header that never appeared.",
+        "- No decision is duplicated between the page and the server. Where the server already answers (`/api/compare`, `/api/preview`), the front end keeps asking."
+      ]
+    },
+    {
+      "key": "ui-regression-tests-for-known-bugs",
+      "title": "A test for each UI bug already found by hand",
+      "milestone": "v1.6.0",
+      "labels": ["area:gui", "area:tests"],
+      "body": [
+        "This project's rule is that a fixed bug starts from a test that reproduces it. The front-end bugs of 1.7.0 and 1.10.0 were fixed without one, because there was nowhere to put it. They are the obvious first tests, and they are not hypothetical — each one shipped:",
+        "",
+        "- **Reloading the page discarded the finished run.** The profile-loading effect cleared the last result, and it also runs on first load, so the run just restored from the server was wiped and the page looked like nothing had ever happened.",
+        "- **A probe's result was unreachable.** The run id was parsed from one of the two shapes the driver prints, so a probe had none, and the file with its answer could not be found. (Server-side, but caught only because the page was missing a table.)",
+        "- **The comparison pair had no defined order** until it was given one: the older run is A, or a before/after reads backwards half the time.",
+        "- **The tab lived only in React state**, so a reload lost it — and there was no way to link to a comparison.",
+        "",
+        "**Done when**",
+        "- Each of the above has a test that fails against the code as it was, and passes against the code as it is.",
+        "- The test names say what the bug was, not which function it lived in, so a future reader learns the trap rather than the call stack."
+      ]
+    },
+    {
+      "key": "ui-safety-surface-tests",
+      "title": "Render-level tests for the three things the page must never quietly change",
+      "milestone": "v1.6.0",
+      "labels": ["area:gui", "safety", "area:tests"],
+      "body": [
+        "Most of the front end is a convenience. Three parts of it are not, because they are what stands between a click and an incident, or between a reader and a wrong number. They are currently asserted by nobody.",
+        "",
+        "- **The safe-peak block.** Above the profile's ceiling the run panel must demand two deliberate acts for that run — the checkbox and the profile name typed by hand — and must never remember either. The API refuses without them, and that refusal is tested; what is untested is that the page still *asks*, and that a preview showing the armed flag does not become a way to launch it.",
+        "- **The refusal card.** When `crowdsim compare` refuses, the page must render the reason and no numbers at all. A delta between two runs that were not the same experiment looks exactly like an answer.",
+        "- **`unknown` is not `MISS`.** In the preflight table a declared cache header that never appeared must stay unknown, and never be painted as a 0% miss — the distinction the whole classification chain preserves from `k6/lib/classify.js` outward.",
+        "",
+        "**Done when**",
+        "- Each of the three has a test that fails if the wording or the behaviour is weakened, not merely if the markup moves.",
+        "- The allowlist verdict shown before a run is covered too: authorised, not authorised, and the case where the page cannot tell.",
+        "- These tests are named as safety tests, so nobody deletes one to make a refactor green."
+      ]
+    },
+    {
+      "key": "ui-tdd-rule",
+      "title": "Write the front-end rule down: a UI change starts with a failing test",
+      "milestone": "v1.6.0",
+      "labels": ["area:gui", "area:tests"],
+      "body": [
+        "The repo's working rules say new generator logic goes in `k6/lib/` with a test, and that every fixed bug starts from a test that reproduces it. Neither sentence mentions the front end, which is exactly why the front end has none — the rule was followed everywhere it was written.",
+        "",
+        "**Done when**",
+        "- `docs/development.md` states, for `gui/ui`, where a test goes and what it is expected to cover, alongside the other suites in the layout table.",
+        "- `CLAUDE.md`/`AGENTS.md` carry the same rule in one line, since that is what gets read before a change.",
+        "- The rule names the honest exception: a purely visual change (spacing, a colour) does not get a test, and the boundary is written down rather than argued about per commit."
       ]
     }
   ]
