@@ -31,6 +31,10 @@
       "description": "Two answers that exist only in a terminal, and one number that is still a guess. `compare` refuses to compare runs that were not the same experiment — that judgement belongs in the page that shows the archive, not only in the CLI. And `safety.generator_mbps` is declared by hand: the estimate that warns you before a run comes back generator_ok:false is only as good as a number somebody typed once and copied between profiles, so measure it instead."
     },
     {
+      "title": "v1.5.0",
+      "description": "The GUI, audited. Its one job is to let somebody watch load being generated and read the result honestly, and the audit found four ways it fails at that quietly: it goes silent when it loses the stream, it dies with a stack trace on a busy port, it spends more time rendering the log than the run spends producing it, and half of it cannot be reached without a mouse. Every item here came with evidence — a killed server, a measured 760 MB of string churn, a DOM with no focusable row — not from a wish list."
+    },
+    {
       "title": "Backlog",
       "description": "Accepted but unscheduled. Nothing here blocks a release."
     }
@@ -456,6 +460,104 @@
         "- A load run started from a container on a non-Linux host says so before generating anything, and says what to do instead: native k6 locally, or the container on a Linux host near the target.",
         "- It does not fire for the GUI, which is a page and not a generator, nor for a container on Linux, which is the intended way to run it.",
         "- Whether it refuses or only warns follows from how reliably the host can be detected: a detection that can be wrong must not become a gate."
+      ]
+    },
+    {
+      "key": "gui-stream-loss-visible",
+      "title": "GUI: say when the live log has been lost, instead of going quiet",
+      "milestone": "v1.5.0",
+      "labels": ["area:gui", "validity"],
+      "body": [
+        "`streamRun` ends with `es.onerror = () => es.close()`. The stream closes, nothing is retried, and nothing is said. Reproduced by killing the server during a run: the log stops mid-line, the state pill still reads *running*, Stop is still offered, and the page looks exactly like a run that has gone quiet on its own.",
+        "",
+        "That is the one confusion this page cannot afford. It exists so somebody can watch load being generated against a real system; \"nothing is happening\" and \"I can no longer see what is happening\" have to look different, because the second one may mean a generator is still running and nobody is watching it.",
+        "",
+        "**Done when**",
+        "- Losing the event stream is visible in the page, immediately, in the same place the log is.",
+        "- It reconnects on its own where that is possible, and says it is doing so; a reconnect that recovers must leave no doubt about what was missed in between.",
+        "- When the server is simply gone, the page says that rather than implying the run went quiet — and the run's state stops being asserted, since it is no longer known.",
+        "- Whatever it claims about the run after a reconnect comes from the server, not from what the page remembers."
+      ]
+    },
+    {
+      "key": "gui-log-render-cost",
+      "title": "GUI: the run log costs more to render than the run costs to produce",
+      "milestone": "v1.5.0",
+      "labels": ["area:gui"],
+      "body": [
+        "The live log is `{log.join('\\n')}` inside a `<pre>`, re-evaluated on every appended line. Measured over the 4000 lines the server keeps: **760 MB of strings built and 215 ms of pure join time**, before React reconciles a 371 KB text node — once per line. Joining once at the end is 0 ms.",
+        "",
+        "A load test at a few hundred req/s produces log lines steadily for minutes, and the page is normally open on the same laptop that is generating the load. Spending the CPU there is not free: it competes with the thing being measured.",
+        "",
+        "**Done when**",
+        "- Appending a line costs the same whether it is the tenth or the four-thousandth.",
+        "- The log still follows the tail while it is running, and can still be scrolled back without fighting it.",
+        "- The truncation notice the server already emits at 4000 lines stays visible rather than being scrolled into a virtualised void."
+      ]
+    },
+    {
+      "key": "gui-keyboard-access",
+      "title": "GUI: half the archive cannot be reached without a mouse",
+      "milestone": "v1.5.0",
+      "labels": ["area:gui"],
+      "body": [
+        "In History, the table rows and the knee-plot points carry `onClick` and nothing else: no `tabindex`, no role, no key handler. Selecting a run to read its result is mouse-only. The comparison checkboxes next to them *are* focusable, so the same panel is half usable from the keyboard and half not, which is worse than either.",
+        "",
+        "This is a console people open next to a terminal, often while typing, sometimes over a share on a call.",
+        "",
+        "**Done when**",
+        "- A run can be selected, and a comparison chosen and run, using only the keyboard.",
+        "- Whatever is focused is visibly focused, in a page that is mostly dark and mostly grey.",
+        "- The clickable points in the knee plot are reachable too, or their information is reachable another way — a chart nobody can tab into is not a reason to leave the data unreachable.",
+        "- The form controls keep their current labelling: every one of them is already wrapped in a `<label>`, and that should not regress into placeholder-only fields."
+      ]
+    },
+    {
+      "key": "gui-serve-port-in-use",
+      "title": "crowdsim serve: a busy port should not be a Node stack trace",
+      "milestone": "v1.5.0",
+      "labels": ["area:gui", "area:cli"],
+      "body": [
+        "Starting the GUI while another one is already listening prints an `EADDRINUSE` dump with a `syscall: 'listen'` object and a Node version banner, and exits 1. Found by accident during the audit — an old server was still holding the port, and the new one's failure was invisible enough that the page it was serving looked current when it was three releases old.",
+        "",
+        "Every other refusal in this tool names the problem in a sentence and tells you what to do. This one is the first thing a new user can hit.",
+        "",
+        "**Done when**",
+        "- A port already in use is reported in one line, with the port, and with the likely cause named: another `crowdsim serve`.",
+        "- The exit code is the usage one, not an unhandled exception.",
+        "- The same applies to the other predictable startup failures — an address that cannot be bound, a profile directory that does not exist."
+      ]
+    },
+    {
+      "key": "gui-narrow-viewport",
+      "title": "GUI: usable on the screen people actually have during an incident",
+      "milestone": "v1.5.0",
+      "labels": ["area:gui"],
+      "body": [
+        "At 600 px the layout survives — nothing overflows horizontally — but the fixed sidebar still takes ~190 px of it, the brand block wraps onto three lines, the mix rows wrap mid-cell, and the checkbox labels break across lines. At 900 px it is cramped rather than broken.",
+        "",
+        "The realistic screens are a laptop half-covered by a terminal, and a phone during an incident.",
+        "",
+        "**Done when**",
+        "- Below a threshold the navigation stops holding a column of its own.",
+        "- The run form, the mix bars and the tables are readable at 600 px without horizontal scrolling — which they already avoid — and without wrapping that makes a number hard to pair with its label.",
+        "- Nothing about the safety block gets smaller or quieter on a small screen: the allowlist verdict and the safe-peak warning are the last things to lose room."
+      ]
+    },
+    {
+      "key": "gui-show-machine-health",
+      "title": "GUI: the health of the machine the runs come from is invisible",
+      "milestone": "Backlog",
+      "labels": ["area:gui"],
+      "body": [
+        "The page reports k6's version, the allowlist and the output directory, and nothing else about the host it is generating from. `crowdsim doctor` — and now `doctor --bench`, which measures what this machine can actually push — exist only in a terminal. The crowdsim version is in `/api/env` and shown nowhere.",
+        "",
+        "The generator's own limits are the most common reason a run is invalid, and the page that starts runs is where somebody would notice.",
+        "",
+        "**Done when**",
+        "- The page can show what `doctor` reports about this host, including the measured generator ceiling when one exists, without anybody opening a terminal.",
+        "- Running the benchmark from the page is explicit and never automatic: it generates load, locally, and a report that starts generating traffic on its own is not a report.",
+        "- The crowdsim version is visible, because a page served by a stale server is indistinguishable from a current one — which is exactly how a three-release-old server survived unnoticed during the audit."
       ]
     }
   ]
