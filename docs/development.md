@@ -59,6 +59,12 @@ real browser and asserts the archive is on screen, skipping loudly when no Chrom
 about per commit: a purely visual change — spacing, a colour, a border — does not get one. The moment a
 change decides *what* is shown rather than how it looks, it does.
 
+**A branch that only runs elsewhere is a branch you have not run.** The e2e suite's skip paths — no browser,
+no built UI — existed for a week before CI hit one and died on a helper that was never defined, because this
+machine takes neither branch. When you add a skip, run it: `CROWDSIM_CHROME=/nonexistent make test-e2e` takes
+the first, moving `gui/ui/dist` aside takes the second. The same logic is why the e2e workflow now builds the
+UI before running: a check that skips on every CI run is not a check.
+
 **The unhappy summaries are fixtures.** `tests/cli/fixtures/summary-invalid.json` and
 `summary-unreachable.json` are asserted to be reported as *invalid* and as *unreachable* — never as capacity
 numbers. A load test's failure mode is a plausible wrong answer, so the tests aim at exactly that.

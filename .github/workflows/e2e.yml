@@ -66,11 +66,20 @@ jobs:
       # generator and the target, which is the one thing this suite must not measure.
       - uses: grafana/setup-k6-action@v1
 
+      # The suite's last leg loads the real page in a real browser. Without a build there is no page, so it
+      # skipped — quietly, on every run, which is the same as not having the check. Chrome itself is already
+      # on the runner image.
+      - name: Build the UI, so the rendered-page check has something to render
+        run: npm run gui:build
+
       - name: Prerequisites are really present
         run: |
           k6 version
           docker version --format '{{.Server.Version}}'
-          # If either were missing the suite would SKIP with exit 0 — correct on a laptop, useless here.
+          test -f gui/ui/dist/index.html || { echo "::error::the UI was not built: the page check would skip"; exit 1; }
+          command -v google-chrome-stable >/dev/null || command -v google-chrome >/dev/null \
+            || echo "::warning::no Chrome on this runner: the rendered-page check will skip"
+          # If any were missing the suite would SKIP with exit 0 — correct on a laptop, useless here.
           # Fail loudly instead, so a runner image change cannot turn this job into a green no-op.
 
       - name: End-to-end suite

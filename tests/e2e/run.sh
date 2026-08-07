@@ -34,6 +34,9 @@ say()  { printf '%s\n' "$*"; }
 ok()   { printf '  ✅ %s\n' "$*"; }
 die()  { printf '❌ %s\n' "$*" >&2; exit 1; }
 skip() { printf '⏭  SKIPPED: %s\n' "$*"; exit 0; }
+# A part of the suite that cannot run here, without failing the rest. `skip` exits; this does not — and it
+# was missing until CI ran a branch this machine never takes, which is the whole reason it now exists.
+warn() { printf '⚠️  %s\n' "$*"; }
 
 command -v docker >/dev/null 2>&1 || skip "docker is not available (the targets are containers)"
 docker info >/dev/null 2>&1       || skip "the docker daemon is not running"
@@ -333,10 +336,24 @@ print(f"  ✅ GUI lists {len(runs)} runs, {len(aborted)} of them aborted")'
 #
 # Skipped, loudly, when there is no browser: a check that quietly disappears is worse than one that is
 # missing on purpose.
+# CROWDSIM_CHROME lets a runner name its browser instead of being guessed at. When it is set and unusable
+# the check is skipped rather than quietly falling back to another browser: somebody who names one wants
+# that one, and a silent substitution is how a check ends up measuring a thing nobody chose. It is also what
+# makes the no-browser branch reachable on a machine that has a browser — the branch CI hit first, and this
+# suite could not.
 CHROME=""
-for c in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" google-chrome-stable google-chrome chromium; do
-  if [ -x "$c" ] || command -v "$c" >/dev/null 2>&1; then CHROME="$c"; break; fi
-done
+if [ -n "${CROWDSIM_CHROME:-}" ]; then
+  if [ -x "$CROWDSIM_CHROME" ] || command -v "$CROWDSIM_CHROME" >/dev/null 2>&1; then
+    CHROME="$CROWDSIM_CHROME"
+  else
+    warn "CROWDSIM_CHROME is set to '$CROWDSIM_CHROME', which is not runnable — not falling back to another"
+  fi
+else
+  for c in "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" \
+           google-chrome-stable google-chrome chromium; do
+    if [ -x "$c" ] || command -v "$c" >/dev/null 2>&1; then CHROME="$c"; break; fi
+  done
+fi
 if [ -z "$CHROME" ]; then
   warn "SKIPPED: the rendered-page check needs Chrome or Chromium, and neither is on this machine"
 else

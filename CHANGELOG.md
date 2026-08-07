@@ -4,6 +4,30 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.13.2] — 2026-08-07
+
+The e2e suite died in CI on `warn: command not found` — a helper used only by branches this machine never
+takes, in a check that CI could not have run anyway.
+
+### Fixed
+- **`tests/e2e/run.sh` called a `warn` helper that was never defined.** It is used by exactly two paths — no
+  browser, and no built UI — and this laptop takes neither, so the browser pass added in 1.13.0 shipped with
+  a `command not found` waiting on the first machine that did. Both paths are now defined, and both were
+  *executed* before this was committed: `CROWDSIM_CHROME=/nonexistent make test-e2e` for the first, the
+  built UI moved aside for the second.
+- **The rendered-page check would have skipped on every CI run**, which is the same as not having it. The e2e
+  workflow ran `npm ci` and never built the UI, so `gui/ui/dist` never existed there. It builds it now, and
+  the prerequisite step fails loudly if the build is missing rather than letting the check disappear —
+  the same rule that already applies to docker and k6 in that job.
+
+### Changed
+- `CROWDSIM_CHROME` names the browser for the rendered-page check, and **is a constraint rather than a
+  preference**: set it to something unusable and the check is skipped with the reason, instead of quietly
+  falling back to another browser. Somebody who names a browser wants that one — and it is what makes the
+  no-browser branch reachable on a machine that has one.
+- `docs/development.md`: a branch that only runs elsewhere is a branch you have not run, with the two
+  commands that take the e2e suite's skip paths.
+
 ## [1.13.1] — 2026-08-06
 
 Three bugs, none of them on the tracker: found by building the container image for the first time since
