@@ -62,9 +62,19 @@ fi
 if [ "$FIX" = "1" ]; then
   for f in $FILES; do
     [ -f "$f" ] || continue
-    # :X.Y.Z → the current version, :X.Y → the current minor. Both forms keep their meaning.
-    perl -pi -e "s{crowdsim:[0-9]+\.[0-9]+\.[0-9]+}{crowdsim:$VERSION}g;
-                 s{crowdsim:[0-9]+\.[0-9]+(?![0-9.])}{crowdsim:$MINOR}g" "$f"
+    # The fixer has to reach exactly what the checker flags, or a release leaves a file the check refuses to
+    # pass and --fix cannot repair — which is what happened the first time this ran: it rewrote the image
+    # references and left the "# or :1.13" comment beside them, and the two disagreed.
+    #
+    # :X.Y.Z → the current version, :X.Y → the current minor, both in an image reference and as a bare tag
+    # mentioned on a line that talks about crowdsim.
+    perl -pi -e '
+      next unless /crowdsim/;
+      s{crowdsim:[0-9]+\.[0-9]+\.[0-9]+}{crowdsim:'"$VERSION"'}g;
+      s{crowdsim:[0-9]+\.[0-9]+(?![0-9.])}{crowdsim:'"$MINOR"'}g;
+      s{(?<![\w.:])(:)[0-9]+\.[0-9]+\.[0-9]+(?![0-9.])}{:'"$VERSION"'}g;
+      s{(?<![\w.:])(:)[0-9]+\.[0-9]+(?![0-9.])}{:'"$MINOR"'}g;
+    ' "$f"
   done
   printf '✏️  rewritten to %s — review the diff before committing\n' "$VERSION"
   exit 0

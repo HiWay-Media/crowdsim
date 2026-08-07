@@ -4,6 +4,18 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.1] — 2026-08-07
+
+Cutting 1.14.0 broke the check 1.14.0 had just added — the fastest possible proof that a repair and its
+detection have to read the same lines.
+
+### Fixed
+- **`scripts/check-doc-versions.sh --fix` could not fix everything the check flagged.** The fixer rewrote
+  the image references and left the `# or :1.13` comment beside them, which the widened detection then
+  refused. So the release that introduced the guard left a tree the guard rejected and its own `--fix`
+  considered done: a blocked release with no way forward but editing by hand. Both halves read the same
+  lines now — an image reference and a bare tag mentioned on a line that talks about crowdsim.
+
 ## [1.14.0] — 2026-08-07
 
 Milestone [v1.8.0](https://github.com/HiWay-Media/crowdsim/milestone/9): the distance between what ships and
