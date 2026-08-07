@@ -16,6 +16,15 @@ crowdsim record  session.har                              # a browser HAR export
 crowdsim serve                                            # the GUI, on loopback
 ```
 
+```bash
+crowdsim --version      # crowdsim 1.13.2 — including inside the image, where nothing else can say
+```
+
+`--version` (and `-V`) answers the question that gets asked while something is going wrong. Inside the image
+the answer is baked in at build time, because there is no `package.json` there to read: without it the CLI
+had no answer and the GUI reported `null`, so the only source was whatever somebody typed into `docker run`
+minutes earlier. `docker inspect` answers it too, from the OCI version label.
+
 ## Subcommands
 
 ### `doctor`

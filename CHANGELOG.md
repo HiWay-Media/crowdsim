@@ -4,6 +4,55 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.14.0] — 2026-08-07
+
+Milestone [v1.8.0](https://github.com/HiWay-Media/crowdsim/milestone/9): the distance between what ships and
+what was tested, and between what the documentation promises and what exists. Nothing here was failing —
+that is the point. Nothing was watching.
+
+### Added
+- **`crowdsim --version`, and an image that knows which one it is**
+  ([#47](https://github.com/HiWay-Media/crowdsim/issues/47)). The question gets asked while something is
+  going wrong, by somebody looking at a container pulled minutes ago — and nothing inside the image could
+  answer it: the CLI had no flag, and the GUI reads a `package.json` the image does not contain, so
+  `/api/env` returned `null`. The version is baked at build time (`ARG` + the OCI version label, so
+  `docker inspect` answers too), the driver reports it, and the page shows it. `docker run … crowdsim
+  --version` now prints it; the smoke test fails the build if it says `unknown`.
+- **CI runs the e2e suite against the k6 the image actually pins**
+  ([#46](https://github.com/HiWay-Media/crowdsim/issues/46)). It pins 0.52.0 while every test here had run
+  against 2.1.0 — two majors apart, because the suite installs whatever is newest on the runner. So the
+  generator users receive had never been the generator the evidence came from. A second job reads the pin
+  from the Dockerfile and runs the whole suite on it, and the suite now records which k6 produced its
+  numbers — in the archive and out loud:
+
+  ```
+  ▶ generator: k6 v2.1.0 …
+  ⚠️  the image ships k6 0.52.0 — these results come from a different generator
+  ```
+
+  The brake is why this matters: it is a threshold with `abortOnFail`, so a changed syntax or a renamed
+  metric produces a run that no longer stops.
+- **CI checks the two claims the documentation makes about itself**
+  ([#48](https://github.com/HiWay-Media/crowdsim/issues/48)). `scripts/check-doc-commands.sh` asserts that
+  every `--flag` the docs hand to `crowdsim` is one the driver parses, and executes the commands that need
+  nothing at all. What needs a target, a profile or docker is out of scope **and says so** — pretending
+  otherwise would be a green tick with nothing behind it. Proved it can fail before trusting it.
+- **What `doctor` knows, in the page** ([#49](https://github.com/HiWay-Media/crowdsim/issues/49)): version,
+  k6, output directory, allowlist, and the generator ceiling `doctor --bench` measured — with the caveat the
+  artefact carries. A ceiling measured inside a VM is shown as exactly that and never as a ceiling, so the
+  page cannot undo the fix 1.13.1 made to the estimate. The page does not offer to run the benchmark: that
+  generates load, and a report that starts traffic on its own is not a report.
+
+### Fixed
+- **The documentation told people to pull an image from eleven releases ago.** README and `docs/docker.md`
+  said `:1.2.0` — and called it "exact version — use this" — while the Kubernetes manifests said `:1.4.1`
+  and the Nomad job and compose file `:1.2.0`. Following the documented path got you a build from before the
+  bandwidth estimate, `discover --verify` and the validator. All twelve references are current, and they
+  stay current by construction: `scripts/new-release.sh prepare` moves them, and
+  `scripts/check-doc-versions.sh` fails CI when they drift — the same way a broken relative link already
+  does. That the deployment manifests were among them is the part worth remembering: this was not a
+  documentation typo, it was the path somebody deploys with.
+
 ## [1.13.2] — 2026-08-07
 
 The e2e suite died in CI on `warn: command not found` — a helper used only by branches this machine never

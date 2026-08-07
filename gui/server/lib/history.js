@@ -79,6 +79,28 @@ export function readDiscover(outDir, runId) {
   return readArtifact(outDir, 'discover', runId);
 }
 
+/**
+ * The newest generator benchmark in the archive, or null when nobody has measured this machine.
+ *
+ * Read rather than derived, and handed over whole — including `virtualised`, because a ceiling measured
+ * inside a VM describes the VM and the page must be able to say so instead of printing a flattering number.
+ */
+export function newestBench(outDir) {
+  let files;
+  try {
+    files = fs.readdirSync(outDir).filter((f) => /^bench-\d{8}T\d{6}Z\.json$/.test(f)).sort();
+  } catch (e) {
+    return null;
+  }
+  for (const f of files.reverse()) {
+    try {
+      const d = JSON.parse(fs.readFileSync(path.join(outDir, f), 'utf8'));
+      if (d && d.mbits_per_second) return d;
+    } catch (e) { /* a half-written artefact is not a measurement */ }
+  }
+  return null;
+}
+
 function readArtifact(outDir, prefix, runId) {
   if (!RUN_ID.test(String(runId || ''))) return null;
   try { return JSON.parse(fs.readFileSync(path.join(outDir, `${prefix}-${runId}.json`), 'utf8')); } catch (e) { return null; }

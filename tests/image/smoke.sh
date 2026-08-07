@@ -69,6 +69,25 @@ case "$dry" in
   *) ok "load reaches the full profile validation" ;;
 esac
 
+# ── the image can say which version it is ────────────────────────────────────────────────────────────
+# Not cosmetic: this is the one place where nobody else can answer the question. Somebody looking at a
+# container they pulled minutes ago has no package.json to read and no repository to check, and a stale
+# server serving a current-looking page is a real way to waste an afternoon.
+img_version="$(docker run --rm "$IMAGE" crowdsim --version 2>/dev/null | tr -d '\r')"
+case "$img_version" in
+  "crowdsim unknown"*) bad "the image does not know its own version: the build forgot CROWDSIM_VERSION" ;;
+  "crowdsim "[0-9]*)   ok "the image reports its version: $img_version" ;;
+  *)                   bad "crowdsim --version said: ${img_version:-nothing}" ;;
+esac
+
+label_version="$(docker image inspect "$IMAGE" \
+  --format '{{index .Config.Labels "org.opencontainers.image.version"}}' 2>/dev/null)"
+if [ -n "$label_version" ] && [ "$label_version" != "unknown" ]; then
+  ok "docker inspect answers it too (label: $label_version)"
+else
+  bad "the OCI version label is missing or unknown, so `docker inspect` cannot answer it"
+fi
+
 # ── the gates survived the build ─────────────────────────────────────────────────────────────────────
 # No allowlist in the image's environment. This is the one that must never regress.
 env_allow="$(docker image inspect "$IMAGE" --format '{{range .Config.Env}}{{println .}}{{end}}' \

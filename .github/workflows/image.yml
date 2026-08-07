@@ -62,6 +62,12 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
+      # The version the build stamps into the image. package.json is the source of truth the release script
+      # already keeps in step with the tag, so nothing here has to parse a ref.
+      - name: The version being built
+        id: version
+        run: echo "value=$(node -p "require('./package.json').version")" >> "$GITHUB_OUTPUT"
+
       # Single-arch first, loaded into the local docker: an image that has not been smoke-tested must not
       # reach a registry, and a multi-arch manifest cannot be loaded locally to test.
       - name: Build for this runner
@@ -70,6 +76,10 @@ jobs:
           context: .
           load: true
           tags: crowdsim:ci
+          # Without this the image reports its version as "unknown" — and the image is the one place where
+          # nothing else can answer the question.
+          build-args: |
+            CROWDSIM_VERSION=${{ steps.version.outputs.value }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -118,6 +128,8 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          build-args: |
+            CROWDSIM_VERSION=${{ steps.version.outputs.value }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha

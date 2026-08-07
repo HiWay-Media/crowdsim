@@ -61,6 +61,12 @@ export default function App() {
           <span className="brand-sub">live-event load simulator</span>
         </div>
         <div className="chips">
+          <Chip
+            label="crowdsim"
+            value={env ? (env.version || 'unknown version') : '…'}
+            bad={Boolean(env && !env.version)}
+            title="the version of the server serving this page — a stale one looks exactly like a current one"
+          />
           <Chip label="k6" value={env ? (env.k6 || 'not installed') : '…'} bad={env && !env.k6} />
           <Chip
             label="allowlist"

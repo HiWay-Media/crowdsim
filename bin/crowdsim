@@ -79,11 +79,35 @@ warn()  { printf '  ⚠️  %s\n' "$*"; }
 # note: "$1" and not "$*" — the second argument is the exit code, not part of the message
 die()   { printf '❌ %s\n' "$1" >&2; exit "${2:-1}"; }
 
+# Which version is this? The question gets asked in the middle of something going wrong, and until now the
+# CLI could not answer it at all — while inside the image the GUI could not either, because it reads a
+# package.json the image does not contain. Three sources, in the order of how much they can be trusted:
+# what the build baked in, what this checkout says, and an honest "unknown".
+crowdsim_version() {
+  if [ -n "${CROWDSIM_VERSION:-}" ]; then printf '%s' "$CROWDSIM_VERSION"; return 0; fi
+  if [ -f "$ROOT/package.json" ]; then
+    python3 -c 'import json,sys
+try:
+    print(json.load(open(sys.argv[1]))["version"])
+except Exception:
+    print("unknown")' "$ROOT/package.json" 2>/dev/null && return 0
+  fi
+  printf '%s' "unknown"
+}
+
 CMD="${1:-}"; shift || true
 # `--help` in SUBCOMMAND position: without this case it falls through to the unknown-subcommand branch
-# and exits 2 — which is the first thing anyone tries.
+# and exits 2 — which is the first thing anyone tries. `--version` is the second.
 case "$CMD" in
   -h|--help) usage; exit 0;;
+  -V|--version)
+    v="$(crowdsim_version)"
+    if [ "$v" = "unknown" ]; then
+      say "crowdsim unknown (not packaged: no CROWDSIM_VERSION baked in and no package.json at $ROOT)"
+    else
+      say "crowdsim $v"
+    fi
+    exit 0;;
   "") usage; exit 2;;
 esac
 

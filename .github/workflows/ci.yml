@@ -51,6 +51,17 @@ jobs:
       - name: front end — the decisions and the safety wording
         run: make test-ui
 
+      # A claim the documentation makes about itself, verified rather than remembered: every image tag it
+      # tells somebody to pull is the version this repository is at. It pointed at 1.2.0 for eleven
+      # releases, and the Kubernetes manifests at 1.4.1, because nothing was looking.
+      - name: documented image tags are the current version
+        run: scripts/check-doc-versions.sh
+
+      # The other claim the documentation makes about itself: that its commands work. Every flag it hands
+      # to crowdsim must be one the driver parses, and the commands that need nothing are run for real.
+      - name: the documentation describes the tool that exists
+        run: scripts/check-doc-commands.sh
+
       - name: CLI tests (safety gates, exit codes, release helper)
         run: make test-cli
 

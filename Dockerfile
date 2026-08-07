@@ -55,6 +55,17 @@ RUN npm ci --omit=dev
 # ─── stage 3: the image ───────────────────────────────────────────────────────────────────────────────
 FROM grafana/k6:0.52.0
 
+# Which version is this? The question is asked in the middle of something going wrong, by somebody looking
+# at a container they pulled minutes ago — and until now nothing inside the image could answer it: the CLI
+# had no flag, and the GUI reads a package.json that is not copied here, so /api/env reported null.
+# Baked at build time, and stamped as a label so `docker inspect` answers it too.
+ARG CROWDSIM_VERSION=unknown
+LABEL org.opencontainers.image.title="crowdsim" \
+      org.opencontainers.image.description="Load simulator for live events" \
+      org.opencontainers.image.source="https://github.com/HiWay-Media/crowdsim" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.version="${CROWDSIM_VERSION}"
+
 USER root
 # nodejs is for `crowdsim serve` only. The driver and the generator need bash, curl and python3.
 RUN apk add --no-cache bash curl python3 coreutils util-linux nodejs
@@ -79,7 +90,8 @@ RUN chmod +x /usr/local/bin/crowdsim
 
 # CROWDSIM_ROOT is what lets the driver live in /usr/local/bin while the tool lives in /crowdsim: without
 # it the script would resolve its root to /usr/local and fail to find the GUI and the A/B templates.
-ENV CROWDSIM_ROOT=/crowdsim \
+ENV CROWDSIM_VERSION=${CROWDSIM_VERSION} \
+    CROWDSIM_ROOT=/crowdsim \
     CROWDSIM_K6_SCRIPT=/crowdsim/k6/live-event.js \
     CROWDSIM_PROFILES=/profiles \
     CROWDSIM_OUT=/out \

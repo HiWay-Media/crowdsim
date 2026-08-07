@@ -65,6 +65,19 @@ machine takes neither branch. When you add a skip, run it: `CROWDSIM_CHROME=/non
 the first, moving `gui/ui/dist` aside takes the second. The same logic is why the e2e workflow now builds the
 UI before running: a check that skips on every CI run is not a check.
 
+**CI checks the claims the documentation makes about itself.** `scripts/check-doc-versions.sh` asserts that
+every image tag the docs and the manifests tell somebody to pull is the version this repository is at — they
+said `:1.2.0` for eleven releases, and the Kubernetes manifests `:1.4.1`, because keeping them current
+depended on memory; `scripts/new-release.sh prepare` now moves them, and CI fails when they drift.
+`scripts/check-doc-commands.sh` asserts that every `--flag` the documentation hands to `crowdsim` is one the
+driver parses, and runs the commands that need nothing at all. What needs a target, a profile or docker is
+out of scope and says so — pretending to check it would be a green tick with nothing behind it.
+
+**The e2e suite runs twice in CI: once against the newest k6, once against the version the image pins.** The
+generator that ships had never been the generator the evidence came from — 0.52.0 against 2.x, two majors
+apart. The brake is a k6 threshold with `abortOnFail`, so a changed threshold syntax produces a run that no
+longer stops; the suite records which k6 produced its numbers, in the archive and in its output.
+
 **The unhappy summaries are fixtures.** `tests/cli/fixtures/summary-invalid.json` and
 `summary-unreachable.json` are asserted to be reported as *invalid* and as *unreachable* — never as capacity
 numbers. A load test's failure mode is a plausible wrong answer, so the tests aim at exactly that.

@@ -62,7 +62,7 @@ spec:
           type: RuntimeDefault
       containers:
         - name: gui
-          image: ghcr.io/hiway-media/crowdsim:1.4.1
+          image: ghcr.io/hiway-media/crowdsim:1.14.0
           imagePullPolicy: IfNotPresent
           args: ["crowdsim", "serve"]
           ports:

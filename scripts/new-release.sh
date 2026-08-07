@@ -162,6 +162,14 @@ PY
     ( cd "$ROOT" && npm install --package-lock-only --silent >/dev/null 2>&1 ) \
       && ok "package-lock.json synced" || warn "could not sync package-lock.json — run npm install"
   fi
+  # The image tags the documentation and the manifests tell people to pull. They spent eleven releases
+  # pointing at 1.2.0 — and the Kubernetes manifests at 1.4.1 — because keeping them current depended on
+  # somebody remembering. It depends on this line now.
+  if [ -x "$ROOT/scripts/check-doc-versions.sh" ]; then
+    "$ROOT/scripts/check-doc-versions.sh" --fix >/dev/null 2>&1 \
+      && ok "documented image tags moved to $version" \
+      || warn "could not update the documented image tags — run scripts/check-doc-versions.sh"
+  fi
   say ""
   say "  Next: write the CHANGELOG section (replace the placeholder), commit everything, then:"
   say "      scripts/new-release.sh tag"

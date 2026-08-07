@@ -19,7 +19,7 @@ import { listProfiles, readProfile, writeProfile, deleteProfile, profilePath, Ba
 import { validateProfile } from '../../../lib/validate.mjs';
 import { buildLoadArgs, buildProbeArgs, buildDiscoverArgs, InvalidRun, SHAPES, RSC_MODES } from './args.js';
 import { commandLine } from './command.js';
-import { readHistory, readSummary, readRunLog, comparable, readProbe, readDiscover } from './history.js';
+import { readHistory, readSummary, readRunLog, comparable, readProbe, readDiscover, newestBench } from './history.js';
 import { Runner, Busy } from './runner.js';
 
 export function createApp(opts) {
@@ -85,6 +85,9 @@ export function createApp(opts) {
       shapes: SHAPES,
       rsc_modes: RSC_MODES,
       ui: Boolean(uiDir),
+      // What this machine was measured doing, if anybody measured it. The generator's own limits are the
+      // most common reason a run is invalid, and the page that starts runs is where somebody would notice.
+      bench: newestBench(outDir),
     });
   }));
 

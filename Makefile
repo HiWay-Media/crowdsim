@@ -81,8 +81,11 @@ gui-dev: ## Vite dev server with API proxy (http://127.0.0.1:5173)
 gui-build: ## produce gui/ui/dist
 	npm run build --workspace gui/ui
 
+# The version is baked in, not guessed at runtime: inside the image there is no package.json to read.
+CROWDSIM_VERSION := $(shell node -p "require('./package.json').version" 2>/dev/null || echo unknown)
+
 image: ## build the single image (driver + generator + GUI) as $(IMAGE)
-	docker build -t $(IMAGE) .
+	docker build --build-arg CROWDSIM_VERSION=$(CROWDSIM_VERSION) -t $(IMAGE) .
 
 image-smoke: ## assert the image is the tool and the gates survived the build
 	tests/image/smoke.sh $(IMAGE)

@@ -145,3 +145,42 @@ test('a connecting client gets the log as one snapshot, not as a replay of lines
     await new Promise((r) => server.close(r));
   }
 });
+
+test('/api/env carries the newest generator benchmark, so the page can show it', async () => {
+  // The measurement lives in out/, written by `doctor --bench`. The page reads it through the server like
+  // everything else — the GUI keeps no results of its own.
+  const { profilesDir, outDir } = tmpdirs();
+  fs.writeFileSync(path.join(outDir, 'bench-20260101T000000Z.json'), JSON.stringify({
+    measured_at: '20260101T000000Z', req_per_second: 100, mbits_per_second: 50, virtualised: false,
+  }));
+  fs.writeFileSync(path.join(outDir, 'bench-20260202T000000Z.json'), JSON.stringify({
+    measured_at: '20260202T000000Z', req_per_second: 45000, mbits_per_second: 16640, virtualised: true,
+  }));
+
+  const app = createApp({ crowdsimBin: FAKE, profilesDir, outDir, version: '9.9.9' });
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  try {
+    const env = await (await fetch(`http://127.0.0.1:${server.address().port}/api/env`)).json();
+    assert.equal(env.version, '9.9.9', 'the page must be able to say which version served it');
+    assert.equal(env.bench.measured_at, '20260202T000000Z', 'the newest measurement');
+    assert.equal(env.bench.virtualised, true, 'and the context it was taken in, or it reads as a ceiling');
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});
+
+test('a host that has never been measured reports no benchmark, rather than a zero', async () => {
+  const { profilesDir, outDir } = tmpdirs();
+  const app = createApp({ crowdsimBin: FAKE, profilesDir, outDir });
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  try {
+    const env = await (await fetch(`http://127.0.0.1:${server.address().port}/api/env`)).json();
+    assert.equal(env.bench, null);
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});

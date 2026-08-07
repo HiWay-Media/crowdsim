@@ -113,3 +113,40 @@ setup() { crowdsim_setup; }
   [ "$status" -eq 5 ]
   [[ "$output" == *"needs docker"* ]]
 }
+
+@test "--version answers the question that gets asked during an incident" {
+  # "Which version is this?" had no answer from the CLI at all, and inside the image not from the page
+  # either: gui/server reads package.json, which the image does not contain, so /api/env said null. The one
+  # place the question is asked is a container somebody pulled minutes ago.
+  run "$CROWDSIM" --version
+  [ "$status" -eq 0 ]
+  [[ "$output" =~ ^crowdsim\ [0-9]+\.[0-9]+\.[0-9]+ ]]
+
+  # It must be THIS checkout's version, not a string somebody typed twice.
+  local pkg
+  pkg="$(python3 -c 'import json;print(json.load(open("package.json"))["version"])')"
+  [[ "$output" == *"$pkg"* ]]
+}
+
+@test "-V is the same answer, since half the tools in a terminal use it" {
+  run "$CROWDSIM" -V
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"crowdsim "* ]]
+}
+
+@test "a packaged build reports the version it was built with, not a file it cannot read" {
+  # In the image there is no package.json: the version is baked in at build time instead. Without this the
+  # answer would be "unknown" precisely where it matters most.
+  run env CROWDSIM_VERSION=9.9.9 "$CROWDSIM" --version
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"9.9.9"* ]]
+}
+
+@test "when nothing knows the version it says so, rather than inventing one" {
+  local nowhere="$BATS_TEST_TMPDIR/nowhere"
+  mkdir -p "$nowhere"
+  run env -u CROWDSIM_VERSION CROWDSIM_ROOT="$nowhere" "$CROWDSIM" --version
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"unknown"* ]]
+  [[ "$output" == *"not packaged"* ]]
+}

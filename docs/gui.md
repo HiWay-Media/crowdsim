@@ -169,6 +169,20 @@ number that means nothing. The first field is `generator_ok`: if it is false, di
 - **Buttons** — Run · Dry run (composes everything, sends no traffic) · Probe · Discover URLs. Stop appears
   while a run is in flight.
 
+### This machine
+
+Under the run form: the version of the server serving the page, k6, where runs are written, the allowlist,
+and what `doctor --bench` measured this host doing. The generator's own limits are the most common reason a
+run is invalid, and this is the page that starts runs — all of it used to live in a terminal.
+
+The measured ceiling keeps the caveat the artefact carries. A benchmark taken **inside a container in a VM**
+is shown as exactly that, not as a ceiling: it describes the VM's own network, which is the layer that
+throttles a run against a real target. The page does not offer to run the benchmark for you — it generates
+load, and a report that starts generating traffic on its own is not a report.
+
+The version is in the header too. A page served by a stale server is indistinguishable from a current one,
+which is how a three-release-old server survived an audit.
+
 ### Profiles
 
 A JSON editor with live validation, and a summary of what the profile means: the mix as shares, the targets,

@@ -37,13 +37,16 @@ test('the modules under test are the ones the page imports', async () => {
   const files = fs.readdirSync(uiLib).filter((f) => f.endsWith('.js'));
   assert.ok(files.length >= 4, `expected the decision modules in gui/ui/src/lib, found ${files.join(', ')}`);
 
-  const components = path.resolve(here, '../../gui/ui/src');
-  const sources = [
-    fs.readFileSync(path.join(components, 'App.jsx'), 'utf8'),
-    fs.readFileSync(path.join(components, 'components/RunPanel.jsx'), 'utf8'),
-    fs.readFileSync(path.join(components, 'components/HistoryPanel.jsx'), 'utf8'),
-    fs.readFileSync(path.join(components, 'components/CompareCard.jsx'), 'utf8'),
-  ].join('\n');
+  // Every component, not a list of four: the list went stale the first time a module was imported by a
+  // component nobody had thought to add to it, and a canary that has to be maintained is one that gets
+  // maintained wrong.
+  const componentsDir = path.resolve(here, '../../gui/ui/src');
+  const jsx = [path.join(componentsDir, 'App.jsx')].concat(
+    fs.readdirSync(path.join(componentsDir, 'components'))
+      .filter((f) => f.endsWith('.jsx'))
+      .map((f) => path.join(componentsDir, 'components', f)),
+  );
+  const sources = jsx.map((f) => fs.readFileSync(f, 'utf8')).join('\n');
   for (const f of files) {
     const mod = f.replace(/\.js$/, '');
     assert.ok(sources.includes(`lib/${mod}.js`), `nothing imports lib/${mod}.js — the test would be alone`);

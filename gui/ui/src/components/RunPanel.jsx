@@ -4,6 +4,7 @@ import MixBars from './MixBars.jsx';
 import SummaryCard from './SummaryCard.jsx';
 import CommandPreview from './CommandPreview.jsx';
 import { ProbeTable, DiscoverTable } from './PreflightTables.jsx';
+import HostPanel from './HostPanel.jsx';
 import { runToShow, shouldClearResult } from '../lib/runs.js';
 import { allowlistVerdict } from '../lib/allowlist.js';
 import { SAFE_PEAK } from '../lib/messages.js';
@@ -322,6 +323,8 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
       </section>
 
       <CommandPreview body={previewBody} disabled={!profileName} />
+
+      <HostPanel env={env} />
 
       {run ? (
         <section className="card wide">

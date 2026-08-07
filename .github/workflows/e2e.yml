@@ -95,3 +95,54 @@ jobs:
           path: tests/e2e/.out/
           retention-days: 7
           if-no-files-found: warn
+
+  # The same suite, against the k6 the IMAGE pins — because the job above installs whatever is newest, and
+  # for eleven releases that meant the generator users receive had never been the generator the evidence
+  # came from. Two majors apart at the time this was written (0.52.0 shipped, 2.x tested).
+  #
+  # The brake is the reason this matters: it is a k6 threshold with abortOnFail, so a changed threshold
+  # syntax or a renamed metric produces a run that no longer stops — and the first person to find out would
+  # be whoever is watching the outage it existed to cut short.
+  e2e-pinned:
+    name: e2e against the k6 the image ships
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm run gui:build
+
+      # Read from the Dockerfile, so the pin has one home and bumping it is one edit.
+      - name: The k6 version the image pins
+        id: pin
+        run: |
+          v=$(grep -oE 'grafana/k6:[0-9]+\.[0-9]+\.[0-9]+' Dockerfile | head -1 | cut -d: -f2)
+          [ -n "$v" ] || { echo "::error::no k6 pin found in the Dockerfile"; exit 1; }
+          echo "value=$v" >> "$GITHUB_OUTPUT"
+          echo "the image ships k6 $v"
+
+      - uses: grafana/setup-k6-action@v1
+        with:
+          k6-version: ${{ steps.pin.outputs.value }}
+
+      - name: It really is the pinned version
+        run: |
+          k6 version
+          k6 version | grep -q "v${{ steps.pin.outputs.value }}" \
+            || { echo "::error::the runner has a different k6 than the image pins"; exit 1; }
+
+      - name: End-to-end suite
+        run: make test-e2e
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-archive-pinned-k6
+          path: tests/e2e/.out/
+          retention-days: 7

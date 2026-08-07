@@ -39,10 +39,15 @@ if (LOOPBACK.indexOf(bind) === -1 && !token) {
   process.exit(3);
 }
 
-let version = null;
-try {
-  version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
-} catch (e) { /* running from an image without package.json: version is cosmetic */ }
+// The build stamps CROWDSIM_VERSION; a checkout has package.json. Inside the image only the first exists,
+// and that is precisely where somebody needs to know which version they are looking at — a page served by
+// a stale server is indistinguishable from a current one.
+let version = process.env.CROWDSIM_VERSION || null;
+if (!version) {
+  try {
+    version = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).version;
+  } catch (e) { /* neither: /api/env reports null, and the page says the version is unknown */ }
+}
 
 const app = createApp({
   crowdsimBin: process.env.CROWDSIM_BIN || path.join(root, 'bin/crowdsim'),

@@ -47,6 +47,18 @@ trap cleanup EXIT
 
 rm -rf "$OUT"; mkdir -p "$OUT"
 
+# WHICH k6 produced these numbers. The image pins one version and this suite runs whatever is installed, so
+# a result has to carry its generator's version or it cannot be attributed later — and the gap between the
+# two is exactly what the pinned job in .github/workflows/e2e.yml exists to close.
+K6_VERSION="$(k6 version 2>/dev/null | head -1)"
+PINNED_K6="$(grep -oE 'grafana/k6:[0-9]+\.[0-9]+\.[0-9]+' "$ROOT/Dockerfile" | head -1 | cut -d: -f2)"
+printf '%s\n' "$K6_VERSION" > "$OUT/k6-version.txt"
+say "▶ generator: $K6_VERSION"
+case "$K6_VERSION" in
+  *"v$PINNED_K6"*) ok "this is the version the image ships ($PINNED_K6)" ;;
+  *) warn "the image ships k6 $PINNED_K6 — these results come from a different generator" ;;
+esac
+
 say "▶ bringing up the local targets"
 ( cd "$HERE" && docker compose up -d --force-recreate >/dev/null )
 
