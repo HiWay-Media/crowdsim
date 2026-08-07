@@ -43,6 +43,10 @@
       "description": "Four features, one theme: the tool knows things it does not yet hand over. It measures a page, verifies a pool and records a fan-out, then asks you to write the profile from scratch. It judges an HTML document and a static asset against one threshold. It reports a cold cache's numbers as the system's. And it produces a result that somebody retypes into an incident document, losing every caveat on the way. Each item closes one of those gaps without loosening anything: no default allowlist, no weaker brake, no invented number."
     },
     {
+      "title": "v1.8.0",
+      "description": "The gap between what is tested and what is delivered. The image pins k6 0.52.0 while every test in this repository has been run against 2.1.0 — two majors apart, and the e2e suite installs whatever is newest on the runner, so the generator that ships is never the generator that was proven. The documentation still tells people to pull :1.2.0, eleven releases old, and calls it the exact version to use. Both were found by looking rather than by anything failing, which is the point: nothing in CI is watching the distance between the artefact and the evidence for it."
+    },
+    {
       "title": "Backlog",
       "description": "Accepted but unscheduled. Nothing here blocks a release."
     }
@@ -731,6 +735,70 @@
         "- Nothing is invented: every figure comes from the summary, and anything the archive does not contain is absent rather than estimated.",
         "- It can report a comparison too, by reusing `crowdsim compare` rather than recomputing a delta — the same rule that keeps the GUI honest.",
         "- Hostnames come from the run as it happened; the command does not sanitise them, and the documentation says plainly that a report describes your infrastructure and belongs wherever your run archives already belong."
+      ]
+    },
+    {
+      "key": "test-the-k6-that-ships",
+      "title": "Test the k6 the image actually ships, not whichever one the runner has",
+      "milestone": "v1.8.0",
+      "labels": ["area:ci", "area:generator", "validity"],
+      "body": [
+        "The image pins `grafana/k6:0.52.0`. The e2e suite — the only thing that runs a real generator — uses whatever k6 is on the machine: 2.1.0 on the developer laptop this was found on, and whatever `grafana/setup-k6-action` installs in CI. So the generator that users receive has never been the generator the evidence came from, and the two are two major versions apart.",
+        "",
+        "The generator leans on k6's own surface in ways a major version is allowed to change: metric names (`http_req_duration`, `data_received`, `dropped_iterations`), threshold expressions with `abortOnFail` — which IS the brake — the executor options, and the shape of the object `handleSummary` receives. A rename in any of them produces a run that no longer stops, or a summary whose verdicts read as zeroes.",
+        "",
+        "Checked by hand while writing this: 0.52.0 does still run the current generator end to end, with the summary and verdicts intact. Nothing keeps that true.",
+        "",
+        "**Done when**",
+        "- One CI job runs the e2e suite against the k6 version the image pins, so the shipped combination is the tested combination.",
+        "- Whichever k6 the suite runs against is stated in its output and in the run archive, so a result can be attributed to a version later.",
+        "- Bumping the pin is a deliberate change that has to pass that job — and the brake leg is the one that matters, because a threshold syntax that stopped working would otherwise surface as a run that never aborts."
+      ]
+    },
+    {
+      "key": "stale-version-references",
+      "title": "The documentation tells people to pull an image from eleven releases ago",
+      "milestone": "v1.8.0",
+      "labels": ["area:ci", "documentation"],
+      "body": [
+        "`README.md` and `docs/docker.md` still say `ghcr.io/hiway-media/crowdsim:1.2.0`, and the docs call it \"exact version — use this\". The current release is 1.13.x. Somebody following the documented path gets an image from before the bandwidth estimate, before `discover --verify`, before the validator, before every fix in the last eleven releases — and nothing about the instructions tells them so.",
+        "",
+        "This is the failure mode the project already knows: a documented command that was true when it was written and is not checked afterwards.",
+        "",
+        "**Done when**",
+        "- The version references in the documentation are correct at release time, by construction rather than by memory — the release script already touches three package.json files and the CHANGELOG.",
+        "- CI fails when a documented image tag is older than the released version, the way it already fails on a broken relative link.",
+        "- Where a floating tag is the honest recommendation, the documentation says which one and what it costs; where an exact version is right, it is the current one."
+      ]
+    },
+    {
+      "key": "docs-commands-still-run",
+      "title": "The documentation claims its commands were executed; nothing re-executes them",
+      "milestone": "v1.8.0",
+      "labels": ["area:ci", "area:tests", "documentation"],
+      "body": [
+        "The rule this project documents about itself is that every command in the docs was run before being written down, and it has caught real bugs — a 500 where a 409 belonged, a profile key the driver ignored. What it does not have is anything that runs them a second time. The stale image tags are the first proof that documented commands rot silently.",
+        "",
+        "**Done when**",
+        "- The copy-pasteable commands that can run without a target — `doctor`, `validate`, `record`, `compare`, `--help`, the `--dry-run` forms — are executed by CI from the documentation itself, so a flag that is renamed breaks the docs immediately.",
+        "- Commands that need a target or generate load are explicitly out of scope and marked as such in the source, rather than being silently skipped.",
+        "- A failure names the file and the line the command came from: the point is to fix the documentation, not to admire a red build."
+      ]
+    },
+    {
+      "key": "gui-show-machine-health-v18",
+      "title": "GUI: show what doctor knows about the machine the runs come from",
+      "milestone": "v1.8.0",
+      "labels": ["area:gui"],
+      "body": [
+        "Scheduled out of the backlog, unchanged in substance from #36: the page reports k6's version, the allowlist and the output directory, and nothing else about the host it generates from. `doctor` — and `doctor --bench`, which now measures what this machine can actually push and records whether it was measured inside a VM — exist only in a terminal.",
+        "",
+        "The generator's own limits are the most common reason a run is invalid, and the page that starts runs is where somebody would notice.",
+        "",
+        "**Done when**",
+        "- The page can show what `doctor` reports about this host, including the measured generator ceiling and the caveat attached to it.",
+        "- Running the benchmark from the page is explicit and never automatic: it generates load, locally, and a report that starts generating traffic on its own is not a report.",
+        "- The crowdsim version is visible, because a page served by a stale server is indistinguishable from a current one — which is how a three-release-old server survived an audit."
       ]
     }
   ]
