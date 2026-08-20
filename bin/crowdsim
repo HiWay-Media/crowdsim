@@ -24,6 +24,8 @@
 #               the tweak under evaluation and one as-is → measured hit ratio and offload
 #   history     one line per run, to see whether the knee moves over time
 #   compare     the delta between two runs, and a refusal when they are not comparable
+#   report      one run as pasteable markdown, with the caveats that do not survive retyping
+#   init        draft a first profile from what probe/discover/record already measured (safety left blank)
 #   record      turn a browser HAR export into a journey file for --shape journey (needs node)
 #   validate    check a profile against every rule at once, without generating anything (needs node)
 #   serve       the GUI: same gates, same output directory, on http://127.0.0.1:8787 (needs node)
@@ -36,9 +38,10 @@
 #                     [--peak 120] [--start 30] [--steps 4] [--step-dur 60s] [--hold 120s]
 #                     [--rsc-mode repeat|random] [--max-5xx 0.05] [--max-p95 5000]
 #                     [--safe-peak 150] [--i-know-this-breaks-production] [--touch-and-go] [--dry-run]
-#   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10] [--third <leg.conf.template>] [--run]
-#   crowdsim cache-ab --new-leg <leg.conf.template>
-#   crowdsim compare  <run-a> <run-b> [--json]
+#                     [--warmup 30s] [--warmup-peak 20]
+#   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10] [--third <t.conf>] [--run] | --new-leg <t.conf>
+#   crowdsim compare  <run-a> <run-b> [--json]  ·  crowdsim init [--out <profile.json>]
+#   crowdsim report   <run-id> [--compare <run-id>] [--out <file.md>]
 #   crowdsim record   <file.har> [--out <journey.json>] [--origin <url>] [--rsc-query _rsc] [--force]
 #   crowdsim validate <f.json>
 #   crowdsim serve    [--port 8787] [--bind 127.0.0.1]
@@ -48,8 +51,8 @@
 #                            profile declares safety.allow_hosts. No default, by design.
 #   CROWDSIM_OUT             output directory for logs and summaries (default: ./out)
 #   CROWDSIM_SLACK_WEBHOOK   if set, --slack posts the run recap there. Never hardcode a webhook here.
-#   CROWDSIM_PROFILES        profile directory the GUI reads and writes (default: ./profiles)
-#   CROWDSIM_GUI_TOKEN       bearer token for the GUI; REQUIRED to bind anything but loopback
+#   CROWDSIM_PROFILES        profile dir the GUI reads/writes (default: ./profiles) · CROWDSIM_GUI_TOKEN:
+#                            bearer token for the GUI; REQUIRED to bind anything but loopback
 #   CROWDSIM_ROOT            where k6/, gui/ and cache-ab/ live (default: the parent of this script)
 #
 # Exit: 0 = executed (a run stopped by the brake is an OUTCOME, not an error) · 2 = usage
@@ -135,9 +138,12 @@ while [ $# -gt 0 ]; do
     --json) COMPARE_JSON=1; shift;;
     --bench) BENCH=1; shift;;
     --run) RUN_LEGS=1; shift;;
+    --warmup) WARMUP_DUR="$2"; shift 2;;
+    --compare) REPORT_COMPARE="$2"; shift 2;;
+    --warmup-peak) WARMUP_PEAK="$2"; shift 2;;
     --third) THIRD_LEG="$2"; shift 2;;
     --new-leg) NEW_LEG="$2"; shift 2;;
-    --out) JOURNEY_OUT="$2"; shift 2;;
+    --out) JOURNEY_OUT="$2"; REPORT_OUT="$2"; INIT_OUT="$2"; shift 2;;
     --origin) RECORD_ORIGIN="$2"; shift 2;;
     --rsc-query) RSC_QUERY_OVERRIDE="$2"; shift 2;;
     --force) FORCE_OVERWRITE=1; shift;;
@@ -152,7 +158,8 @@ while [ $# -gt 0 ]; do
     # argument IS the profile, and the same goes for the two run ids `compare` works on. Everywhere else a
     # bare word is still a mistake worth stopping for.
     *) if [ "$CMD" = "validate" ] && [ -z "$PROFILE_F" ]; then PROFILE_F="$1"; shift
-       elif [ "$CMD" = "compare" ] || [ "$CMD" = "record" ]; then POSITIONAL+=("$1"); shift
+       elif [ "$CMD" = "compare" ] || [ "$CMD" = "record" ] || [ "$CMD" = "report" ] \
+            || [ "$CMD" = "init" ]; then POSITIONAL+=("$1"); shift
        else die "unknown option: $1" 2; fi;;
   esac
 done
@@ -915,6 +922,18 @@ cmd_load() {
   resolve_profile; resolve_target
   gate_allowlist
   gate_peak
+  # A warm-up generates real load, so it passes the same gates. Priming is not a way around the ceiling.
+  if [ -n "${WARMUP_DUR:-}" ]; then
+    case "$WARMUP_DUR" in
+      *[0-9]s|*[0-9]m|*[0-9]h|*[0-9]ms) ;;
+      *) die "--warmup takes a duration like 30s or 2m (got: $WARMUP_DUR)" 2;;
+    esac
+    WARMUP_PEAK="${WARMUP_PEAK:-$START}"
+    PEAK_SAVED="$PEAK"; PEAK="$WARMUP_PEAK"
+    gate_peak
+    PEAK="$PEAK_SAVED"
+  fi
+
   bandwidth_note "$PEAK"
   virtualised_generator_note
   k6_bin
@@ -943,6 +962,21 @@ cmd_load() {
     env+=("JOURNEY=$jpath")
   fi
 
+  # The warm-up: its own k6 invocation, its own summary file, no brake. Two runs rather than one filtered
+  # one, because filtering is where a caveat gets lost — nothing here can fold priming traffic into the
+  # measurement, since the measurement is a different process reading a different file.
+  local -a warm_env=() warm_args=()
+  local warm_summary="" warm_log="" warmed_by=""
+  if [ -n "${WARMUP_DUR:-}" ]; then
+    warm_summary="$OUT_DIR/warmup-$RUN_ID.json"
+    warm_log="$OUT_DIR/warmup-$RUN_ID.log"
+    warmed_by="$WARMUP_DUR at $WARMUP_PEAK req/s"
+    warm_env=("${env[@]}" "WARMUP=1" "PEAK_RPS=$WARMUP_PEAK" "START_RPS=$WARMUP_PEAK" "STEPS=1"
+              "STEP_DUR=$WARMUP_DUR" "HOLD_DUR=0s" "SUMMARY_OUT=$warm_summary")
+    for e in "${warm_env[@]}"; do warm_args+=(-e "$e"); done
+    env+=("WARMED_BY=$warmed_by")
+  fi
+
   local -a k6args=()
   for e in "${env[@]}"; do k6args+=(-e "$e"); done
 
@@ -951,11 +985,26 @@ cmd_load() {
   say "  target    $BASE_URL"
   say "  profile   $PROFILE_F"
   say "  shape     $SHAPE   peak ${PEAK} → hold ${HOLD}   steps ${STEPS}×${STEP_DUR}"
+  if [ -n "$warmed_by" ]; then
+    say "  warm-up   $warmed_by, excluded from the numbers (its own summary: $(basename "$warm_summary"))"
+  fi
   say "╚══════════════════════════════════════════════════════════════════════════════╝"
 
   if [ "$DRY" = "1" ]; then
+    if [ -n "$warmed_by" ]; then say "(dry run) warm-up: k6 run ${warm_args[*]} $K6_SCRIPT"; fi
     say "(dry run) k6 run ${k6args[*]} $K6_SCRIPT"
     return 0
+  fi
+
+  if [ -n "$warmed_by" ]; then
+    say ""
+    say "▶ warm-up: $warmed_by. Priming the caches in front of the target — no brake, and none of this"
+    say "  reaches the measurement below. A run against a cold cache measures a cold cache."
+    set +e
+    "$K6" run "${warm_args[@]}" "$K6_SCRIPT" 2>&1 | tee "$warm_log" | tail -3
+    set -e
+    ok "warm-up done (kept apart in $(basename "$warm_log"))"
+    say ""
   fi
 
   # The brake tripping means k6 exits non-zero. That is an OUTCOME (you found the knee), not a failure
@@ -1004,7 +1053,21 @@ PY
 }
 
 cmd_history() {
-  if [ -f "$HISTORY_F" ]; then column -t -s $'\t' "$HISTORY_F"; else say "no runs yet ($HISTORY_F)"; fi
+  if [ ! -f "$HISTORY_F" ]; then say "no runs yet ($HISTORY_F)"; return 0; fi
+  # Aligned in python3, not with column(1): column comes from util-linux and busybox does not have it, so
+  # inside the published image this subcommand used to fail with 127 — the one command whose entire job is
+  # to print a file. python3 is already a hard runtime dependency; column never was.
+  python3 - "$HISTORY_F" <<'PY'
+import sys
+rows = [l.rstrip('\n').split('\t') for l in open(sys.argv[1], encoding='utf-8') if l.strip()]
+if not rows:
+    raise SystemExit(0)
+width = max(len(r) for r in rows)
+rows = [r + [''] * (width - len(r)) for r in rows]
+pads = [max(len(r[i]) for r in rows) for i in range(width)]
+for r in rows:
+    print('  '.join(c.ljust(pads[i]) for i, c in enumerate(r)).rstrip())
+PY
 }
 
 # ─────────────────────────────── compare: the only honest number ─────────────────────────────────────
@@ -1016,6 +1079,363 @@ cmd_history() {
 # and a run with generator_ok: false has no numbers at all — comparing either quietly produces a confident
 # figure with nothing behind it, which is worse than no comparison. So mismatches stop the command (exit 2)
 # instead of appearing as a footnote nobody reads.
+# ─────────────────────────────── report: the result, with its caveats ────────────────────────────────
+# Every run ends up in a document — an incident write-up, a ticket, a message to whoever asked — and that
+# meant retyping numbers out of the terminal. The caveats are exactly what does not survive the retyping:
+# generator_ok, that the pool was synthetic and colder than real traffic, that only the delta is defensible,
+# that a brake abort is a result rather than a failure. The tool knew all of it and handed over a JSON file.
+#
+# Nothing here is computed: every figure comes from the summary, and anything the archive does not contain is
+# absent instead of estimated. A comparison is `crowdsim compare`, not a second delta.
+# ─────────────────────────────── init: the first profile ─────────────────────────────────────────────
+# The profile is the whole configuration, and writing the first one is the highest step in this tool. Most of
+# it has already been measured by the time somebody asks: `probe` knows the page weight and which cache
+# layers answered, `discover --verify` has a pool of URLs that actually render, `record` has a real fan-out.
+# Those artefacts sit in out/ and nothing assembled them.
+#
+# Two things this must never do, and they are the reason it exists rather than a template in the README:
+#  · fill in safety.allow_hosts — that would be crowdsim authorising a host on your behalf;
+#  · fill in safety.safe_peak_rps — that would be crowdsim deciding how far somebody's production may bend.
+# Both are left empty, the file says why, and `validate` refuses it until a human fills them in.
+cmd_init() {
+  local out="${INIT_OUT:-${POSITIONAL[0]:-}}"
+  if [ -z "$out" ]; then out="$OUT_DIR/profile-draft.json"; fi
+  if [ -e "$out" ]; then
+    die "$out already exists — a profile you have already written is not ours to replace" 2
+  fi
+  # A profile is a map of your infrastructure, and the profile directory is the one that gets committed.
+  local pdir="${CROWDSIM_PROFILES:-$ROOT/profiles}"
+  local dest_dir; dest_dir="$(cd "$(dirname "$out")" 2>/dev/null && pwd || echo "$(dirname "$out")")"
+  local pdir_abs; pdir_abs="$(cd "$pdir" 2>/dev/null && pwd || echo "$pdir")"
+  if [ "$dest_dir" = "$pdir_abs" ]; then
+    die "refusing to write into the profile directory ($pdir_abs) without being asked twice.
+
+  A profile names real routes on a real host, and that directory is the one that gets committed. Write it
+  somewhere else and move it deliberately, or keep it in your own private repo." 2
+  fi
+
+  mkdir -p "$(dirname "$out")"
+  local rc=0
+  python3 - "$OUT_DIR" "$out" <<'PY' || rc=$?
+import glob, json, os, sys
+
+out_dir, dest = sys.argv[1], sys.argv[2]
+
+def newest(prefix, needs=None):
+    for f in sorted(glob.glob(os.path.join(out_dir, prefix + '-*.json')), reverse=True):
+        try:
+            d = json.load(open(f, encoding='utf-8'))
+        except Exception:
+            continue
+        if needs is None or needs(d):
+            return d
+    return None
+
+probe = newest('probe', lambda d: d.get('base_url'))
+disc = newest('discover', lambda d: d.get('pool_path'))
+journey = newest('journey', lambda d: d.get('pages'))
+
+if not probe and not disc:
+    print("  ❌ nothing to build a profile from: out/ has no probe and no discover artefact.")
+    print("     Measure the site first — those two commands are what this assembles:")
+    print("       crowdsim probe    --profile <p.json> --target <name>")
+    print("       crowdsim discover --profile <p.json> --verify")
+    print("     Yes, that needs a profile: start from profiles/example.json for the first probe, then let")
+    print("     this command write the real one from what the probe found.")
+    raise SystemExit(4)
+
+base_url = (probe or disc).get('base_url')
+weight = (probe or {}).get('bytes')
+layers = (probe or {}).get('layers') or []
+pool_file = os.path.basename((disc or {}).get('pool_path') or '') or None
+verified = (disc or {}).get('verified')
+
+provenance = []
+if probe:
+    provenance.append(f"probe {probe.get('run_id')}: target, page weight {weight} B, "
+                      f"{len(layers)} declared cache layer(s)")
+if disc:
+    kept = disc.get('kept')
+    provenance.append(f"discover {disc.get('run_id')}: pool {pool_file}"
+                      + (f", {kept} of {disc.get('distinct')} verified to render" if verified else
+                         ", NOT VERIFIED — nobody has asked these paths whether they render"))
+if journey:
+    provenance.append(f"record: a journey of {len(journey.get('pages') or [])} page(s)")
+
+profile = {
+    '_comment': 'Drafted by `crowdsim init` from the artefacts in out/. Every value here came from a '
+                'measurement or is marked TODO — nothing was guessed. Read the TODOs before running it.',
+    '_provenance': provenance,
+    'name': 'TODO-name-this-profile',
+    'description': f'Drafted from a probe of {base_url}. TODO: say what this profile is for.',
+    'targets': {
+        'default': 'edge',
+        'list': {
+            'edge': {
+                'base_url': base_url,
+                '_comment': 'From the probe. TODO: add `bypass` to skip the CDN and hit your own edge '
+                            'directly, keeping SNI and Host correct — that is usually the target you want.',
+            },
+        },
+    },
+    '_classes_comment': 'TODO: THE WEIGHTS BELOW ARE A STARTING POINT, NOT A MEASUREMENT. They must come '
+                        'from your own edge log — crowdsim does not read logs, by choice, and a mix nobody '
+                        'measured is a guess wearing a number. Add or remove classes to match what your '
+                        'frontend actually serves.',
+    'classes': [
+        {'name': 'html', 'weight': 40, 'pool': 'pages',
+         '_comment': 'TODO: weight from your edge log. slo.brake_class names this class, because the '
+                     'document is what falls over first on a server-rendered frontend. A class may also '
+                     'declare its own max_p95_ms, which may only be sharper than the profile\'s.'},
+        {'name': 'rsc_page', 'weight': 45, 'pool': 'pages', 'kind': 'rsc',
+         '_comment': 'TODO: framework navigation requests (React Server Components, Turbo, Inertia). '
+                     'Remove this class if your frontend does not make them.'},
+        {'name': 'static', 'weight': 15, 'pool': 'assets',
+         '_comment': 'TODO: point `assets` at a pool of real static URLs — a static pool contains build '
+                     'hashes and goes stale on every deploy.'},
+    ],
+    'pools': {
+        'pages': ('@' + pool_file) if pool_file else ['/', 'TODO-add-real-paths'],
+        'assets': ['TODO-add-real-asset-paths'],
+    },
+    'rsc': {'mode': 'repeat', 'query': '_rsc',
+            '_comment': 'repeat reproduces what a real Next.js build does (few distinct navigation URLs). '
+                        'random measures the opposite hypothesis. Do not swap them between runs you compare.'},
+    'cache_headers': [
+        {'label': l.get('label'), 'header': l.get('header'), 'hit': l.get('hit_pattern') or 'hit',
+         '_comment': ('seen answering in the probe' if l.get('hit') is not None else
+                      'declared, but this header never appeared in the probe: check the NAME before '
+                      'trusting a hit ratio for this layer')}
+        for l in layers
+    ],
+    'slo': {
+        'max_p95_ms': 'TODO-number-of-ms',
+        'max_failed_rate': 0.02,
+        'guillotine_ms': 'TODO-your-proxy-read-timeout-in-ms',
+        'brake_class': 'html',
+        '_comment': 'TODO: max_p95_ms is the latency past which you consider the site broken, and '
+                    'guillotine_ms MUST be your reverse proxy\'s read timeout — it is where 504s come '
+                    'from, and the k6 request timeout has to exceed it or the 504s are invisible. A class '
+                    'may declare its own max_p95_ms to make the brake sharper for it.',
+    },
+    'safety': {
+        'allow_hosts': [],
+        'safe_peak_rps': None,
+        '_comment': 'LEFT EMPTY ON PURPOSE, and validate will refuse this file until you fill them in. '
+                    'allow_hosts is the allowlist: crowdsim never authorises a host on your behalf, not '
+                    'even one it just probed. safe_peak_rps is the rate past which a run needs '
+                    '--i-know-this-breaks-production typed on the command line: it is a decision about how '
+                    'far someone else\'s production may bend, and no tool gets to make it for you.',
+    },
+}
+if pool_file and verified is False:
+    profile['pools']['_comment'] = ('The pages pool is NOT VERIFIED: nobody has asked those paths whether '
+                                   'they render. Re-run discover with verification before a load run uses '
+                                   'them — a pool of 404s measures your error page at full speed.')
+if journey:
+    profile['journey'] = {'file': 'TODO-path-to-the-journey-file-record-wrote',
+                          '_comment': 'Only used with --shape journey. `crowdsim record` writes this file.'}
+
+json.dump(profile, open(dest, 'w', encoding='utf-8'), indent=1, ensure_ascii=False)
+print(f"  ✅ drafted {dest}")
+for line in provenance:
+    print(f"     from {line}")
+print("")
+print("  It will NOT run yet, by design:")
+print("     · safety.allow_hosts and safety.safe_peak_rps are empty — fill them in;")
+print("     · the class weights are a starting point, not your traffic mix;")
+print("     · slo.max_p95_ms and slo.guillotine_ms are TODO, and the second must be your proxy's read")
+print("       timeout, or the 504s a run produces will be invisible to it.")
+print("")
+print(f"  Then:  crowdsim validate {dest}")
+PY
+  if [ "$rc" != "0" ]; then rm -f "$out"; exit "$rc"; fi
+}
+
+cmd_report() {
+  local run="${POSITIONAL[0]:-}"
+  if [ -z "$run" ]; then
+    die "report needs a run id: crowdsim report <run-id> (see crowdsim history)" 2
+  fi
+  local summary="$OUT_DIR/summary-$run.json"
+  if [ ! -f "$summary" ]; then
+    die "no summary for $run in $OUT_DIR — is that a run id? (crowdsim history)" 2
+  fi
+
+  local out="${REPORT_OUT:-$OUT_DIR/report-$run.md}"
+  local compare_block=""
+  if [ -n "${REPORT_COMPARE:-}" ]; then
+    # The delta comes from the command that owns that judgement, refusals included. Recomputing it here
+    # would be a second opinion, and the first time the two disagreed the wrong one would be in a document.
+    local cmp_rc=0 cmp_out
+    cmp_out="$("$0" compare "$run" "$REPORT_COMPARE" 2>&1)" || cmp_rc=$?
+    compare_block="$OUT_DIR/.report-cmp-$run.txt"
+    {
+      printf '## Compared with %s\n\n' "$REPORT_COMPARE"
+      if [ "$cmp_rc" != "0" ]; then
+        printf 'crowdsim compare **refused this comparison**, and that refusal is the answer:\n\n'
+      else
+        printf 'From `crowdsim compare %s %s` — the same verdict a terminal prints:\n\n' \
+          "$run" "$REPORT_COMPARE"
+      fi
+      printf '```\n%s\n```\n\n' "$cmp_out"
+    } > "$compare_block"
+  fi
+
+  python3 - "$summary" "$out" "${compare_block:-}" <<'PY'
+import json, os, sys
+
+summary_path, out_path, compare_block = sys.argv[1], sys.argv[2], sys.argv[3]
+d = json.load(open(summary_path, encoding='utf-8'))
+
+def ms(v):
+    return 'n/a' if v is None else (f'{v:.2f} ms' if abs(v) < 10 else f'{v:.0f} ms')
+
+def pct(v):
+    return 'n/a' if v is None else f'{v * 100:.2f}%'
+
+L = []
+w = L.append
+w(f"# crowdsim run {d.get('run_id')}")
+w('')
+w(f"- **profile** `{d.get('profile')}` · **target** `{d.get('base_url')}` · **shape** "
+  f"`{d.get('shape')}` · **requested peak** {d.get('peak_rps_user_target')} user req/s")
+if d.get('warmup'):
+    w(f"- **warm-up** {d['warmup']}, excluded from every number below")
+w('')
+
+# 1. Is the run valid at all? Nothing below means anything until this is answered — docs/reading-results.md
+#    exists because the failure mode of a load test is a plausible number, not a crash.
+w('## Is this run valid?')
+w('')
+if d.get('generator_ok') is False:
+    w('**DISCARD THIS RUN.** The summary says `generator_ok: false`: more than 2% of iterations were '
+      'dropped, so the generator or its network was the bottleneck — not the system under test. A '
+      'generator-bound run looks exactly like a healthy system absorbing load, which is why no numbers '
+      'from it are reproduced here.')
+    w('')
+    w(f"- {d.get('dropped_iterations', 0)} iterations dropped out of {d.get('requests', 0)} requests")
+    w('- Move the generator closer to the target, or onto a bigger host, and run it again.')
+    w('')
+    w('---')
+    w('')
+    w('_This report describes your infrastructure: it names your hosts. Keep it wherever your run '
+      'archives already belong._')
+    open(out_path, 'w', encoding='utf-8').write('\n'.join(L) + '\n')
+    print(f'  ✅ report: {out_path}')
+    raise SystemExit(0)
+
+if d.get('target_unreachable'):
+    w('**This is a connectivity result, not a capacity one.** The target never answered, so the numbers '
+      'below describe a failed connection. Run `crowdsim probe` against the same target before trying '
+      'again.')
+else:
+    w(f"Yes. The generator held the requested rate ({d.get('dropped_iterations', 0)} dropped iterations "
+      f"of {d.get('requests', 0)} requests), and the target answered.")
+w('')
+
+# 2. Did the brake trip? An abort is the intended outcome, and the exit code is 0 for that reason.
+w('## What happened')
+w('')
+if d.get('aborted'):
+    by = d.get('aborted_by') or {}
+    who = by.get('class')
+    detail = ''
+    if by.get('threshold'):
+        reached = by.get('value')
+        detail = (f" — `{by['threshold']}`"
+                  + (f", reached {reached:.0f}" if isinstance(reached, (int, float)) else ''))
+    w(f"The brake aborted the run: **you found the knee**, which is what this tool is for. It is not a "
+      f"failure of the run or of the tool.")
+    if who:
+        w('')
+        w(f"Stopped by class **{who}**{detail}.")
+    elif detail:
+        w('')
+        w(f"Stopped by the run's overall threshold{detail}.")
+else:
+    w('The run completed without crossing its thresholds: the brake did not trip at this peak.')
+w('')
+
+# 3. The margin: the share past the proxy read timeout is where 504s come from.
+if d.get('over_guillotine_rate') is not None and d.get('guillotine_ms') is not None:
+    w(f"**Past the {d['guillotine_ms']} ms read timeout:** {pct(d['over_guillotine_rate'])} of requests. "
+      'That share, not the average latency, is the margin you actually have — past it a real visitor gets '
+      'a 504.')
+    w('')
+
+# 4. Only now, the numbers.
+w('## Numbers')
+w('')
+w('| metric | value |')
+w('|---|---|')
+dur = d.get('dur') or {}
+for label, key in (('p50', 'p50'), ('p95', 'p95'), ('p99', 'p99'), ('max', 'max')):
+    if dur.get(key) is not None:
+        w(f'| {label} | {ms(dur[key])} |')
+if d.get('failed_rate') is not None:
+    w(f"| failed rate | {pct(d['failed_rate'])} |")
+for label, key in (('504', 'e504'), ('502', 'e502'), ('5xx total', 'e5xx'), ('404', 'e404')):
+    if d.get(key) is not None:
+        w(f'| {label} | {d[key]} |')
+w(f"| requests | {d.get('requests', 0)} |")
+if d.get('rps_avg') is not None:
+    w(f"| achieved rate | {d['rps_avg']:.1f} req/s |")
+w('')
+
+cache = d.get('cache') or {}
+if cache:
+    w('### Cache hit ratio per layer')
+    w('')
+    for layer in cache:
+        v = cache[layer]
+        if v is None:
+            w(f'- **{layer}**: n/a — the declared header never appeared in any response, so nothing was '
+              'classified. That is usually the wrong header name in the profile rather than a cold cache, '
+              'and it is never a 0% hit ratio.')
+        else:
+            w(f'- **{layer}**: {pct(v)}')
+    w('')
+
+per_class = d.get('per_class') or {}
+if per_class:
+    w('### Per class')
+    w('')
+    w('| class | requests | p95 | p99 | failed |')
+    w('|---|---|---|---|---|')
+    for name in per_class:
+        c = per_class[name] or {}
+        w(f"| {name} | {c.get('reqs', 0)} | {ms(c.get('p95'))} | {ms(c.get('p99'))} "
+          f"| {pct(c.get('failed'))} |")
+    w('')
+
+if compare_block and os.path.exists(compare_block):
+    w(open(compare_block, encoding='utf-8').read().rstrip('\n'))
+    w('')
+
+# 5. The caveats, in the document rather than in somebody's memory.
+w('## What these numbers are worth')
+w('')
+w('- **Only the delta travels.** These absolutes describe this URL pool, which is colder than real '
+  'traffic: a synthetic pool of cold URLs is a harder test than the mix your visitors produce. Quote the '
+  'change between two runs at an identical pool, not the number.')
+w('- **The mix is the measurement.** `--peak` is total user req/s split across the profile\'s request '
+  'classes by the weights measured on your own edge log, not page loads.')
+if d.get('dropped_iterations'):
+    w(f"- **{d['dropped_iterations']} iterations were dropped** out of {d.get('requests', 0)}. Under the 2% "
+      'threshold, so the run stands — but it is the number to watch if you raise the peak.')
+w('')
+w('---')
+w('')
+w('_This report describes your infrastructure: it names your hosts. Keep it wherever your run archives '
+  'already belong._')
+
+open(out_path, 'w', encoding='utf-8').write('\n'.join(L) + '\n')
+print(f'  ✅ report: {out_path}')
+PY
+  rm -f "$OUT_DIR/.report-cmp-$run.txt"
+}
+
 cmd_compare() {
   local a="${POSITIONAL[0]:-}" b="${POSITIONAL[1]:-}"
   if [ -z "$a" ] || [ -z "$b" ]; then
@@ -1543,6 +1963,8 @@ case "$CMD" in
   cache-ab) cmd_cache_ab;;
   history)  cmd_history;;
   compare)  cmd_compare;;
+  report)   cmd_report;;
+  init)     cmd_init;;
   record)   cmd_record;;
   validate) cmd_validate;;
   serve)    cmd_serve;;

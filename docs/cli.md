@@ -13,6 +13,8 @@ crowdsim validate p.json                                  # every rule at once, 
 crowdsim history                                          # one line per run: does the knee move?
 crowdsim compare <run-a> <run-b>                          # the delta, or a refusal if they differ
 crowdsim record  session.har                              # a browser HAR export → a journey file
+crowdsim init                                             # a first profile, drafted from what was measured
+crowdsim report  <run-id>                                 # one run as markdown you can paste in a ticket
 crowdsim serve                                            # the GUI, on loopback
 ```
 
@@ -244,6 +246,102 @@ structural checks ran"* and carries on with what `resolve_profile` checks by its
 missing pool files, empty pools). What it cannot catch that way is exactly the interesting half — a brake
 class that does not exist, an allowlist of `*`, a read timeout below the p95 SLO.
 
+### `init`
+
+```bash
+crowdsim init --out my-site.json
+```
+
+Drafts a profile from the artefacts already in `out/`, and says which run each part came from:
+
+```
+  ✅ drafted my-site.json
+     from probe 20260820T101500Z: target, page weight 46231 B, 2 declared cache layer(s)
+     from discover 20260820T102000Z: pool pool-20260820T102000Z.json, 383 of 400 verified to render
+
+  It will NOT run yet, by design:
+     · safety.allow_hosts and safety.safe_peak_rps are empty — fill them in;
+     · the class weights are a starting point, not your traffic mix;
+     · slo.max_p95_ms and slo.guillotine_ms are TODO, and the second must be your proxy's read
+       timeout, or the 504s a run produces will be invisible to it.
+
+  Then:  crowdsim validate my-site.json
+```
+
+Writing the first profile is the highest step in this tool, and most of it has already been measured by the
+time somebody sits down to write it: `probe` knows the page weight and which cache layers answered,
+`discover --verify` has a pool of URLs that render, `record` has a real fan-out. Those files were sitting in
+`out/` and nothing assembled them.
+
+**What it refuses to do is the point.** It never fills in `safety.allow_hosts` — that would be crowdsim
+authorising a host on your behalf — and never fills in `safety.safe_peak_rps`, which is a decision about how
+far somebody's production may be bent. Both are left empty, the file says why, and `validate` refuses the
+draft until a human fills them in:
+
+```
+▶ validating my-site.json
+  ❌ safety.allow_hosts    declared and empty is not an allowlist: fill in the hosts this profile may
+                           generate load against, or remove the key and pass CROWDSIM_ALLOW_TARGETS instead
+  ❌ safety.safe_peak_rps  the safe ceiling has to be a positive number of req/s: the rate past which a run
+                           needs --i-know-this-breaks-production on the command line
+  ❌ slo.max_p95_ms        max_p95_ms has to be a positive number of milliseconds — this one is still the
+                           TODO a drafted profile carries
+  ❌ slo.guillotine_ms     guillotine_ms has to be a positive number of milliseconds — this one is still the
+                           TODO a drafted profile carries
+  ❌ name                  still a TODO from a drafted profile: this is a value only you can decide
+  ❌ pools.assets[0]       still a TODO from a drafted profile: this is a value only you can decide
+  6 errors · 0 warnings — errors must be fixed before a run means anything
+```
+
+Everything else it cannot measure is a `TODO` rather than a plausible value, for the same reason. The **class
+weights especially**: crowdsim does not read edge logs, by choice, and a mix nobody measured is a guess
+wearing a number — the draft says so where the weights are.
+
+- With no `probe` and no `discover` artefact it exits **4** and names the two commands to run first, instead
+  of writing a hollow file.
+- It **never overwrites** an existing file (exit 2), and refuses to write into the profile directory (exit 2)
+  — that is the one that gets committed, and a profile names real routes on a real host.
+- An unverified pool is carried across with the warning attached, in the file.
+
+### `report`
+
+```bash
+crowdsim report 20260820T125256Z                      # → out/report-<run-id>.md
+crowdsim report 20260820T125256Z --compare 20260819T171100Z
+crowdsim report 20260820T125256Z --out ticket.md
+```
+
+One run as markdown, written for the place the result actually goes: a ticket, a PR, an incident timeline.
+The caveats travel **with** the numbers, because the caveats are what does not survive retyping — somebody
+pastes a p95 into a channel and it becomes a capacity figure by Tuesday.
+
+The order is the order in which a run has to be read: is it valid, what happened, then the numbers.
+
+```markdown
+## Is this run valid?
+
+Yes. The generator held the requested rate (0 dropped iterations of 11 requests), and the target answered.
+
+## What happened
+
+The brake aborted the run: **you found the knee**, which is what this tool is for. It is not a failure of
+the run or of the tool.
+
+Stopped by class **rsc_page** — `p(95)<300`, reached 465.
+
+**Past the 1000 ms read timeout:** 0.00% of requests. That share, not the average latency, is the margin you
+actually have — past it a real visitor gets a 504.
+```
+
+A run with `generator_ok: false` produces a report that says **DISCARD THIS RUN** and prints no latency
+table at all: there is nothing in it to quote. A layer whose header never appeared is reported as `n/a — the
+declared header never appeared in any response`, never as 0%. `--compare` delegates to
+[`compare`](#compare), refusal included: if the two runs are not comparable the report says so instead of
+carrying a percentage.
+
+The report describes your infrastructure — it names your hosts. It says so in its own footer, and `out/` is
+gitignored for the same reason.
+
 ### `history`
 
 Prints `out/history.tsv` as a table: one line per run. What it is for is watching whether the knee moves
@@ -275,6 +373,8 @@ Only `load` uses most of them; unknown flags are an error (exit 2) rather than b
 | `--abort-delay <dur>` | `30s` | load | Grace period before the brake is evaluated, so a cold start does not abort the run. |
 | `--safe-peak <n>` | `safety.safe_peak_rps` | load | The ceiling for this run. Can only make the gate stricter in practice — going above still needs the override. |
 | `--i-know-this-breaks-production` | off | load | The only way past the safe peak. Command line only, every time. |
+| `--warmup <dur>` | off | load | A separate, unmeasured run before the measured one: fills the caches, opens the pools, JITs the app. Its numbers are written to `warmup-<run>.json` and are **not** mixed into the result. |
+| `--warmup-peak <n>` | `--start` | load | Rate for the warm-up. Subject to the same safe-peak gate as anything else. |
 | `--touch-and-go` | off | load | Preset: `--steps 3 --step-dur 20s --hold 0s --abort-delay 10s`. The cheapest ramp that still produces errors — **not** a way to make a test harmless. |
 | `--skip-classes <a,b>` | target's `skip_classes` | load | Classes to leave out (routes a given tier does not serve). |
 | `--insecure` | target's `insecure` | load, probe | Skip TLS verification, for a node addressed by IP. |
@@ -285,7 +385,9 @@ Only `load` uses most of them; unknown flags are an error (exit 2) rather than b
 | `--ttl <s>` | `10` | cache-ab | Cache TTL for the candidate leg. |
 | `--port <n>` | `8787` | serve | GUI port. |
 | `--bind <addr>` | `127.0.0.1` | serve | GUI bind address. Anything but loopback needs a token. |
+| `--out <file>` | — | record, report, init | Where to write the journey file, the report, or the drafted profile. |
 | `-h`, `--help` | — | all | The usage header. |
+| `-V`, `--version` | — | — | The version, including inside the image where nothing else can say. |
 
 ## Environment
 
@@ -414,6 +516,10 @@ out/
   pool-<run_id>.report.txt what --verify dropped, and why
   discover-<run_id>.json   the same as data: offered, kept, dropped, and whether it was verified
   journey-<run_id>.json    what record extracted from a HAR (data about your site: keep it private)
+  warmup-<run_id>.json     the warm-up's own summary, kept apart so it can never be read as the result
+  warmup-<run_id>.log      the warm-up's log
+  report-<run_id>.md       what `report` wrote: the run with its caveats attached
+  profile-draft.json       what `init` drafted, if you did not pass --out
   profile-<run_id>.json    the profile as resolved for that run (pools inlined)
   history.tsv              one appended line per run
   bench-<run_id>.json      what doctor --bench measured this machine doing, and where it was measured

@@ -36,7 +36,9 @@
       "weight": 43.2,
       "kind": "rsc",
       "pool": "pages",
-      "_comment": "React Server Components prefetch and navigation. Usually the largest class and the one flat load tools cannot produce."
+      "max_p95_ms": 2500,
+      "_comment": "React Server Components prefetch and navigation. Usually the largest class and the one flat load tools cannot produce.",
+      "_slo_comment": "max_p95_ms here is THIS class's own limit, sharper than the profile's 5000 ms: a navigation request at 2.5 s means the app is already queueing, and waiting for the shared limit spends a minute measuring a system that was already gone. A per-class limit may only be SHARPER than the profile's — looser is refused by validate, since it would move the knee later than the profile asks for. max_failed_rate works the same way."
     },
     {
       "name": "html",
@@ -116,14 +118,14 @@
     "max_p95_ms": 5000,
     "guillotine_ms": 7000,
     "brake_class": "rsc_page",
-    "_comment": "guillotine_ms is your reverse proxy read timeout: requests slower than this become 504s for real users, so crowdsim reports the share that crossed it. brake_class is the class whose p95 aborts the run."
+    "_comment": "guillotine_ms is your reverse proxy read timeout: requests slower than this become 504s for real users, so crowdsim reports the share that crossed it. brake_class is the class whose p95 aborts the run — for the classes that declare no limit of their own. Whatever is crossed first stops the run, and the summary's aborted_by names which class and which threshold it was."
   },
 
   "safety": {
     "safe_peak_rps": 150,
     "allow_hosts": ["www.example.test", "10.0.0.*", "127.0.0.1"],
     "generator_mbps": 1000,
-    "_comment": "allow_hosts is a hard gate: crowdsim refuses any target whose host does not match. safe_peak_rps is the ceiling above which --i-know-this-breaks-production is mandatory. Set safe_peak_rps to a level you have already proven harmless, not to what you hope is harmless.",
+    "_comment": "allow_hosts is a hard gate: crowdsim refuses any target whose host does not match. safe_peak_rps is the ceiling above which --i-know-this-breaks-production is mandatory. Set safe_peak_rps to a level you have already proven harmless, not to what you hope is harmless. Neither field has a default anywhere, and allow_hosts declared as [] is an error rather than an empty allowlist — `crowdsim init` leaves both blank on purpose, and validate refuses the file until a human fills them in.",
     "_generator_mbps_comment": "Optional: what the GENERATOR's link can actually sustain, in Mbit/s. `probe` measures the weight of one page, so `load` and `doctor` can tell you what the requested peak implies (45 KB at 380 req/s is ~17.6 MB/s = ~141 Mbit/s) and warn before a run comes back with generator_ok: false. It is a warning, never a gate: the estimate assumes every request weighs what that page weighed, which is wrong in both directions."
   },
 

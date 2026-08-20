@@ -391,3 +391,49 @@ for k in ('in_container', 'kernel', 'virtualised'):
 assert isinstance(d['virtualised'], bool), d
 PY
 }
+
+@test "--warmup primes first, in a separate run whose numbers are kept apart" {
+  # A run against a cold cache measures a cold cache, and that number travels into a document as though it
+  # described the system at rest. People already work around it by running twice and discarding the first —
+  # the right instinct with the wrong mechanism, because the discarded run is not written down anywhere.
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 20 --warmup 5s --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"warm-up"* ]]
+  # Two k6 invocations, and the warm-up is the one that primes: no brake, its own summary file.
+  [[ "$output" == *"WARMUP=1"* ]]
+  [[ "$output" == *"warmup-"* ]]
+  # …and the measured run is told what preceded it, so its summary can say so.
+  [[ "$output" == *"WARMED_BY="* ]]
+}
+
+@test "without --warmup nothing changes at all" {
+  # The regression that matters: a cold-cache run is a legitimate measurement when that is the question,
+  # and the tool must not start warming caches on its own.
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 20 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"warm-up"* ]]
+  [[ "$output" != *"WARMUP=1"* ]]
+  [[ "$output" != *"WARMED_BY="* ]]
+}
+
+@test "the warm-up rate defaults to the ramp's start, and can be set" {
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 40 --start 7 --warmup 5s --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"5s at 7 req/s"* ]]
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 40 --warmup 5s --warmup-peak 3 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"5s at 3 req/s"* ]]
+}
+
+@test "a warm-up above the safe peak is refused by the same gate as anything else" {
+  # It generates real load. Priming is not a way around the ceiling.
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 10 --warmup 5s --warmup-peak 99999 --dry-run
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"safe"* ]]
+}
+
+@test "a warm-up duration has to look like a duration" {
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 10 --warmup soon --dry-run
+  [ "$status" -eq 2 ]
+  [[ "$output" == *"--warmup"* ]]
+}

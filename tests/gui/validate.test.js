@@ -159,3 +159,135 @@ test('generator_mbps is optional, but must be a positive number when present', (
     assert.ok(validateProfile(p).errors.some((e) => e.path === 'safety.generator_mbps'), String(bad));
   }
 });
+
+// ── per-class SLO (#43) ──────────────────────────────────────────────────────────────────────────────
+test('a per-class threshold looser than the profile is refused: the brake may only get sharper', () => {
+  // A brake that fires LATER than the profile asked for is worse than no brake, because somebody is
+  // watching the outage it existed to cut short.
+  const p = clone(example);
+  p.slo.max_p95_ms = 800;
+  p.classes[0].max_p95_ms = 3000;
+  const r = validateProfile(p);
+  assert.equal(r.ok, false);
+  const e = r.errors.find((x) => x.path.includes('max_p95_ms'));
+  assert.ok(e, JSON.stringify(r.errors));
+  assert.match(e.message, /later than the profile/i);
+});
+
+test('a per-class failed rate looser than the profile is refused for the same reason', () => {
+  const p = clone(example);
+  p.slo.max_failed_rate = 0.02;
+  p.classes[0].max_failed_rate = 0.5;
+  const r = validateProfile(p);
+  assert.equal(r.ok, false);
+  assert.ok(r.errors.some((x) => x.path.includes('max_failed_rate')), JSON.stringify(r.errors));
+});
+
+test('a sharper per-class threshold is accepted without comment', () => {
+  const p = clone(example);
+  p.slo.max_p95_ms = 3000;
+  p.classes[0].max_p95_ms = 800;
+  const r = validateProfile(p);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.ok(!r.warnings.some((w) => w.path.includes('max_p95_ms')), JSON.stringify(r.warnings));
+});
+
+test('a threshold tight enough to abort a healthy system is a warning, not a refusal', () => {
+  // 20 ms is below what a healthy origin answers in over a real network, so the run would abort on the ramp
+  // and read as a knee. It is still somebody\'s decision to make.
+  const p = clone(example);
+  p.classes[0].max_p95_ms = 20;
+  const r = validateProfile(p);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+  assert.ok(r.warnings.some((w) => /abort/i.test(w.message) && w.path.includes('max_p95_ms')),
+    JSON.stringify(r.warnings));
+});
+
+test('a per-class threshold that is not a number is an error', () => {
+  const p = clone(example);
+  p.classes[0].max_p95_ms = 'fast';
+  assert.equal(validateProfile(p).ok, false);
+});
+
+test('the summary reports which per-class limits are in force', () => {
+  const p = clone(example);
+  p.slo.max_p95_ms = 3000;
+  p.classes[0].max_p95_ms = 800;
+  const cls = validateProfile(p).summary.classes.find((c) => c.name === p.classes[0].name);
+  assert.equal(cls.max_p95_ms, 800, JSON.stringify(cls));
+});
+
+// ── the two fields nobody may generate for you (#42) ─────────────────────────────────────────────────
+test('an allowlist declared and left empty is an error, not an empty allowlist', () => {
+  // `crowdsim init` writes it empty on purpose — a generated allowlist would be the tool authorising a host
+  // on somebody's behalf. So the file has to be refused until a human fills it in, or the emptiness would
+  // just sit there until a run failed at the gate with no explanation of why the profile looked fine.
+  const p = clone(example);
+  p.safety.allow_hosts = [];
+  const r = validateProfile(p);
+  assert.equal(r.ok, false);
+  const e = r.errors.find((x) => x.path === 'safety.allow_hosts');
+  assert.ok(e, JSON.stringify(r.errors));
+  assert.match(e.message, /empty/i);
+});
+
+test('a safe peak that is not a positive number is an error', () => {
+  for (const bad of [null, 0, -1, 'fast']) {
+    const p = clone(example);
+    p.safety.safe_peak_rps = bad;
+    assert.equal(validateProfile(p).ok, false, `safe_peak_rps: ${JSON.stringify(bad)}`);
+  }
+});
+
+test('a profile that declares no safety block at all keeps its existing behaviour', () => {
+  // Absent is not the same as declared-and-empty: an allowlist can legitimately come from
+  // CROWDSIM_ALLOW_TARGETS, and the gate in the driver is what decides either way.
+  const p = clone(example);
+  delete p.safety;
+  const r = validateProfile(p);
+  assert.equal(r.ok, true, JSON.stringify(r.errors));
+});
+
+// ── the placeholders a drafted profile carries ──────────────────────────────────────────────────────
+// `crowdsim init` writes TODO markers where a human has to decide, and `validate` is what stops that draft
+// from being run as if it were finished. A TODO that reaches a run is not a typo: "TODO-number-of-ms" as an
+// SLO makes every threshold pass, and a run that cannot brake is a run that hurts somebody for nothing.
+
+test('a TODO left in the profile is an error naming the field, not a passing profile', () => {
+  const p = clone(example);
+  p.slo.max_p95_ms = 'TODO-number-of-ms';
+  const r = validateProfile(p);
+  const e = r.errors.find(x => x.path === 'slo.max_p95_ms');
+  assert.ok(e, 'a TODO SLO passed validation: ' + JSON.stringify(r.errors));
+  assert.match(e.message, /TODO|number/i);
+});
+
+test('a TODO anywhere else is reported too, with the path that carries it', () => {
+  const p = clone(example);
+  p.name = 'TODO-name-this-profile';
+  const r = validateProfile(p);
+  assert.ok(r.errors.some(x => x.path === 'name'), JSON.stringify(r.errors));
+});
+
+test('a TODO inside a _comment is not an error: that is where the instructions live', () => {
+  const p = clone(example);
+  p._comment = 'TODO: read this before running it';
+  p.classes[0]._comment = 'TODO: weight from your edge log';
+  const r = validateProfile(p);
+  assert.equal(r.errors.filter(x => /TODO/i.test(x.message)).length, 0, JSON.stringify(r.errors));
+});
+
+test('a non-numeric read timeout is an error: it is the field the 504s depend on', () => {
+  const p = clone(example);
+  p.slo.guillotine_ms = 'soon';
+  const r = validateProfile(p);
+  assert.ok(r.errors.some(x => x.path === 'slo.guillotine_ms'), JSON.stringify(r.errors));
+});
+
+test('a field refused for what it is is not also reported as a TODO: one diagnosis per field', () => {
+  const p = clone(example);
+  p.slo.max_p95_ms = 'TODO-number-of-ms';
+  const r = validateProfile(p);
+  assert.equal(r.errors.filter(x => x.path === 'slo.max_p95_ms').length, 1,
+    JSON.stringify(r.errors.filter(x => x.path === 'slo.max_p95_ms')));
+});

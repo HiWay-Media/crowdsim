@@ -83,3 +83,17 @@ skip_unless_k6() {
 path_without_stub() {
   printf '%s' "${PATH#"$BATS_TEST_TMPDIR/stub:"}"
 }
+
+# A PATH with the tools the driver needs and NO `column`. Not a hypothetical: `column` comes from
+# util-linux/bsdmainutils and is absent from busybox, which is what the published image is built on — so
+# `crowdsim history` inside the container was the one subcommand that could not run at all.
+path_without_column() {
+  local dir="$BATS_TEST_TMPDIR/nocolumn" tool p
+  mkdir -p "$dir"
+  for tool in bash sh python3 curl sed tr date mkdir cat grep tee cut wc rm env node docker; do
+    p="$(command -v "$tool" 2>/dev/null)" && ln -sf "$p" "$dir/$tool"
+  done
+  ln -sf "$BATS_TEST_TMPDIR/stub/k6" "$dir/k6"
+  rm -f "$dir/column"
+  printf '%s' "$dir"
+}

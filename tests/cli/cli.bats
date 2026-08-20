@@ -107,6 +107,29 @@ setup() { crowdsim_setup; }
   [[ "$output" == *"20260805T090000Z"* ]]
 }
 
+@test "history still prints where there is no column(1) — which is the published image" {
+  # `column` ships with util-linux; busybox does not have it, and the image is alpine-based. So the one
+  # subcommand whose whole job is to print a file was the one that could not run in the container.
+  mkdir -p "$CROWDSIM_OUT"
+  printf 'run_id\tpeak\tgen_ok\n20260805T090000Z\t60\tTrue\n' > "$CROWDSIM_OUT/history.tsv"
+  run env PATH="$(path_without_column)" "$CROWDSIM" history
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"20260805T090000Z"* ]]
+  [[ "$output" == *"run_id"* ]]
+}
+
+@test "the history columns line up, so a long run id does not shift the row" {
+  mkdir -p "$CROWDSIM_OUT"
+  # the peak values are chosen not to occur inside the run ids, so index() finds the column, not a digit
+  printf 'run_id\tpeak\n20260805T090000Z\t77\nshort\t488\n' > "$CROWDSIM_OUT/history.tsv"
+  run "$CROWDSIM" history
+  [ "$status" -eq 0 ]
+  # the second column starts at the same offset on both rows
+  a="$(echo "$output" | awk '/20260805T090000Z/ {print index($0, "77")}')"
+  b="$(echo "$output" | awk '/^short/ {print index($0, "488")}')"
+  [ -n "$a" ] && [ "$a" = "$b" ]
+}
+
 @test "cache-ab without docker exits 5 rather than half-starting a leg" {
   # The A/B harness is two containers: without docker there is nothing to fall back to.
   run env PATH="$(path_without_docker)" "$CROWDSIM" cache-ab --profile "$FIXTURES/minimal.json"

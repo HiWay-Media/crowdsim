@@ -87,7 +87,9 @@ CROWDSIM_VERSION := $(shell node -p "require('./package.json').version" 2>/dev/n
 image: ## build the single image (driver + generator + GUI) as $(IMAGE)
 	docker build --build-arg CROWDSIM_VERSION=$(CROWDSIM_VERSION) -t $(IMAGE) .
 
-image-smoke: ## assert the image is the tool and the gates survived the build
+# Depends on `image` on purpose: a smoke test run against an image built three releases ago passes exactly
+# like one that tested your change. The script now says so too, but the honest default is to build first.
+image-smoke: image ## assert the image is the tool and the gates survived the build
 	tests/image/smoke.sh $(IMAGE)
 
 image-run: ## run the GUI from the image on http://127.0.0.1:8787 (token printed below)

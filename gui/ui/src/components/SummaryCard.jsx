@@ -7,6 +7,7 @@ import React from 'react';
  *   3. only then: the numbers, per class, with the share past the read timeout — not the average.
  * Presenting the numbers first is how a generator-bound run becomes a capacity claim.
  */
+import { abortDetail } from '../lib/messages.js';
 
 const pct = (x) => (x === null || x === undefined ? 'n/a' : `${(x * 100).toFixed(2)}%`);
 const ms = (x) => (x === null || x === undefined ? 'n/a' : `${Math.round(x)} ms`);
@@ -35,6 +36,7 @@ export default function SummaryCard({ summary, compare }) {
       ) : s.aborted ? (
         <div className="banner warn">
           <strong>Aborted by the brake: you found the knee.</strong> That is the intended outcome, not a failure.
+          {abortDetail(s.aborted_by) ? <> {abortDetail(s.aborted_by)}</> : null}
         </div>
       ) : (
         <div className="banner ok">Completed without crossing the thresholds.</div>

@@ -149,6 +149,12 @@ When it ends you get the verdict, in the order that keeps you honest:
 
 ![The result: the driver's recap, the per-class table, and the run's own files](assets/screens/gui-result.png)
 
+If the brake stopped the run, the banner says so as the intended outcome — and names the class and the
+threshold that crossed, because a class can hold itself to [its own
+SLO](profile.md#a-class-may-set-its-own-limit) and "you found the knee" no longer says where. It comes from
+the summary's `aborted_by` and nowhere else: runs archived before that field existed show the verdict without
+the detail, rather than a culprit reconstructed from the profile.
+
 Reload the page and it is still there. The server keeps the run list, and the page asks for it on load.
 
 **Then read [Reading results](reading-results.md).** It is short, and it is the page that stops you quoting a

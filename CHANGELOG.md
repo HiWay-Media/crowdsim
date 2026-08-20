@@ -4,6 +4,61 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.15.0] — 2026-08-20
+
+Milestone v1.7.0: four things the tool knew and did not hand over. It had measured the page weight, the cache
+layers and a pool that renders, and still left writing the first profile entirely to you. It could tell a
+document from a navigation request everywhere except in the one place it matters, the brake. It knew the first
+thirty seconds of a run are a cold cache and folded them into the p95 anyway. And it produced a result nobody
+could paste anywhere without leaving the caveats behind.
+
+### Added
+- **`crowdsim init` drafts a first profile from what has already been measured**, and says which run each part
+  came from — the target and page weight from the newest `probe`, the verified pool from `discover`, the
+  fan-out from `record`. Writing the first profile is the highest step in this tool, and most of it was
+  sitting in `out/` with nothing to assemble it. What it refuses to do is the point: `safety.allow_hosts`
+  stays empty, because filling it in would be crowdsim authorising a host on your behalf, and
+  `safety.safe_peak_rps` stays empty, because that is a decision about how far somebody's production may be
+  bent. Everything else it cannot measure — the class weights above all, since the tool does not read edge
+  logs — is a `TODO` rather than a plausible number. `validate` refuses the draft until a human has been
+  through them, which is the actual guard. It never overwrites a file, refuses to write into the profile
+  directory, and with no artefacts at all exits 4 naming the two commands to run first.
+- **A class can declare its own `max_p95_ms` or `max_failed_rate`.** One SLO for every class was one too few:
+  a document at 2.5 s is unpleasant, a navigation request at 2.5 s means the app is already queueing, and
+  waiting for a shared 5 s limit spends a minute measuring a system that was already gone. Per-class limits
+  may only be **sharper** — a looser one is refused by `validate`, since it would move the knee later than the
+  profile asks for — and a limit tight enough to abort on the ramp is a warning. The thresholds are built in
+  `k6/lib/brake.js`, with the invariant under test: a profile that declares no per-class SLO gets exactly the
+  thresholds it got before.
+- **The run says which class and which threshold stopped it**, in the panel, in `summary.aborted_by`, in the
+  GUI's banner and in the report. With per-class SLOs "the brake tripped" stopped being enough to act on. Runs
+  archived before this show the verdict without the detail rather than a culprit reconstructed from the
+  profile — that would name a class that may not be the one that crossed.
+- **`--warmup <dur>` runs the generator once before the measured run and throws the numbers away** (to
+  `warmup-<run>.json`, which is not a result and has no brake). The first thirty seconds of any run measure an
+  empty cache, a cold pool and an unJITted app, and they sit inside the p95 you are about to quote; with a
+  sharp per-class SLO they abort the run and read as a knee that is not there. `--warmup-peak` defaults to
+  `--start` and passes the same safe-peak gate as anything else.
+- **`crowdsim report <run-id>`** writes one run as markdown for the place results actually go — a ticket, a PR,
+  an incident timeline — with the caveats attached to the numbers, because the caveats are what does not
+  survive retyping. Validity first, then what happened, then the numbers, then what they are worth. A run with
+  `generator_ok: false` comes out as **DISCARD THIS RUN** with no latency table to quote; `--compare`
+  delegates to `compare`, refusal included.
+- **`validate` refuses a profile that is still a draft**: a `TODO` left in any value (`_comment` fields
+  excepted — that is where the instructions live), an `slo.max_p95_ms` or `guillotine_ms` that is not a
+  positive number, and an `allow_hosts` declared as `[]`. A non-numeric SLO does not fail loudly; it makes
+  every threshold pass, so the run cannot brake at all. One diagnosis per field, never two.
+
+### Fixed
+- **`crowdsim history` could not run inside the published image.** It formatted with `column(1)`, which comes
+  from util-linux and does not exist in busybox — so the one subcommand whose entire job is to print a file
+  exited 127 in the container. It aligns in python3 now, which was already a hard runtime dependency.
+- **`make image-smoke` could pass against an image built three releases earlier.** It did not build first, and
+  the assert did not compare the image to the working tree: the run that closed this reported a healthy image
+  labelled 1.14.0 while the tree was 1.14.1. This is the suite that guards the invariant nobody may regress —
+  no allowlist default in the image — so a stale pass is the worst kind. It builds first, and says so if the
+  label and the tree disagree.
+
 ## [1.14.1] — 2026-08-07
 
 Cutting 1.14.0 broke the check 1.14.0 had just added — the fastest possible proof that a repair and its

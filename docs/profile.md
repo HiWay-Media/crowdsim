@@ -93,6 +93,8 @@ gets `weight / total × peak`.
 | `path_suffix_pool` | no | A second pool appended to the path (pagination, filters). |
 | `path_prefix` | no | Prepended (a route only one tier serves). |
 | `rsc_state_path` | no | The path used to build `Next-Router-State-Tree`, when it differs from the requested one (search). |
+| `max_p95_ms` | no | This class's own p95 limit, sharper than the profile's, which aborts the run for this class alone — see [A class may set its own limit](#a-class-may-set-its-own-limit). |
+| `max_failed_rate` | no | This class's own failed-rate limit, same rule. |
 
 Rules the tool enforces, and why:
 
@@ -195,6 +197,43 @@ traffic forensics and recognise it in access logs.
 Set `guillotine_ms` **above** `max_p95_ms`. Inverted, the brake would only fire after real users were
 already getting 504s.
 
+### A class may set its own limit
+
+One SLO for every class is one SLO too few. A document that takes 2 s is unpleasant; a navigation request
+that takes 2 s means the app is already queueing, and by the time the *document* crosses a shared 5 s limit
+the run has spent a minute measuring a system that was already gone. So a class can declare its own:
+
+```json
+"classes": [
+  { "name": "rsc_page", "weight": 45, "pool": "pages", "max_p95_ms": 800 },
+  { "name": "html",     "weight": 40, "pool": "pages" },
+  { "name": "search",   "weight": 15, "pool": "queries", "max_failed_rate": 0.01 }
+],
+"slo": { "max_p95_ms": 2500, "max_failed_rate": 0.05, "guillotine_ms": 6000, "brake_class": "html" }
+```
+
+Both keys are optional, both default to the profile's, and **both may only be sharper**. A per-class limit
+looser than the profile's is refused by `validate` — it would move the knee *later* for that class, so a run
+would sail past the SLO the profile states, which is the opposite of what a brake is for:
+
+```
+❌ classes[0].max_p95_ms  3000 ms is looser than the profile's 2500 ms: the brake would fire later than the
+                          profile asks for. A per-class limit may only make it sharper.
+⚠️  classes[2].max_p95_ms  40 ms is below what a healthy origin answers in over a real network: this would
+                          abort on the ramp and read as a knee
+```
+
+Whichever limit is crossed first stops the run, and the run **says which one**, in the panel and in the
+summary — with per-class SLOs "the brake tripped" is no longer enough information to act on:
+
+```
+  outcome       ⛔ ABORTED by the brake (knee exceeded)
+                stopped by class rsc_page — p(95)<300, reached 534
+```
+
+`brake_class` keeps its meaning for classes that declare nothing: it is the one whose p95 is held to the
+profile's `max_p95_ms`. A class with its own limit is always its own brake.
+
 ---
 
 ## `safety` — the two gates
@@ -208,7 +247,7 @@ already getting 504s.
 
 | Key | What it does |
 |---|---|
-| `allow_hosts` | Hostname globs the tool may generate load against. Hostnames only — no scheme, no port, no path. `CROWDSIM_ALLOW_TARGETS` overrides it. **No default anywhere**: a load test aimed at the wrong hostname is indistinguishable from an attack. `"*"` is rejected — it is not an allowlist. |
+| `allow_hosts` | Hostname globs the tool may generate load against. Hostnames only — no scheme, no port, no path. `CROWDSIM_ALLOW_TARGETS` overrides it. **No default anywhere**: a load test aimed at the wrong hostname is indistinguishable from an attack. `"*"` is rejected — it is not an allowlist, and neither is `[]`: declared-and-empty is an error, because a profile that looks complete and is refused at the gate tells you nothing about why. Omitting the key is fine — then the allowlist has to come from the environment. |
 | `safe_peak_rps` | The ceiling above which a run needs `--i-know-this-breaks-production` on the command line. Falls back to 150 if absent, which is a guess about *your* system. Set it to a level you have already proven harmless — not to what you hope is harmless. |
 | `generator_mbps` | Optional: what the **generator's** link can sustain, in Mbit/s. With it, `load` and `doctor` compare the bandwidth the requested peak implies (page weight × peak, from the newest `probe`) and warn before a run comes back `generator_ok: false`. A warning, never a gate. Leave it out and the estimate falls back to whatever `crowdsim doctor --bench` measured on this machine — a loopback ceiling, labelled as one. Declaring the real uplink is better: it is the only one of the two that knows about your network. |
 

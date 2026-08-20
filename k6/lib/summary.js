@@ -35,6 +35,10 @@ export function cacheRate(metrics, name) {
  * in the summary if some threshold mentions it, so the per-class breakdown is bought with thresholds
  * that can never fail. Counting those as "the brake tripped" would mark every run as aborted.
  */
+import { abortedBy as abortedByLocal } from './brake.js';
+
+export { abortedBy } from './brake.js';
+
 export function brakeTripped(metrics) {
   return Object.keys(metrics || {}).some((key) => {
     const met = metrics[key];
@@ -105,6 +109,9 @@ export function buildSummary(metrics, ctx) {
     rsc_mode: ctx.rscMode,
     peak_rps_user_target: ctx.peakRps,
     aborted: brakeTripped(metrics),
+    // WHAT stopped it, not only that something did. "aborted: true" sends somebody to read a log; the class
+    // and the number it reached is the answer they were going to look for.
+    aborted_by: abortedByLocal(metrics),
     requests: cnt('http_reqs'),
     rps_avg: g('http_reqs', 'rate', 0),
     failed_rate: g('http_req_failed', 'rate', 0),
@@ -113,6 +120,10 @@ export function buildSummary(metrics, ctx) {
       p99: g('http_req_duration', 'p(99)'), max: g('http_req_duration', 'max'),
     },
     guillotine_ms: ctx.guillotineMs,
+    // The caveat travels with the numbers. A summary that does not say whether the caches were primed leaves
+    // the first question in the room — "was it warm?" — with no answer in the file.
+    warmup: ctx.warmup || null,
+    is_warmup: Boolean(ctx.isWarmup),
     over_guillotine_rate: g('cs_over_guillotine', 'rate', 0),
     dropped_iterations: cnt('dropped_iterations'),
     e504: cnt('cs_504'), e502: cnt('cs_502'), e5xx: cnt('cs_5xx'), e404: cnt('cs_404'),
@@ -130,6 +141,18 @@ const pct = (x) => (x === null || x === undefined ? 'n/a' : (x * 100).toFixed(2)
 const ms = (x) => (x === null || x === undefined ? 'n/a' : Math.round(x) + ' ms');
 const pad = (s, n) => String(s).padEnd(n);
 const rp = (s, n) => String(s).padStart(n);
+
+/**
+ * The one line that turns "it aborted" into something actionable. With per-class SLOs in the profile the
+ * brake can trip for a class that is not the brake class and at a threshold the profile does not state, so
+ * the panel has to name both — otherwise the only way to find out is the k6 log, which nobody keeps.
+ */
+export function abortAttribution(by) {
+  if (!by || !by.threshold) return '';
+  const where = by.class ? 'class ' + by.class : by.metric;
+  const at = (by.value === null || by.value === undefined) ? '' : ', reached ' + Math.round(by.value);
+  return '\n                stopped by ' + where + ' — ' + by.threshold + at;
+}
 
 export function renderSummaryText(out, ctx) {
   const labels = ctx.cacheLabels || [];
@@ -160,7 +183,7 @@ export function renderSummaryText(out, ctx) {
   outcome       ${out.target_unreachable
       ? '⛔ TARGET NEVER ANSWERED — ' + pct(out.failed_rate) + ' failed at ~0 ms. This is NOT a knee:\n'
         + '                check the address, port, TLS and network path. Nothing here is a capacity number.'
-      : (out.aborted ? '⛔ ABORTED by the brake (knee exceeded)'
+      : (out.aborted ? '⛔ ABORTED by the brake (knee exceeded)' + abortAttribution(out.aborted_by)
                      : '✅ completed without crossing the thresholds')}
   volume        ${out.requests} requests · ${out.rps_avg.toFixed(1)} req/s avg
   latency       p50 ${ms(out.dur.p50)} · p95 ${ms(out.dur.p95)} · p99 ${ms(out.dur.p99)} · max ${ms(out.dur.max)}

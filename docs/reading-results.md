@@ -41,6 +41,24 @@ A threshold with `abortOnFail` fired: the brake stopped the run. The exit code s
 the outcome the tool exists to produce. Holding a system in collapse hurts real users and adds no
 information.
 
+**Which threshold, for which class**, is in `aborted_by` — and in the panel, on the line under the outcome:
+
+```
+  outcome       ⛔ ABORTED by the brake (knee exceeded)
+                stopped by class rsc_page — p(95)<300, reached 534
+```
+
+```json
+"aborted_by": { "metric": "http_req_duration", "class": "rsc_page",
+                "threshold": "p(95)<300", "value": 464.84875 }
+```
+
+Since a class can declare [its own SLO](profile.md#a-class-may-set-its-own-limit), the knee is not
+necessarily at the profile's `max_p95_ms` nor in its `brake_class`, and "the brake tripped" stopped being
+enough to act on. `class` is `null` when an overall threshold fired, and the whole field is `null` on any run
+archived before this existed — never a guess reconstructed from the profile, which would name a class that
+may not be the one that crossed.
+
 ### 4. The share past `guillotine_ms`, per class
 
 `guillotine_ms` is your reverse proxy's read timeout. Requests slower than it become 504s for real
@@ -77,6 +95,9 @@ Averages hide the queue, and the queue is what produces the errors.
 | `aborted` | A real threshold failed — the brake stopped the run. (Thresholds ending in `>=0` are decoration used to surface per-class sub-metrics; they are excluded.) |
 | `generator_ok` | `dropped_iterations` ≤ 2% of `requests`. False invalidates everything else. |
 | `target_unreachable` | `failed_rate` > 0.9 and p95 null or < 50 ms. |
+| `aborted_by` | Which threshold stopped it: `{ metric, class, threshold, value }`, or `null` — including on older runs, which did not record it. |
+| `warmup` | What the warm-up was (`"30s at 20 req/s"`), or `null`. The warm-up's own numbers are in `warmup-<run_id>.json` and are never mixed in here. |
+| `is_warmup` | `true` only inside `warmup-<run_id>.json`. That file is not a result: it has no brake and its latencies describe a cold system on purpose. |
 
 ### Volume and latency
 
@@ -127,6 +148,38 @@ run_id  profile  base_url  shape  peak  aborted  reqs  rps  failed  p95  e504  g
 ```bash
 crowdsim history          # printed as a table
 ```
+
+## Handing a run to somebody else
+
+```bash
+crowdsim report 20260820T125356Z --out ticket.md
+```
+
+The numbers are the easy part to paste; the caveats are what gets lost, and a p95 with no caveats becomes a
+capacity figure in somebody else's slide. [`report`](cli.md#report) writes the run as markdown with the
+caveats attached to it — validity first, then what happened, then the numbers, then what they are worth. A
+run with `generator_ok: false` comes out as **DISCARD THIS RUN** with no latency table at all.
+
+## A warm-up is not part of the result
+
+`--warmup 30s` runs the generator once before the measured run, at `--warmup-peak` (default: `--start`), and
+throws its numbers away — into `warmup-<run_id>.json`, which exists so you can check the warm-up did what you
+asked, not so you can quote it. Nothing from it reaches `summary-<run_id>.json`; the measured run only
+records **that** it happened, in `warmup`.
+
+It matters because the first thirty seconds of any run measure an empty cache, a cold connection pool and an
+unJITted app, and those thirty seconds sit inside the p95 you are about to quote. It matters even more with a
+per-class SLO: a class held to 800 ms will trip the brake on a cold start and the run will read as a knee
+that is not there.
+
+**The warm-up has no brake**, deliberately: a cold start crossing an SLO is what a warm-up exists to absorb,
+so aborting there would abort exactly the runs that most needed warming. Its thresholds are the decorative
+ones that make the per-class sub-metrics appear, nothing more — which is also why its file is not a result.
+Read it if the measured run surprises you: a warm-up already at 4 s p95 says the ramp never had a chance.
+
+What a warm-up does **not** do is flatter a cold system. It warms the same pool the run is about to use, so
+the measured run still faces the URLs it was going to face — and at a pool of 400 distinct cold URLs, warming
+one is not warming the next.
 
 ## Comparing runs honestly
 

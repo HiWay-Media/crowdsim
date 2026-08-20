@@ -156,3 +156,54 @@ test('journey shape reports request counts instead of a per-class target rate', 
   assert.equal(out.per_class.journey.rps_target, null);
   assert.match(renderSummaryText(out, ctx), /1234 req/);
 });
+
+// ── who tripped the brake ───────────────────────────────────────────────────────────────────────────
+// The panel is what people read; the summary file is what they read later, if at all. A run that aborted
+// without saying which class crossed which threshold sends everybody to the k6 log to find out, and with
+// per-class SLOs in the profile "the brake tripped" is no longer enough information to act on.
+
+test('an aborted run names the class and the threshold that stopped it, in the panel', () => {
+  const m = healthy({
+    'http_req_duration{class:rsc_page}': {
+      values: { med: 300, 'p(95)': 465, 'p(99)': 484, max: 500 },
+      thresholds: { 'p(95)<300': { ok: false }, 'p(95)>=0': { ok: true } },
+    },
+  });
+  const out = buildSummary(m, CTX);
+  assert.equal(out.aborted, true);
+  assert.deepEqual(out.aborted_by,
+    { metric: 'http_req_duration', class: 'rsc_page', threshold: 'p(95)<300', value: 465 });
+  const txt = renderSummaryText(out, CTX);
+  assert.match(txt, /ABORTED by the brake/);
+  assert.match(txt, /rsc_page/, 'the panel does not say which class tripped it');
+  assert.match(txt, /p\(95\)<300/, 'the panel does not say which threshold was crossed');
+});
+
+test('a run stopped by the overall threshold does not invent a class', () => {
+  const m = healthy({
+    http_req_failed: {
+      values: { rate: 0.12, passes: 3600, fails: 26400 },
+      thresholds: { 'rate<0.05': { ok: false } },
+    },
+  });
+  const out = buildSummary(m, CTX);
+  assert.equal(out.aborted, true);
+  assert.equal(out.aborted_by.class, null);
+  const txt = renderSummaryText(out, CTX);
+  assert.match(txt, /rate<0\.05/);
+  assert.doesNotMatch(txt, /class null|class undefined/);
+});
+
+test('a decorative >=0 threshold is never reported as the cause', () => {
+  // Those thresholds exist only to make the per-class sub-metrics appear in the summary. Reporting one as
+  // the brake would mark every healthy run as aborted.
+  const m = healthy({
+    'http_req_duration{class:html}': {
+      values: { med: 120, 'p(95)': 800, 'p(99)': 1500, max: 4200 },
+      thresholds: { 'p(95)>=0': { ok: false } },
+    },
+  });
+  const out = buildSummary(m, CTX);
+  assert.equal(out.aborted_by, null);
+  assert.match(renderSummaryText(out, CTX), /completed without crossing/);
+});

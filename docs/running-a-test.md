@@ -29,16 +29,22 @@ prompt either hangs or gets auto-answered. The gates are explicit arguments inst
 ## The sequence
 
 ```
-doctor → discover → probe → dry-run → touch-and-go → the real ramp → compare
-  │         │         │         │           │              │            │
-  │         │         │         │           │              │            └─ against a previous run
-  │         │         │         │           │              └─ the number you will quote
-  │         │         │         │           └─ 20-40s: does anything break at all
-  │         │         │         └─ what k6 will be told, without sending anything
+doctor → discover → probe → init → dry-run → touch-and-go → the real ramp → compare → report
+  │         │         │       │        │           │              │            │         │
+  │         │         │       │        │           │              │            │         └─ hand it over
+  │         │         │       │        │           │              │            └─ against a previous run
+  │         │         │       │        │           │              └─ the number you will quote
+  │         │         │       │        │           └─ 20-40s: does anything break at all
+  │         │         │       │        └─ what k6 will be told, without sending anything
+  │         │         │       └─ a first profile, drafted from the three steps above (first time only)
   │         │         └─ does the target answer, and what does each layer say about caching
   │         └─ a pool of URLs that actually render
   └─ is this machine able to generate the load at all
 ```
+
+The first time through, `init` sits in the middle of that line rather than at the start: writing a profile is
+easier once the tool has measured the page weight, the cache layers and a pool that renders. Every run after
+that starts at `probe`.
 
 ### 1. `doctor`
 
@@ -90,6 +96,23 @@ What to get out of it:
   the run will be invalid before it starts. `probe` records it, and `load` states the implied bandwidth
   before every run — declare `safety.generator_mbps` and it is checked rather than merely reported.
 
+### 3b. `init` — the first profile, from what was just measured (first time only)
+
+```bash
+crowdsim init --out my-site.json
+crowdsim validate my-site.json      # it will refuse: that is the point
+```
+
+Drafts a profile from the artefacts the last three commands left in `out/`, naming which run each part came
+from. What it leaves blank is what matters: `safety.allow_hosts` and `safety.safe_peak_rps` stay empty, the
+class weights are labelled a starting point rather than a mix, and everything else it cannot measure is a
+`TODO` instead of a plausible number. `validate` refuses the file until you have been through them. Details
+in the [CLI reference](cli.md#init).
+
+Bootstrapping question, answered: the first `probe` and `discover` need *a* profile, so start from
+[`profiles/example.json`](../profiles/example.json) with your own `base_url` and allowlist, and let `init`
+write the real one afterwards.
+
 ### 4. `--dry-run` — see the command, send nothing
 
 ```bash
@@ -112,8 +135,15 @@ that can still produce errors — not a way to make a load test harmless.
 
 ```bash
 crowdsim load --profile my-site.json --target edge \
-  --peak 120 --start 30 --steps 4 --step-dur 60s --hold 120s
+  --peak 120 --start 30 --steps 4 --step-dur 60s --hold 120s --warmup 30s
 ```
+
+`--warmup 30s` runs the generator once before the measured run and throws the numbers away. The first thirty
+seconds of any run measure an empty cache, a cold connection pool and an unJITted app — and they sit inside
+the p95 you are about to quote. With a per-class SLO they do worse than that: a class held to 800 ms trips
+the brake on the cold start and the run reads as a knee that is not there. The warm-up defaults to `--start`
+and has [no brake of its own](reading-results.md#a-warm-up-is-not-part-of-the-result); its numbers go to
+`warmup-<run>.json`, never into the summary.
 
 The run climbs in `steps` linear steps from `--start` to `--peak`, then holds. It aborts the moment the
 brake trips — holding a system in collapse hurts real users and adds no information.
@@ -141,6 +171,19 @@ run with `generator_ok: false` has no numbers at all. Either one gets exit 2 and
 plausible percentage. A different target or peak is allowed and labelled, because "what does the CDN add" is a
 real question — it is just not a before/after of one target. Details in the
 [CLI reference](cli.md#compare).
+
+### 8. `report` — hand the result to somebody else
+
+```bash
+crowdsim report 20260820T125356Z --out ticket.md
+crowdsim report 20260820T125356Z --compare 20260819T171100Z
+```
+
+The numbers paste easily and the caveats do not, which is how a p95 from a synthetic pool becomes a capacity
+figure in somebody else's slide two weeks later. `report` writes the run as markdown with the caveats attached
+— validity first, then what happened (naming the class and threshold that stopped it), then the numbers, then
+what they are worth. A run with `generator_ok: false` comes out as **DISCARD THIS RUN**, with no latency table
+to quote. It names your hosts, so it belongs wherever your run archives already belong.
 
 ## Choosing what to point at
 
@@ -191,7 +234,7 @@ cacheable and the origin can no longer correct you.
 | exit 4 from `probe` | The target did not answer. Fix that before generating load. |
 | `generator_ok: false` | The run is invalid. Not a tunable — move the generator. |
 | `TARGET NEVER ANSWERED` | Connectivity, not capacity: near-total failure at near-zero latency. |
-| The brake trips almost immediately | Often a class 404ing on a tier that does not serve it → `skip_classes`. |
+| The brake trips almost immediately | Often a class 404ing on a tier that does not serve it → `skip_classes`. Or a cold start against a sharp per-class SLO → `--warmup`. Either way `aborted_by` names the class. |
 | `class skipped: … (pool is empty)` | Expected and reported; the mix is renormalised over the rest. |
 
 [Reading results](reading-results.md) covers what to do with a run that did produce numbers.

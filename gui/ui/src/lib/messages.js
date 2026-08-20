@@ -45,6 +45,20 @@ export const LAYER = {
 };
 
 /** How a three-valued layer verdict is shown. null is not false. */
+/**
+ * The brake tripped — but for whom, and against which number. A class may declare its own max_p95_ms, so the
+ * knee is no longer necessarily at the profile's SLO nor in the profile's brake class, and "you found the
+ * knee" alone leaves the reader with nowhere to go. Returns null when the run does not know: every summary
+ * archived before per-class SLOs has no attribution, and deriving one from the profile would name a class
+ * that may not be the one that crossed.
+ */
+export function abortDetail(by) {
+  if (!by || !by.threshold) return null;
+  const where = by.class ? `class ${by.class}` : by.metric;
+  const at = (by.value === null || by.value === undefined) ? '' : `, reached ${Math.round(by.value * 100) / 100}`;
+  return `Stopped by ${where} — ${by.threshold}${at}.`;
+}
+
 export function layerVerdict(hit) {
   if (hit === null || hit === undefined) return { text: LAYER.unknown, tone: 'warn' };
   return hit ? { text: LAYER.hit, tone: 'ok' } : { text: LAYER.miss, tone: 'note' };

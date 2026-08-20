@@ -33,6 +33,7 @@ import { sleep } from 'k6';
 import exec from 'k6/execution';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
+import { brakeThresholds } from './lib/brake.js';
 import { usableClasses, shares, stages as mkStages, vus as mkVus, journeyPlan, rscQuery as mkRscQuery,
          classPath, DEFAULT_RSC_HASHES } from './lib/mix.js';
 import { compileLayers, layerHit, statusBuckets, overGuillotine } from './lib/classify.js';
@@ -55,6 +56,14 @@ const INSECURE   = (__ENV.INSECURE  || '0') === '1';
 const ABORT_DELAY= __ENV.ABORT_DELAY|| '30s';        // grace period before the brake is evaluated
 const JOURNEY_F  = __ENV.JOURNEY    || '';
 const SUMMARY_F  = __ENV.SUMMARY_OUT|| 'summary.json';
+// A warm-up primes the caches in front of the target and is NOT the measurement: it runs without a brake,
+// and its numbers go to their own file so nothing can fold them into the run that follows. A run against a
+// cold cache measures a cold cache, and that number travels into documents as though it described the
+// system at rest — which is why people already run twice and discard the first, without recording that
+// they did.
+const WARMUP     = __ENV.WARMUP === '1';
+// What the measured run says about the warm-up that preceded it: "30s at 20 req/s", or nothing at all.
+const WARMED_BY  = __ENV.WARMED_BY  || '';
 // classes to skip, comma separated. Needed for targets that do not serve every route: hitting an
 // application instance directly means the reverse-proxy-only routes answer 404, one class goes to 100%
 // failed, and the brake trips at a couple of req/s making the target unusable.
@@ -158,20 +167,20 @@ if (SHAPE === 'mix') {
 // thresholds below are no-ops: they exist to surface p95 / errors / cache hit ratio PER CLASS, which is
 // the breakdown you compare against your edge-log measurements.
 const CLASS_NAMES = CLASS_DEFS.map((c) => c.name).concat(SHAPE === 'journey' ? ['journey'] : []);
-const thresholds = {
-  http_req_failed: [{ threshold: `rate<${MAX_5XX}`, abortOnFail: true, delayAbortEval: ABORT_DELAY }],
-};
-thresholds[`http_req_duration{class:${BRAKE_CLASS}}`] = [
-  { threshold: `p(95)<${MAX_P95_MS}`, abortOnFail: true, delayAbortEval: ABORT_DELAY },
-];
-for (const cls of CLASS_NAMES) {
-  const k = `http_req_duration{class:${cls}}`;
-  thresholds[k] = (thresholds[k] || []).concat(['p(95)>=0']);
-  thresholds[`http_req_failed{class:${cls}}`] = ['rate>=0'];
-  thresholds[`cs_over_guillotine{class:${cls}}`] = ['rate>=0'];
-  thresholds[`http_reqs{class:${cls}}`] = ['count>=0'];   // lets the summary skip classes never emitted
-  for (const l of CACHE_LAYERS) thresholds[`cache_hit_${l.label}{class:${cls}}`] = ['rate>=0'];
-}
+// Built in lib/brake.js, where node --test can feed it the profiles you hope never to see. A class may
+// declare its own max_p95_ms / max_failed_rate and gets its own aborting threshold — the run stops on the
+// FIRST class to cross its own. Sharper, never later: validate refuses a per-class limit that would delay
+// the brake past what the profile asked for.
+const thresholds = brakeThresholds({
+  classDefs: CLASS_DEFS,
+  slo: Object.assign({}, SLO, { brake_class: BRAKE_CLASS }),
+  maxP95: MAX_P95_MS,
+  maxFailed: MAX_5XX,
+  abortDelay: ABORT_DELAY,
+  cacheLabels: CACHE_LABELS,
+  shape: SHAPE,
+  priming: WARMUP,
+});
 
 export const options = {
   scenarios,
@@ -310,6 +319,8 @@ export function handleSummary(data) {
     rscMode: RSC_MODE,
     peakRps: PEAK_RPS,
     guillotineMs: GUILLOTINE,
+    warmup: WARMUP ? 'this run IS the warm-up' : (WARMED_BY || null),
+    isWarmup: WARMUP,
     classNames: CLASS_NAMES,
     cacheLabels: CACHE_LABELS,
     shares: SHARE,

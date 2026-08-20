@@ -8,7 +8,7 @@ npm install          # bats, express, vite, react
 make lint            # bash -n on the driver, node --check on every JS file
 make test            # unit + UI + GUI + CLI — and not one request sent
 make test-e2e        # a real ~12 req/s run against an nginx container on loopback
-make image-smoke     # the built image: still the tool, gates intact
+make image-smoke     # builds, then asserts the image is still the tool with its gates intact
 ```
 
 ## The test layout
@@ -20,7 +20,7 @@ make image-smoke     # the built image: still the tool, gates intact
 | `tests/gui/` | `node --test` | the API over a real socket: traversal, the override confirmation, one-run-at-a-time, refusals passed through, read-only mounts | no |
 | `tests/ui/` | `node --test` | the front end's decisions and its safety wording, as plain modules from `gui/ui/src/lib` | no |
 | `tests/e2e/` | shell + docker | three legs, one per conclusion the tool produces: a fast nginx (chain works, healthy target does *not* abort), a slow single-worker origin (**the brake does abort**, early, generator still holding), and an unreachable target (**connectivity, not capacity**). Skips (exit 0) without docker or k6 | **yes**, on loopback |
-| `tests/image/` | shell + docker | the published artefact: driver finds generator, GUI starts, gates survived the build, no allowlist default | no |
+| `tests/image/` | shell + docker | the published artefact: driver finds generator, GUI starts, gates survived the build, no allowlist default, **and that the image under test was built from this working tree** | no |
 | `tests/k8s/` | shell + kubectl | `ci/kubernetes` rendered client-side (no cluster): never-retried Job, cluster-enforced deadline, one GUI replica, ClusterIP only, no CronJob, no committed override, pinned image | no |
 
 Two properties hold this together, and both are load-bearing:

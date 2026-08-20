@@ -15,7 +15,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SAFE_PEAK, REFUSAL, LAYER, layerVerdict } from '../../gui/ui/src/lib/messages.js';
+import { SAFE_PEAK, REFUSAL, LAYER, layerVerdict, abortDetail } from '../../gui/ui/src/lib/messages.js';
 import { mayRenderNumbers } from '../../gui/ui/src/lib/compare.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -89,4 +89,30 @@ test('the preflight table paints the verdict through layerVerdict, not with its 
   const tables = src('components/PreflightTables.jsx');
   assert.match(tables, /layerVerdict/);
   assert.match(tables, /LAYER\.absentExplained/);
+});
+
+// ── who tripped the brake, in the browser ───────────────────────────────────────────────────────────
+// "You found the knee" is the right verdict and, now that a class may declare its own SLO, no longer the
+// whole answer: the knee belongs to a class, at a threshold the profile-level SLO does not state. Without
+// that, the page sends people to the k6 log to find out what the summary file already knows.
+
+test('the abort banner names the class and the threshold when the summary knows them', () => {
+  const t = abortDetail({ metric: 'http_req_duration', class: 'rsc_page', threshold: 'p(95)<300', value: 465 });
+  assert.match(t, /rsc_page/);
+  assert.match(t, /p\(95\)<300/);
+  assert.match(t, /465/);
+});
+
+test('an older summary with no attribution says nothing rather than guessing', () => {
+  // Every run archived before per-class SLOs existed has no aborted_by. Deriving the culprit from the
+  // profile's brake_class would name a class that may not be the one that crossed.
+  assert.equal(abortDetail(undefined), null);
+  assert.equal(abortDetail(null), null);
+  assert.equal(abortDetail({ metric: 'http_req_duration' }), null);
+});
+
+test('an overall threshold is named as itself, not as a class', () => {
+  const t = abortDetail({ metric: 'http_req_failed', class: null, threshold: 'rate<0.05', value: 0.12 });
+  assert.match(t, /http_req_failed/);
+  assert.doesNotMatch(t, /class/);
 });

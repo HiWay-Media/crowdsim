@@ -17,8 +17,11 @@ PORT="${SMOKE_PORT:-18788}"
 NAME="crowdsim-smoke-$$"
 FAILED=0
 
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+
 ok()   { printf '  ✅ %s\n' "$*"; }
 bad()  { printf '  ❌ %s\n' "$*"; FAILED=1; }
+warn() { printf '  ⚠️  %s\n' "$*"; }
 say()  { printf '%s\n' "$*"; }
 
 cleanup() { docker rm -f "$NAME" >/dev/null 2>&1 || true; }
@@ -86,6 +89,21 @@ if [ -n "$label_version" ] && [ "$label_version" != "unknown" ]; then
   ok "docker inspect answers it too (label: $label_version)"
 else
   bad "the OCI version label is missing or unknown, so `docker inspect` cannot answer it"
+fi
+
+# Is this image even the working tree? A smoke test that passes against an image built three releases ago
+# reads exactly like a smoke test that passed — and this suite is the one that guards the invariant nobody
+# may regress (no allowlist default in the image). It has already happened: the label said 1.14.0 while the
+# tree was 1.14.1, because `make image-smoke` does not build. Now it says so.
+tree_version="$(node -p "require('$ROOT/package.json').version" 2>/dev/null || echo '')"
+if [ -z "$tree_version" ]; then
+  warn "cannot read the working tree's version (no node): not checking whether the image matches it"
+elif [ "$label_version" = "$tree_version" ]; then
+  ok "the image is this working tree (both $tree_version)"
+else
+  bad "this image was built from version $label_version, and the working tree is $tree_version.
+      Whatever you are about to trust this run for, it was not tested. Build it first:
+        make image && make image-smoke"
 fi
 
 # ── the gates survived the build ─────────────────────────────────────────────────────────────────────

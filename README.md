@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.14.1        # or :1.14, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.15.0        # or :1.15, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.14.1 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.15.0 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.14.1 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.15.0 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -134,6 +134,8 @@ crowdsim validate p.json                                  # every rule at once, 
 crowdsim record  session.har                              # a browser HAR export → a journey file
 crowdsim history                                          # one line per run: does the knee move?
 crowdsim compare <run-a> <run-b>                          # the delta, or a refusal if they differ
+crowdsim init                                             # a first profile, drafted from what was measured
+crowdsim report  <run-id>                                 # the run as markdown, caveats attached
 crowdsim serve                                            # the same thing with a GUI, on loopback
 ```
 
@@ -141,8 +143,14 @@ crowdsim serve                                            # the same thing with 
 
 ```bash
 crowdsim discover --profile p.json --verify && crowdsim probe --profile p.json
-crowdsim load --profile p.json --peak 60          # stays under the profile's safe ceiling
+crowdsim load --profile p.json --peak 60 --warmup 30s    # stays under the profile's safe ceiling
+crowdsim report <run-id> --out ticket.md                 # what to paste, with what it is worth
 ```
+
+First time, with no profile of your own yet: `probe` and `discover` once against
+[`profiles/example.json`](profiles/example.json) with your `base_url` and allowlist in it, then
+`crowdsim init` drafts the real profile from what those two measured — leaving the allowlist and the safe
+ceiling blank, because no tool gets to decide those for you.
 
 ## The GUI
 
@@ -192,7 +200,7 @@ launched from the page are the same kind of object, and appear in the same histo
 make test         # unit + GUI + CLI — generates no load whatsoever
 make test-k8s     # ci/kubernetes: safety invariants on the manifests (needs kubectl, no cluster)
 make test-e2e     # a real 12 req/s run against an nginx container on loopback (needs docker + k6)
-make image-smoke  # the built image: still the tool, gates intact (needs docker + make image)
+make image-smoke  # builds the image, then asserts it is still the tool, gates intact (docker)
 ```
 
 | Suite | What it covers |
@@ -221,8 +229,13 @@ It declares named `targets` (each one a `base_url`, optional `host_header`, and 
 CDN while keeping SNI and Host correct), the `classes` that make up the mix, the `pools` they draw from,
 the `cache_headers` used to classify each layer, your `slo`, and `safety`.
 
-Two details worth understanding before your first run:
+Three details worth understanding before your first run:
 
+- **A class may hold itself to a sharper SLO** than the profile's, with its own `max_p95_ms` or
+  `max_failed_rate` — a navigation request at 2.5 s already means the app is queueing, while a document at
+  2.5 s is merely unpleasant. Sharper only: a looser per-class limit is refused, since it would move the knee
+  later than the profile asks for. Whatever is crossed first stops the run, and the run says which class and
+  which threshold it was.
 - **`guillotine_ms`** is your reverse proxy's read timeout. Requests slower than it become 504s for real
   visitors, so crowdsim reports the share of each class that crossed it. That percentage is your margin.
 - **`rsc.mode`** — on a Next.js build the `_rsc` query value depends on route and build, not on the
