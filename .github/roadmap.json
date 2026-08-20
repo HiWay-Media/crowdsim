@@ -47,6 +47,10 @@
       "description": "The gap between what is tested and what is delivered. The image pins k6 0.52.0 while every test in this repository has been run against 2.1.0 — two majors apart, and the e2e suite installs whatever is newest on the runner, so the generator that ships is never the generator that was proven. The documentation still tells people to pull :1.2.0, eleven releases old, and calls it the exact version to use. Both were found by looking rather than by anything failing, which is the point: nothing in CI is watching the distance between the artefact and the evidence for it."
     },
     {
+      "title": "v1.9.0",
+      "description": "Two numbers the tool still averages away. Every result it produces is one p95 for a whole ramp \u2014 30 req/s and 120 req/s inside the same figure \u2014 so the knee, the thing this tool is named after, can only be found by running four times and comparing. And the one input it insists must be measured, the class mix, is the one it refuses to help measure: the documentation says on every page that weights come from your own edge log, and `init` writes them as a TODO. This milestone makes a single run show where the knee is, and turns the mix from a guess with a decimal point into a measurement. Nothing here loosens a gate, invents a number, or asks for access to anything privileged."
+    },
+    {
       "title": "Backlog",
       "description": "Accepted but unscheduled. Nothing here blocks a release."
     }
@@ -364,6 +368,97 @@
         "- The probe result is shown per layer: the header seen, whether it counts as a hit under the profile's pattern, and the page weight.",
         "- A declared cache header that never appeared is called out as such, since that is usually a wrong header name in the profile rather than a cold cache.",
         "- The discover result shows the pool it would write, with the counts kept and dropped, before a run uses it."
+      ]
+    },
+
+    {
+      "key": "per-step-metrics",
+      "title": "One p95 for a whole ramp is a number for a rate that never happened",
+      "milestone": "v1.9.0",
+      "labels": ["area:generator", "validity"],
+      "body": [
+        "A run climbs from `--start` to `--peak` in `--steps` steps and then holds. The summary reports one p50/p95/p99 over all of it \u2014 so the figure people quote describes a mixture of rates, most of them below the one they think they measured. A run that ramps 30 \u2192 120 reports a p95 that is neither the p95 at 30 nor the p95 at 120, and it is the *only* latency number the tool hands over.",
+        "",
+        "It is also why finding the knee takes four runs and a `compare` between each: the shape of the curve is already inside a single run, and gets averaged out before anybody sees it.",
+        "",
+        "**Done when**",
+        "- Every request is tagged with the ramp step it belongs to, and the summary carries a per-step block: requested rate, achieved rate, p50/p95/p99, failed rate, share past `guillotine_ms`, and the same per class.",
+        "- The panel prints it as a table \u2014 rate against p95 \u2014 because that table *is* the knee.",
+        "- The step boundaries come from the same `stages()` the ramp is built from, not from a second calculation that can drift. Computed twice, they will disagree once.",
+        "- A run stopped by the brake reports the steps it completed and marks the last one partial. A partial step is not a measurement of its rate.",
+        "- `--hold` is its own step, labelled as the one at peak: it is the only part of the run where the requested rate was sustained rather than passed through.",
+        "- Unit tests in `k6/lib/`: attribution at the boundaries, `--steps 1`, a run aborted mid-step, and the invariant that the aggregate numbers do not change."
+      ]
+    },
+
+    {
+      "key": "knee-estimate",
+      "title": "Name the knee: the highest rate that stayed inside the SLO, and the one that did not",
+      "milestone": "v1.9.0",
+      "labels": ["area:cli", "validity"],
+      "body": [
+        "With per-step numbers the answer everybody actually came for is computable: *clean up to 90 req/s, crossed at 120*. Today the tool reports \"completed\" or \"aborted\" and the reader converts that into a capacity figure by hand \u2014 usually by rounding up to `--peak`, which is the one rate nobody measured the system surviving.",
+        "",
+        "**Done when**",
+        "- The summary carries a knee: the highest step whose p95 and failed rate stayed inside the SLO, and the first step that crossed, with both rates named.",
+        "- It **refuses** instead of estimating when the run cannot support one: fewer than two completed steps, a step shorter than the abort delay, `generator_ok: false`, an unreachable target. A knee from one step is a straight line through one point.",
+        "- The refusal names the condition and what to change (`--steps`, `--step-dur`), in the same voice as `compare`'s refusals.",
+        "- `report` states it as the headline claim, with the caveat that it is a knee at *this* URL pool.",
+        "- `history.tsv` and the GUI's knee plot carry it, so the plot stops being one dot per run and becomes a curve."
+      ]
+    },
+
+    {
+      "key": "weights-from-access-log",
+      "title": "The mix is the one input the tool demands and refuses to help measure",
+      "milestone": "v1.9.0",
+      "labels": ["area:cli", "validity"],
+      "body": [
+        "Every page of the documentation says the class weights must come from your own edge access log, and `crowdsim init` writes them as a `TODO` for exactly that reason. Nothing in the tool reads a log. So the single most important input \u2014 the one that decides whether a run reproduces your traffic or a shape nobody has ever served \u2014 is left to somebody counting lines in a terminal, which in practice means the weights are a guess with a decimal point.",
+        "",
+        "The tool must not go and fetch the log itself: that would mean privileged access to production edges, which this project deliberately does not want. The log arrives on **stdin, or as a file the operator hands over**.",
+        "",
+        "**Done when**",
+        "- `crowdsim weights <access.log>` (or stdin) classifies each request line with the profile's own class rules and prints the mix \u2014 count, share, and the weight to paste \u2014 plus what it could not classify, which is the interesting part.",
+        "- Unclassified lines are reported as a share, never silently dropped: a mix computed from 40% of the log is a mix of something else.",
+        "- It reads the combined format and a `--format` field list, and says what it could not parse rather than guessing a column.",
+        "- It never writes into a profile by itself: it prints the `classes` block, and `init` uses it when a log is available.",
+        "- Its own output states that this is your traffic during *that* window \u2014 a mix measured in a quiet hour does not reproduce a spike.",
+        "- Nothing from the log reaches `out/`. An access log holds URLs, addresses and user agents, and this repository is not where any of that goes."
+      ]
+    },
+
+    {
+      "key": "gui-warmup-and-report",
+      "title": "The GUI cannot express two flags the CLI has, and cannot hand over a result",
+      "milestone": "v1.9.0",
+      "labels": ["area:gui"],
+      "body": [
+        "`--warmup` and `--warmup-peak` exist on the command line and not in `gui/server/lib/args.js`, so every run launched from the page folds its own cold start into the numbers \u2014 and the page is where the people least likely to know that are launching runs. Meanwhile `crowdsim report` writes exactly the artefact somebody reading a finished run wants next, and the GUI has no way to produce it.",
+        "",
+        "**Done when**",
+        "- The form offers a warm-up (duration and rate), `args.js` validates both as known flags with validated values, and the command preview shows them \u2014 the preview is the contract.",
+        "- The result view offers the run's report as a file, produced by spawning `crowdsim report` like every other action. The GUI still re-implements nothing.",
+        "- The safe-peak gate applies to the warm-up rate exactly as to the peak, typed-profile-name override included. A warm-up is load.",
+        "- Tests: `tests/gui/` for the argv and the refusals, `tests/ui/` for the form's decisions, and the report download in the e2e page pass."
+      ]
+    },
+
+    {
+      "key": "docs-quoted-output",
+      "title": "The docs quote the tool's own output, and nothing checks the quotes",
+      "milestone": "v1.9.0",
+      "labels": ["area:ci", "area:tests"],
+      "body": [
+        "`scripts/check-doc-commands.sh` proves the documented commands run and that every documented flag is one the driver parses. What it cannot see is the **output** those commands produce, and the documentation is full of it: validator refusals, panel lines, report sections. Those blocks are the part a reader compares against their own terminal, so a stale one is worse than a missing one.",
+        "",
+        "Not hypothetical: while writing the v1.7.0 documentation a quoted `validate` refusal turned out never to have existed in that wording. It was caught by running the command by hand one more time than usual, which is not a control.",
+        "",
+        "**Done when**",
+        "- A checker extracts the distinctive sentences from output blocks in `docs/` and `README.md` and asserts each is still produced by the tool, against the sources those messages live in (`lib/validate.mjs`, `k6/lib/`, `bin/crowdsim`, `gui/ui/src/lib/messages.js`).",
+        "- It runs in CI, and it can fail: the change that adds it also plants a wrong quote and shows the checker catching it.",
+        "- A block that cannot be checked mechanically is marked illustrative, explicitly, rather than skipped in silence.",
+        "- Numbers inside quoted output are exempt by design \u2014 they came from a real run on somebody's machine and will never match again. The wording is what is asserted."
       ]
     },
 
