@@ -159,7 +159,17 @@ run shows where latency left the SLO instead of one p95 averaged over every rate
   s2*                 3→5       3.0   660 ms    855 ms    856 ms   0.00%    0.00%
 ```
 
-That is a knee between 3 and 5 req/s, from a single run. Read
+And the tool states it, once, under that table:
+
+```
+  ── the knee ──
+  clean up to 3 req/s (swept, not sustained), crossed at 4 req/s — p95 901 ms crossed the SLO of 700 ms.
+```
+
+A knee from a single run. It is also the number most likely to be quoted without its caveats, so it arrives
+with them attached — and the tool **refuses** to state one when the run cannot support it: fewer than two
+completed steps, steps shorter than `--abort-delay`, a generator that did not hold the rate, an unreachable
+target. Each refusal names what to change. Read
 [the per-step table](reading-results.md#4-the-per-step-table-not-the-aggregate-p95) before quoting anything:
 a climbing step sweeps a range of rates rather than holding one, and `--hold` is the only part of the run
 where a rate was actually sustained. So the ramp is what finds the knee, and the hold is what you quote.
@@ -174,7 +184,7 @@ crowdsim load --profile my-site.json --target edge --peak 400 \
 ### 7. Compare
 
 ```bash
-crowdsim history                                        # one line per run: did the knee move?
+crowdsim history                                        # one line per run, with the knee each one measured
 crowdsim compare 20260805T090000Z 20260805T093000Z      # the delta, per class and per cache layer
 ```
 

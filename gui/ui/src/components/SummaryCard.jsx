@@ -8,6 +8,7 @@ import React from 'react';
  * Presenting the numbers first is how a generator-bound run becomes a capacity claim.
  */
 import { abortDetail } from '../lib/messages.js';
+import { kneeText } from '../lib/runs.js';
 
 const pct = (x) => (x === null || x === undefined ? 'n/a' : `${(x * 100).toFixed(2)}%`);
 const ms = (x) => (x === null || x === undefined ? 'n/a' : `${Math.round(x)} ms`);
@@ -41,6 +42,25 @@ export default function SummaryCard({ summary, compare }) {
       ) : (
         <div className="banner ok">Completed without crossing the thresholds.</div>
       )}
+
+      {/* The knee: the only rate in this card that was measured rather than requested. A refusal is shown
+          with the same weight as a claim would have been — a quiet absence is read as "no knee found", and
+          then somebody quotes the requested peak. */}
+      {s.knee ? (
+        <div className={`banner ${s.knee.refused ? 'warn' : 'info'}`}>
+          {s.knee.refused ? (
+            <><strong>No knee from this run.</strong> {s.knee.reason} {s.knee.fix}</>
+          ) : (
+            <>
+              <strong>{`${s.knee.summary[0].toUpperCase()}${s.knee.summary.slice(1)}`}</strong>{' '}
+              {s.knee.clean && s.knee.clean.caveat
+                ? `${s.knee.clean.caveat[0].toUpperCase()}${s.knee.clean.caveat.slice(1)}. ` : ''}
+              {s.knee.note ? `${s.knee.note} ` : ''}
+              This is a knee at this URL pool, which is colder than real traffic.
+            </>
+          )}
+        </div>
+      ) : null}
 
       <div className="stats">
         <Stat label="requests" value={s.requests} />

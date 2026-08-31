@@ -38,3 +38,48 @@ export function shouldClearResult(event) {
   if (e.reason === 'profile-selected') return Boolean(e.from) && e.from !== e.to;
   return false;
 }
+
+/**
+ * The knee, as one cell of the history table. (#51)
+ *
+ * Three states that must not be collapsed into each other:
+ *  · measured — a band: clean up to X, crossed at Y;
+ *  · not found — the run stayed clean at every rate it reached, so the knee is ABOVE its peak. Printing the
+ *    peak on its own would read as a measured knee, which is the mistake this whole feature exists to stop;
+ *  · refused / absent — a dash or nothing, never a number. A refused knee is a run that cannot answer the
+ *    question; an absent one is a run archived before the question could be asked.
+ */
+export function kneeText(knee) {
+  if (!knee) return { text: '', tone: null, title: 'this run has no per-step numbers' };
+  if (knee.refused) {
+    return { text: '—', tone: 'warn', title: `no knee from this run: ${knee.reason} ${knee.fix || ''}`.trim() };
+  }
+  const clean = knee.clean || {};
+  if (!knee.crossed) {
+    return {
+      text: `≥ ${clean.requested_rps}`,
+      tone: 'ok',
+      title: 'clean at every rate this run reached: the knee is above this peak, the run did not find it',
+    };
+  }
+  return {
+    text: `${clean.requested_rps} → ${knee.crossed.requested_rps}`,
+    tone: 'warn',
+    title: knee.summary || '',
+  };
+}
+
+/**
+ * One run's own shape: rate against p95, one point per ramp step. A single run is a curve now — the dots in
+ * the plot are a whole-ramp p95 against a requested peak, which is an average over every rate the run passed
+ * through, and the two must not be drawn as if they meant the same thing.
+ *
+ * A step with no p95 emitted nothing: left out, rather than drawn at zero, which would bend the curve towards
+ * a rate that was never measured.
+ */
+export function stepCurve(perStep) {
+  if (!perStep || !perStep.length) return [];
+  return perStep
+    .filter((r) => r && r.p95 !== null && r.p95 !== undefined && r.requested_rps)
+    .map((r) => ({ step: r.step, rate: r.requested_rps, p95: r.p95, partial: Boolean(r.partial) }));
+}

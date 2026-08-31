@@ -4,6 +4,43 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.17.0] — 2026-08-31
+
+The tool reported "completed" or "aborted" and left everybody to turn that into a capacity figure by hand,
+which in practice means rounding up to `--peak` — the one rate nobody measured the system surviving. With the
+ramp reported step by step (1.16.0), the sentence people actually came for is computable, and so is the
+harder half: knowing when a run cannot support it.
+
+### Added
+- **The knee, named once: *clean up to 3 req/s, crossed at 4*.** New `k6/lib/knee.js`, in `summary.knee`, in
+  the panel, in `report`, in `history.tsv` and on the page. It arrives with the two caveats that never
+  survive retyping — that a rate the ramp swept through is not a rate that was sustained (only `--hold`
+  sustains one), and that a knee at a synthetic pool of cold URLs is harsher than one at real traffic.
+- **A knee is a crossing the system does not come back from.** A step that crosses and is then undone at an
+  equal or higher rate is reported as a cold cache or noise, with `--warmup` as the fix, rather than as the
+  knee. See below: this rule came from a run, not from a whiteboard.
+- **Five refusals, each naming what to change**, because a knee gets quoted in rooms this tool is not in:
+  fewer than two completed steps (one point is not a curve), nothing completed at all (the ramp already
+  starts at or above capacity — lower `--start`), steps shorter than `--abort-delay` (the brake is not
+  evaluated in them, so a step can pass while already crossing), a generator that did not hold the rate, and
+  an unreachable target. The refusal is printed as loudly as the claim would have been: a quiet absence reads
+  as *no knee found*, and then the peak gets quoted.
+- **`history.tsv` carries `knee_clean` and `knee_crossed`**, empty rather than `0` when a run could not
+  support a knee — and the GUI reads them as `null`, so a refused knee cannot arrive on the page as a knee at
+  zero req/s. Rows written before these columns existed keep working: the parser is header-keyed.
+- **The GUI plot is a curve, not only dots.** Selecting a run draws its own per-step shape — rate against
+  p95, from a single run — over the historical dots, which are each one run's requested peak against its
+  whole-ramp p95. The two are on the same axes and do not mean the same thing, and the page says so.
+- **`report` leads with the knee**, and with the refusal when there is one.
+
+### Fixed
+- **A cold start was being reported as the knee.** A real run against a slow origin came back with p95 736 ms
+  at 1→2 req/s and then 611 and 609 ms at the same rate; the first version of this feature announced *"the
+  ramp starts at or above this system's capacity — lower --start"*. It was an empty cache. The rule is now
+  that a crossing must persist to the end of the run to be the knee, and a transient one is named as what it
+  is. This is the second bug in two releases found by running the thing against a real target instead of a
+  metric tree.
+
 ## [1.16.0] — 2026-08-31
 
 The number this tool hands over described a rate the system was never held at. A run climbs from `--start` to

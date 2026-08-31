@@ -37,6 +37,7 @@ export function cacheRate(metrics, name) {
  */
 import { abortedBy as abortedByLocal } from './brake.js';
 import { stepPlan, perStep } from './steps.js';
+import { knee } from './knee.js';
 
 export { abortedBy } from './brake.js';
 
@@ -139,8 +140,23 @@ export function buildSummary(metrics, ctx) {
                                  { durationMs: ctx.durationMs, classNames: ctx.classNames }) : null,
   };
 
+
+
   out.generator_ok = generatorHeldRate(out.dropped_iterations, out.requests);
   out.target_unreachable = targetUnreachable(out.failed_rate, out.dur.p95);
+
+  // The sentence people came for: the highest rate this run measured the system surviving, and the rate at
+  // which it stopped — or a refusal, which is the more important half. Last, because it reads the two
+  // verdicts above: those are exactly the conditions that make a knee meaningless. See lib/knee.js.
+  out.knee = ctx.ramp ? knee(out.per_step, {
+    maxP95: (ctx.slo && ctx.slo.max_p95_ms) || null,
+    maxFailed: ctx.slo && ctx.slo.max_failed_rate !== undefined ? ctx.slo.max_failed_rate : undefined,
+    classSlo: ctx.classSlo || {},
+    generatorOk: out.generator_ok,
+    targetUnreachable: out.target_unreachable,
+    stepDur: ctx.ramp.stepDur,
+    abortDelay: ctx.abortDelay,
+  }) : null;
   return out;
 }
 
@@ -193,6 +209,25 @@ export function renderStepTable(out) {
   return t;
 }
 
+/**
+ * The knee as one sentence, or the refusal as one sentence. Both are printed: a refusal that is quieter than
+ * the claim would have been is read as "no knee found", and the reader quotes the peak instead — which is the
+ * one rate nobody measured the system surviving.
+ */
+export function renderKnee(out) {
+  const k = out.knee;
+  if (!k) return '';
+  if (k.refused) {
+    return '\n  ── the knee ──\n  ⚠️  no knee from this run: ' + k.reason + '\n      ' + k.fix + '\n';
+  }
+  var t = '\n  ── the knee ──\n  ' + k.summary + '\n';
+  if (k.clean && k.clean.caveat) t += '      ' + k.clean.caveat + '\n';
+  // A crossing the system recovered from is not a knee, and is not silence either: it is the reason to warm
+  // up before the next run.
+  if (k.note) t += '      ' + k.note + '\n';
+  return t;
+}
+
 export function renderSummaryText(out, ctx) {
   const labels = ctx.cacheLabels || [];
   const isMix = out.shape === 'mix';
@@ -233,5 +268,5 @@ export function renderSummaryText(out, ctx) {
   cache         ${cacheLine}
 
   ── per class ──
-${tbl}${renderStepTable(out)}`;
+${tbl}${renderStepTable(out)}${renderKnee(out)}`;
 }

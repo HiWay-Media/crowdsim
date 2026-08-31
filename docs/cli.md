@@ -333,6 +333,11 @@ Stopped by class **rsc_page** — `p(95)<300`, reached 465.
 actually have — past it a real visitor gets a 504.
 ```
 
+It leads with **the knee** — the highest rate the run measured the system surviving and the rate at which it
+stopped — because that is the sentence the document is being written around. A run that cannot support a knee
+gets the refusal instead, with what to change: an omitted section would read as *no knee found*, and then the
+requested peak gets quoted.
+
 A run with `generator_ok: false` produces a report that says **DISCARD THIS RUN** and prints no latency
 table at all: there is nothing in it to quote. A layer whose header never appeared is reported as `n/a — the
 declared header never appeared in any response`, never as 0%. `--compare` delegates to
@@ -346,6 +351,12 @@ gitignored for the same reason.
 
 Prints `out/history.tsv` as a table: one line per run. What it is for is watching whether the knee moves
 after a change — not for reading a single run, which is what the summary is for.
+
+The last two columns are the knee each run measured (`knee_clean`, `knee_crossed`), and they are **empty**
+rather than `0` when a run could not support one — see
+[the knee](reading-results.md#5-the-knee-named-or-refused). Aligned in python3, not with `column(1)`: that
+comes from util-linux, busybox does not have it, and this subcommand used to exit 127 inside the published
+image.
 
 ### `serve`
 

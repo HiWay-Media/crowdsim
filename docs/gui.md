@@ -147,9 +147,15 @@ a second one.
 
 When it ends you get the verdict, in the order that keeps you honest:
 
-![The result: the driver's recap, the per-class table, and the run's own files](assets/screens/gui-result.png)
+![The result: the verdict, the measured knee, the per-class table and the run's own files](assets/screens/gui-result.png)
 
-If the brake stopped the run, the banner says so as the intended outcome — and names the class and the
+The blue banner is **the knee**: the highest rate this run measured the system surviving, and the rate at
+which it stopped — with the two caveats that never survive retyping attached to it, that a swept rate is not a
+sustained one and that a knee at a synthetic pool is harsher than one at real traffic. When the run cannot
+support a knee, that banner says so instead, with the reason and what to change: a quiet absence would be read
+as *no knee found*, after which somebody quotes the requested peak — the one rate nobody measured.
+
+If the brake stopped the run, the amber banner says so as the intended outcome — and names the class and the
 threshold that crossed, because a class can hold itself to [its own
 SLO](profile.md#a-class-may-set-its-own-limit) and "you found the knee" no longer says where. It comes from
 the summary's `aborted_by` and nowhere else: runs archived before that field existed show the verdict without
@@ -211,11 +217,21 @@ read-only, the page still lists, validates and runs profiles, and explains that 
 
 ### History
 
-![History: one row per run, invalid runs struck through, with the knee plot](assets/screens/gui-history.png)
+![History: one row per run with the knee it measured, and the selected run's per-step curve](assets/screens/gui-history.png)
 
 `out/history.tsv` and the summaries, read from disk — including runs started from the command line. Runs with
-`generator_ok: false` are struck through and drawn hollow in the knee plot (p95 against requested peak) rather
-than plotted next to valid ones.
+`generator_ok: false` are struck through and drawn hollow in the plot rather than plotted next to valid ones.
+
+**The `knee` column is the only pair of numbers here that was measured rather than requested.** `3 → 4` means
+clean at 3 req/s and crossed at 4; `≥ 2` means the run stayed clean at every rate it reached, so the knee is
+*above* its peak and this run did not find it; a dash means the run could not support a knee at all, with the
+reason on hover. A run archived before per-step numbers existed shows nothing — which is not the same as a
+knee of zero, and is why the column is empty rather than `0`.
+
+**Two things are drawn on the same axes and they do not mean the same thing.** A dot is one run: its requested
+peak against its p95 over the whole ramp, i.e. an average across every rate it passed through. The line is the
+selected run's own per-step shape — that is the real curve, and it comes from a single run. Hollow points on
+the line are partial steps: the run ended inside them.
 
 Selecting a run shows the full result and a comparison against previous runs at the **same profile, target and
 shape**, labelled so nobody quotes the absolutes: *deltas are the honest part*.

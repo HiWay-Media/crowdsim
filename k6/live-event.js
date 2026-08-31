@@ -356,6 +356,19 @@ export function handleSummary(data) {
     cacheLabels: CACHE_LABELS,
     shares: SHARE,
     ramp: RAMP,
+    // The knee is judged against the same limits as the brake, per-class ones included: a knee computed
+    // from the profile SLO alone would sit above the rate at which the run actually aborted.
+    slo: { max_p95_ms: MAX_P95_MS, max_failed_rate: MAX_5XX },
+    classSlo: CLASS_DEFS.reduce(function (acc, c) {
+      if (c.max_p95_ms !== undefined && c.max_p95_ms !== null) {
+        acc[c.name] = acc[c.name] || {}; acc[c.name].maxP95 = Number(c.max_p95_ms);
+      }
+      if (c.max_failed_rate !== undefined && c.max_failed_rate !== null) {
+        acc[c.name] = acc[c.name] || {}; acc[c.name].maxFailed = Number(c.max_failed_rate);
+      }
+      return acc;
+    }, {}),
+    abortDelay: ABORT_DELAY,
     // How long the run actually lasted: a step whose window the run never reached the end of is a fraction
     // of that step, not a measurement of its rate.
     durationMs: (data.state && data.state.testRunDurationMs) || 0,

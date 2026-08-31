@@ -1039,16 +1039,22 @@ print(d.get("generator_ok"), d.get("target_unreachable"))' "$summary")"
 
 record_history() {
   if [ ! -f "$HISTORY_F" ]; then
-    printf 'run_id\tprofile\tbase_url\tshape\tpeak\taborted\treqs\trps\tfailed\tp95\te504\tgen_ok\n' > "$HISTORY_F"
+    printf 'run_id\tprofile\tbase_url\tshape\tpeak\taborted\treqs\trps\tfailed\tp95\te504\tgen_ok\tknee_clean\tknee_crossed\n' > "$HISTORY_F"
   fi
   python3 - "$1" >> "$HISTORY_F" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1]))
 f = lambda x: '' if x is None else x
+# The knee is the only pair of numbers in this row that describes a rate the system was actually measured
+# at. Left EMPTY when the run could not support one (see k6/lib/knee.js): an empty cell is a run with no
+# knee, a 0 would be a knee at zero req/s.
+k = d.get('knee') or {}
+clean = None if k.get('refused') else ((k.get('clean') or {}).get('requested_rps'))
+crossed = None if k.get('refused') else ((k.get('crossed') or {}).get('requested_rps'))
 print('\t'.join(str(f(v)) for v in [
     d['run_id'], d.get('profile'), d['base_url'], d['shape'], d['peak_rps_user_target'],
     d['aborted'], d['requests'], round(d['rps_avg'], 1), round(d['failed_rate'], 4),
-    round(d['dur']['p95'] or 0), d['e504'], d['generator_ok']]))
+    round(d['dur']['p95'] or 0), d['e504'], d['generator_ok'], clean, crossed]))
 PY
 }
 
@@ -1362,6 +1368,35 @@ if d.get('over_guillotine_rate') is not None and d.get('guillotine_ms') is not N
     w(f"**Past the {d['guillotine_ms']} ms read timeout:** {pct(d['over_guillotine_rate'])} of requests. "
       'That share, not the average latency, is the margin you actually have — past it a real visitor gets '
       'a 504.')
+    w('')
+
+# 3b. The knee: the claim this whole run exists to support, and the one that will be quoted without its
+# caveats unless they are attached to it here. Absent for a run archived before per-step numbers existed —
+# inventing a refusal reason for those would be a statement about a run that never had the data.
+knee = d.get('knee')
+if knee:
+    w('## The knee')
+    w('')
+    if knee.get('refused'):
+        w(f"**No knee from this run.** {knee['reason']}")
+        w('')
+        w(f"{knee['fix']}")
+        w('')
+        w('This is not "no knee found": it is a run that cannot answer the question. Quoting the requested '
+          'peak instead would quote the one rate nobody measured this system surviving.')
+    else:
+        w(f"**{knee['summary'][0].upper()}{knee['summary'][1:]}**")
+        w('')
+        clean = knee.get('clean') or {}
+        if clean.get('caveat'):
+            w(f"- {clean['caveat'][0].upper()}{clean['caveat'][1:]}. A rate the ramp passed through is not "
+              'a rate the system was held at: only the `--hold` step holds one.')
+        crossed = knee.get('crossed') or {}
+        if crossed.get('partial'):
+            w('- The step that crossed is **partial** — the run ended inside it — so it says where the '
+              'system broke, not how it behaves at that rate.')
+        w('- This is a knee **at this URL pool**. A synthetic pool of distinct cold URLs is a harder test '
+          'than the traffic your visitors produce, so the real knee is at or above this rate, not below it.')
     w('')
 
 # 4. Only now, the numbers.

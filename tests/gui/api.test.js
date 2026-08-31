@@ -342,3 +342,33 @@ test('without a built UI the root page says how to build it instead of 404ing', 
     assert.match(r.text, /gui:build/);
   });
 });
+
+// ── the knee travels with the history (#51) ─────────────────────────────────────────────────────────
+// history.tsv is what the page plots. Without the knee in it, every row is "peak asked" against "p95 over
+// the whole ramp" — two numbers that describe rates the system was never held at. With it, a row states a
+// rate that was measured surviving.
+
+test('history carries the knee, and a row from before it existed is not invented', async () => {
+  await withServer({}, async ({ api, outDir }) => {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(path.join(outDir, 'history.tsv'),
+      // an old row: the two columns simply are not there
+      'run_id\tprofile\tbase_url\tshape\tpeak\taborted\treqs\trps\tfailed\tp95\te504\tgen_ok\n' +
+      '20260805T090000Z\tsite\thttp://127.0.0.1:8099\tmix\t40\tFalse\t12000\t39.6\t0.0012\t780\t0\tTrue\n');
+    const old = await api('GET', '/api/history');
+    assert.equal(old.json.runs[0].knee_clean, null, 'a knee was invented for a run that never measured one');
+    assert.equal(old.json.runs[0].knee_crossed, null);
+
+    fs.writeFileSync(path.join(outDir, 'history.tsv'),
+      'run_id\tprofile\tbase_url\tshape\tpeak\taborted\treqs\trps\tfailed\tp95\te504\tgen_ok\tknee_clean\tknee_crossed\n' +
+      '20260805T090000Z\tsite\thttp://127.0.0.1:8099\tmix\t40\tFalse\t12000\t39.6\t0.0012\t780\t0\tTrue\t30\t40\n' +
+      // a run whose knee was refused: the columns are empty, which is not the same as zero
+      '20260805T100000Z\tsite\thttp://127.0.0.1:8099\tmix\t80\tTrue\t20000\t70.1\t0.07\t6900\t812\tTrue\t\t\n');
+    const h = await api('GET', '/api/history');
+    const [newest, older] = h.json.runs;
+    assert.equal(older.knee_clean, 30);
+    assert.equal(older.knee_crossed, 40);
+    assert.equal(newest.knee_clean, null, 'a refused knee must not become 0 req/s');
+    assert.equal(newest.knee_crossed, null);
+  });
+});

@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.16.0        # or :1.16, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.17.0        # or :1.17, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.16.0 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.17.0 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.16.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.17.0 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -132,7 +132,7 @@ crowdsim probe    --profile p.json --target edge          # reachability + cache
 crowdsim load     --profile p.json --target edge --peak 60
 crowdsim validate p.json                                  # every rule at once, before anything runs
 crowdsim record  session.har                              # a browser HAR export → a journey file
-crowdsim history                                          # one line per run: does the knee move?
+crowdsim history                                          # one line per run, with the knee each measured
 crowdsim compare <run-a> <run-b>                          # the delta, or a refusal if they differ
 crowdsim init                                             # a first profile, drafted from what was measured
 crowdsim report  <run-id>                                 # the run as markdown, caveats attached
@@ -286,6 +286,11 @@ the origin can no longer correct you. See the warning at the top of that file.
   of it belongs to no rate the system was ever held at. The table says where latency left the SLO — a knee
   from a single run — and marks the step the brake died inside as partial, because a fraction of a step is
   not a result for its rate.
+- **The knee is stated once, or refused.** *Clean up to 3 req/s, crossed at 4.* A knee is a crossing the
+  system does not come back from: one that is undone at a higher rate is a cold cache, and is reported as
+  that instead. When the run cannot support the claim — one completed step, steps shorter than the abort
+  delay, a generator that did not hold — the tool says so rather than estimating, because the alternative is
+  a confident number that gets quoted in rooms this tool is not in.
 - Per class, the interesting column is the share past `guillotine_ms`, not the average latency. Averages
   hide the queue, and the queue is what produces the errors.
 - Compare runs against each other at an **identical pool**, before and after a change. Absolute numbers

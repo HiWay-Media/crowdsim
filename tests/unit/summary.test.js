@@ -264,3 +264,37 @@ test('a step the run died inside is printed as partial, not as that rate\'s resu
   assert.equal(last.partial, true);
   assert.match(renderSummaryText(out, RAMP_CTX), /partial/i);
 });
+
+// ── the knee, named (#51) ───────────────────────────────────────────────────────────────────────────
+
+test('the summary names the knee, and the panel states it as one sentence', () => {
+  const ctx = Object.assign({}, RAMP_CTX, {
+    slo: { max_p95_ms: 1000, max_failed_rate: 0.05 }, abortDelay: '30s',
+  });
+  const out = buildSummary(withSteps(), ctx);
+  assert.equal(out.knee.refused, undefined, JSON.stringify(out.knee));
+  assert.equal(out.knee.clean.step, 's1');
+  assert.equal(out.knee.crossed.step, 'peak');
+  const txt = renderSummaryText(out, ctx);
+  assert.match(txt, /knee/i);
+  assert.match(txt, /crossed at 100/);
+});
+
+test('a run whose steps cannot support a knee prints the refusal, not a number', () => {
+  // The whole point of #51: the refusal has to be as visible as the claim would have been, or somebody
+  // reads the absence of a knee as "no knee found" and quotes the peak.
+  const ctx = Object.assign({}, RAMP_CTX, {
+    slo: { max_p95_ms: 1000 }, abortDelay: '30s',
+    ramp: { steps: 3, startRps: 30, peakRps: 100, stepDur: '10s', holdDur: '20s' },
+  });
+  const out = buildSummary(withSteps(), ctx);
+  assert.equal(out.knee.refused, true);
+  const txt = renderSummaryText(out, ctx);
+  assert.match(txt, /--abort-delay/, 'the panel hides the reason a knee was refused');
+});
+
+test('a run with no ramp has no knee field to misread', () => {
+  const out = buildSummary(healthy(), CTX);
+  assert.equal(out.knee, null);
+  assert.doesNotMatch(renderSummaryText(out, CTX), /knee/i);
+});

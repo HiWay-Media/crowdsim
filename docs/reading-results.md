@@ -10,8 +10,9 @@ in which a run must be read, and what every field means.
 2. target_unreachable true  → connectivity, not capacity. Not a knee.
 3. aborted           true  → you found the knee. That is a success.
 4. per step: at which RATE did latency leave the SLO   ← the knee itself
-5. per class: the share past guillotine_ms             ← your margin
-6. only then: the overall latency, errors, cache
+5. knee: the same thing as one sentence, or a refusal
+6. per class: the share past guillotine_ms             ← your margin
+7. only then: the overall latency, errors, cache
 ```
 
 ### 1. `generator_ok: false` → discard the run
@@ -92,7 +93,45 @@ A step that sent nothing is absent rather than shown as a row of zeros, which wo
 fast. Requests still in flight when the last stage ends carry no step tag at all: crediting them to the peak
 would move the slowest requests of the run into the step people quote.
 
-### 5. The share past `guillotine_ms`, per class
+### 5. The knee, named or refused
+
+From that table the tool computes the sentence people actually came for, and prints it under it:
+
+```
+  ── the knee ──
+  clean up to 3 req/s (swept, not sustained), crossed at 4 req/s — p95 901 ms crossed the SLO of 700 ms.
+      this rate was swept through on the way up, not sustained: only the --hold step holds a rate
+```
+
+**A knee is a crossing the system does not come back from.** That rule is not pedantry: a real run against a
+slow origin returned p95 736 ms at 1→2 req/s and then 611 and 609 ms at the same rate. The first version of
+this feature called that *"the ramp starts above this system's capacity"*. It was a cold start. A crossing
+undone at an equal or higher rate is now reported as what it is:
+
+```
+  ── the knee ──
+  clean at every rate this run reached, up to 2 req/s (sustained). The knee is above this peak: the run
+  did not find it.
+      a step crossed the SLO and the system came back inside it at an equal or higher rate (s1 at 2 req/s).
+      That is a cold cache or noise, not a knee — use --warmup so the first step is not the one paying for
+      an empty cache.
+```
+
+And **the refusals matter more than the claim**, because a knee gets quoted in rooms this tool is not in:
+
+| The run | What you get |
+|---|---|
+| one completed step | refused — one point is not a curve |
+| nothing completed | refused — the ramp already starts at or above capacity: lower `--start` |
+| `--step-dur` below `--abort-delay` | refused — the brake is not evaluated in those steps, so a step can pass while already crossing |
+| `generator_ok: false` | refused — no step measured the rate it claims |
+| target unreachable | refused — that is connectivity, not capacity |
+
+Each refusal names the condition and what to change. A refusal is printed as loudly as a claim would have
+been: a quiet absence reads as *no knee found*, and then the requested peak gets quoted — the one rate nobody
+measured the system surviving.
+
+### 6. The share past `guillotine_ms`, per class
 
 `guillotine_ms` is your reverse proxy's read timeout. Requests slower than it become 504s for real
 visitors, so the interesting column is not the average latency but the **percentage that crossed it**:
@@ -128,6 +167,7 @@ Averages hide the queue, and the queue is what produces the errors.
 | `aborted` | A real threshold failed — the brake stopped the run. (Thresholds ending in `>=0` are decoration used to surface per-class sub-metrics; they are excluded.) |
 | `generator_ok` | `dropped_iterations` ≤ 2% of `requests`. False invalidates everything else. |
 | `target_unreachable` | `failed_rate` > 0.9 and p95 null or < 50 ms. |
+| `knee` | `{ clean, crossed, transient, note, summary }` — the highest rate that stayed inside the SLO and the rate that crossed and never came back, or `{ refused, reason, fix }`. `null` for a run with no ramp. `crossed: null` means the run never found the knee; `clean: null` means the first step already crossed. |
 | `per_step` | The ramp, step by step: `requested_rps` (and `from_rps`, the rate the step swept up from), `sustained`, `achieved_rps`, `requests`, `p50/p95/p99`, `failed_rate`, `over_guillotine_rate`, `partial`, and `per_class` for the classes that ran in it. `null` for a run whose caller supplied no ramp. |
 | `aborted_by` | Which threshold stopped it: `{ metric, class, threshold, value }`, or `null` — including on older runs, which did not record it. |
 | `warmup` | What the warm-up was (`"30s at 20 req/s"`), or `null`. The warm-up's own numbers are in `warmup-<run_id>.json` and are never mixed in here. |
@@ -176,8 +216,11 @@ One appended line per run, written by the driver — the GUI reads the same file
 terminal and runs launched from the page sit side by side:
 
 ```
-run_id  profile  base_url  shape  peak  aborted  reqs  rps  failed  p95  e504  gen_ok
+run_id  profile  base_url  shape  peak  aborted  reqs  rps  failed  p95  e504  gen_ok  knee_clean  knee_crossed
 ```
+
+The last two are the knee, and they are **empty** — not `0` — when the run could not support one. `knee_crossed`
+empty with `knee_clean` filled means the run stayed clean throughout: the knee is above its peak.
 
 ```bash
 crowdsim history          # printed as a table

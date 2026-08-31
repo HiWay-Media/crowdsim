@@ -5,12 +5,15 @@ import CompareCard from './CompareCard.jsx';
 import { orderPair } from '../lib/compare.js';
 import { parseHash, formatHash } from '../lib/hash.js';
 import { activatesOn } from '../lib/keys.js';
+import { kneeText, stepCurve } from '../lib/runs.js';
 
 /*
  * The archive, read from out/history.tsv and out/summary-*.json — the files the driver writes. Runs
  * launched from the command line appear here too, because there is only one source of truth.
  *
- * The chart is a knee plot: requested peak on x, p95 on y, one point per run of the selected profile.
+ * The chart is a knee plot: rate on x, p95 on y. Two things are drawn on those axes and they do not mean the
+ * same thing — a dot is one run's requested peak against its p95 over the WHOLE ramp, i.e. an average across
+ * every rate it passed through; the line is the selected run's own per-step shape, which is the real curve.
  * Runs the generator could not sustain are drawn hollow, and excluded from any conclusion.
  */
 export default function HistoryPanel() {
@@ -70,7 +73,14 @@ export default function HistoryPanel() {
         <h2>Runs</h2>
         {error ? <div className="banner bad">{error}</div> : null}
         {!rows.length ? <p className="note">No runs recorded yet. The archive is written by the driver, in the output directory.</p> : null}
-        {rows.length ? <KneePlot rows={rows} onPick={setSelected} selected={selected} /> : null}
+        {rows.length ? (
+          <KneePlot
+            rows={rows}
+            onPick={setSelected}
+            selected={selected}
+            curve={stepCurve(detail && detail.summary ? detail.summary.per_step : null)}
+          />
+        ) : null}
 
         {rows.length ? (
           <div className="actions">
@@ -91,7 +101,7 @@ export default function HistoryPanel() {
             <tr>
               <th>cmp</th>
               <th>run</th><th>profile</th><th>target</th><th>shape</th><th>peak</th><th>achieved</th>
-              <th>p95</th><th>failed</th><th>504</th><th>outcome</th>
+              <th>p95</th><th>failed</th><th>504</th><th>knee</th><th>outcome</th>
             </tr>
           </thead>
           <tbody>
@@ -124,6 +134,11 @@ export default function HistoryPanel() {
                 <td>{r.p95} ms</td>
                 <td>{r.failed === null ? 'n/a' : `${(r.failed * 100).toFixed(2)}%`}</td>
                 <td>{r.e504}</td>
+                <td className={r.knee_crossed !== null && r.knee_crossed !== undefined ? 'warn' : ''}>
+                  {r.knee_clean === null || r.knee_clean === undefined ? ''
+                    : (r.knee_crossed === null || r.knee_crossed === undefined
+                        ? `≥ ${r.knee_clean}` : `${r.knee_clean} → ${r.knee_crossed}`)}
+                </td>
                 <td>
                   {r.generator_ok === false
                     ? <span className="pill bad">invalid</span>
@@ -145,20 +160,38 @@ export default function HistoryPanel() {
 }
 
 /** Inline SVG: no chart dependency for one scatter plot with 20 points. */
-function KneePlot({ rows, onPick, selected }) {
+function KneePlot({ rows, onPick, selected, curve }) {
   const pts = rows.filter((r) => r.peak && r.p95 !== null);
-  if (pts.length < 2) return null;
+  const line = curve || [];
+  if (pts.length < 2 && line.length < 2) return null;
   const W = 640; const H = 200; const pad = 34;
-  const maxX = Math.max(...pts.map((p) => p.peak));
-  const maxY = Math.max(...pts.map((p) => p.p95));
+  // The curve shares the axes with the dots, so it has to share their scale too — otherwise the same
+  // coordinate would mean two rates.
+  const maxX = Math.max(...pts.map((p) => p.peak), ...line.map((p) => p.rate), 1);
+  const maxY = Math.max(...pts.map((p) => p.p95), ...line.map((p) => p.p95), 1);
   const x = (v) => pad + (v / maxX) * (W - pad * 2);
   const y = (v) => H - pad - (v / maxY) * (H - pad * 2);
   return (
-    <svg className="knee" viewBox={`0 0 ${W} ${H}`} role="img" aria-label="p95 against requested peak">
+    <svg className="knee" viewBox={`0 0 ${W} ${H}`} role="img"
+         aria-label="p95 against rate: one dot per run, and the selected run's per-step curve">
       <line x1={pad} y1={H - pad} x2={W - pad} y2={H - pad} className="axis" />
       <line x1={pad} y1={pad} x2={pad} y2={H - pad} className="axis" />
-      <text x={W - pad} y={H - 10} className="axis-label" textAnchor="end">requested peak (req/s)</text>
+      <text x={W - pad} y={H - 10} className="axis-label" textAnchor="end">rate (req/s)</text>
       <text x={6} y={pad - 12} className="axis-label">p95 (ms)</text>
+      {line.length > 1 ? (
+        <polyline
+          className="step-curve"
+          fill="none"
+          points={line.map((p) => `${x(p.rate)},${y(p.p95)}`).join(' ')}
+        />
+      ) : null}
+      {line.map((p) => (
+        <circle key={`step-${p.step}`} cx={x(p.rate)} cy={y(p.p95)} r={p.partial ? 2 : 3}
+                className={`step-pt ${p.partial ? 'partial' : ''}`}>
+          <title>{`step ${p.step} · ${p.rate} req/s · p95 ${Math.round(p.p95)} ms`
+            + (p.partial ? ' · PARTIAL: the run ended inside this step' : '')}</title>
+        </circle>
+      ))}
       {pts.map((p) => (
         <circle
           key={p.run_id}

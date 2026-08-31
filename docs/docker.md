@@ -60,8 +60,8 @@ queue needs time to build.
 ### Pull a released tag
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.16.0     # exact version — use this
-docker pull ghcr.io/hiway-media/crowdsim:1.16       # latest patch of 1.2
+docker pull ghcr.io/hiway-media/crowdsim:1.17.0     # exact version — use this
+docker pull ghcr.io/hiway-media/crowdsim:1.17       # latest patch of 1.2
 docker pull ghcr.io/hiway-media/crowdsim:latest    # last release
 ```
 
@@ -134,7 +134,7 @@ docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" \
   -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.16.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.17.0 crowdsim serve
 ```
 
 Or `make image-run`, which does exactly this against `crowdsim:dev` and prints a freshly generated token.
@@ -181,7 +181,7 @@ docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" \
   -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.16.0 \
+  ghcr.io/hiway-media/crowdsim:1.17.0 \
   crowdsim load --profile /profile.json --target edge --peak 60
 ```
 
@@ -209,7 +209,7 @@ by that same container, so the same caveat applies to the runs, not to the page.
 ```bash
 docker run --rm --network host -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.16.0 crowdsim probe --profile /profile.json
+  ghcr.io/hiway-media/crowdsim:1.17.0 crowdsim probe --profile /profile.json
 
 # same shape for: discover --limit 400 · load --dry-run · history
 ```

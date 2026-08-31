@@ -120,6 +120,8 @@ table { width: 100%; border-collapse: collapse; }
 .banner.ok { border-color: #2c6c52; background: #12251d; }
 .banner.warn { border-color: #6b5623; background: #241f11; }
 .banner.bad { border-color: #6b3232; background: #241414; }
+/* A measured statement rather than a verdict: the knee is neither good news nor bad news. */
+.banner.info { border-color: #2c4f6c; background: #121d25; }
 
 .gate { border: 1px dashed var(--line); border-radius: 8px; padding: 10px 12px; margin: 12px 0; color: var(--dim); font-size: 12.5px; }
 .gate.danger { border: 1px solid var(--bad); background: #221214; color: var(--text); }
@@ -176,6 +178,11 @@ table { width: 100%; border-collapse: collapse; }
 .knee .pt.clean { fill: var(--ok); }
 .knee .pt.knee { fill: var(--warn); }
 .knee .pt.invalid { fill: none; stroke: var(--bad); stroke-dasharray: 2 2; }
+/* The selected run's own per-step shape. Drawn as a line, not as dots, because it IS one measurement: the
+   dots are separate runs and averaged over their whole ramp. */
+.knee .step-curve { stroke: var(--accent); stroke-width: 1.5; }
+.knee .step-pt { fill: var(--accent); }
+.knee .step-pt.partial { fill: none; stroke: var(--accent); stroke-dasharray: 1 1; }
 
 /* ── token gate ─────────────────────────────────────────────────────────────────────────────────── */
 .tokengate { max-width: 420px; margin: 12vh auto; background: var(--panel); border: 1px solid var(--line);

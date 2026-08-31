@@ -376,7 +376,13 @@ runs = json.load(sys.stdin)["runs"]
 assert len(runs) == 3, f"the GUI lists {len(runs)} runs, expected 3"
 aborted = [r for r in runs if r["aborted"]]
 assert len(aborted) == 2, "the GUI does not distinguish the aborted runs"
-print(f"  ✅ GUI lists {len(runs)} runs, {len(aborted)} of them aborted")'
+# The knee has to survive the trip through history.tsv (#51). A refused knee must arrive as null: reading it
+# as 0 would put a knee at zero req/s on the page, for a run that measured nothing of the sort.
+for r in runs:
+    for k in ("knee_clean", "knee_crossed"):
+        assert k in r, f"the GUI history row has no {k}: the knee stops at the driver"
+        assert r[k] is None or isinstance(r[k], (int, float)), f"{k} came through as {r[k]!r}"
+print(f"  ✅ GUI lists {len(runs)} runs, {len(aborted)} of them aborted, knee carried per run")'
 
 # ── the page itself, in a real browser ───────────────────────────────────────────────────────────────
 # tests/ui asserts the front end's decisions as plain modules, which is fast and covers the reasoning — and
@@ -441,9 +447,13 @@ check('role="button"' in html, "the focusable rows do not announce themselves as
 points = re.findall(r'<circle[^>]*class="pt[^>]*>', html)
 check(not points or all('tabindex' in p.lower() for p in points),
       "the knee-plot points are clickable but not reachable")
+
+# The knee column (#51). Every run in this archive either has a measured band or is a refusal, and the page
+# must show which — a blank column reads as "no knee found", after which somebody quotes the requested peak.
+check('<th>knee</th>' in html, "the archive table has no knee column")
 if fail:
     print("\n".join("  ❌ " + f for f in fail)); sys.exit(1)
-print(f"  ✅ the page rendered {len(ids)} runs from the archive, clean and knee told apart")
+print(f"  ✅ the page rendered {len(ids)} runs from the archive, clean and knee told apart, knee column present")
 PY2
   fi
 fi

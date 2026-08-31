@@ -44,6 +44,51 @@ json.dump({
 PY
 }
 
+# add_knee <run_id> — the knee a completed ramp produces
+add_knee() {
+  python3 - "$CROWDSIM_OUT/summary-$1.json" <<'PY'
+import json, sys
+f = sys.argv[1]
+d = json.load(open(f))
+d['per_step'] = [
+    {'step': 's1', 'index': 1, 'is_hold': False, 'sustained': False, 'from_rps': 60,
+     'requested_rps': 90, 'achieved_rps': 75.0, 'requests': 4500, 'p50': 90, 'p95': 400,
+     'p99': 600, 'failed_rate': 0.0, 'over_guillotine_rate': 0.0, 'partial': False, 'per_class': {}},
+    {'step': 's2', 'index': 2, 'is_hold': False, 'sustained': False, 'from_rps': 90,
+     'requested_rps': 120, 'achieved_rps': 105.0, 'requests': 6300, 'p50': 300, 'p95': 4200,
+     'p99': 9000, 'failed_rate': 0.04, 'over_guillotine_rate': 0.12, 'partial': False, 'per_class': {}},
+]
+d['knee'] = {
+    'clean': {'step': 's1', 'requested_rps': 90, 'from_rps': 60, 'achieved_rps': 75.0, 'p95': 400,
+              'failed_rate': 0.0, 'sustained': False,
+              'caveat': 'this rate was swept through on the way up, not sustained: only the --hold step '
+                        'holds a rate'},
+    'crossed': {'step': 's2', 'requested_rps': 120, 'from_rps': 90, 'achieved_rps': 105.0, 'p95': 4200,
+                'failed_rate': 0.04, 'partial': False, 'class': None,
+                'why': 'p95 4200 ms crossed the SLO of 2500 ms'},
+    'summary': 'clean up to 90 req/s (swept, not sustained), crossed at 120 req/s — p95 4200 ms crossed '
+               'the SLO of 2500 ms.',
+}
+json.dump(d, open(f, 'w'), indent=1)
+PY
+}
+
+# refuse_knee <run_id> — a ramp that cannot support a knee
+refuse_knee() {
+  python3 - "$CROWDSIM_OUT/summary-$1.json" <<'PY'
+import json, sys
+f = sys.argv[1]
+d = json.load(open(f))
+d['per_step'] = []
+d['knee'] = {'refused': True,
+             'reason': 'only one step ran to completion: one point is not a curve, and a knee from it '
+                       'would be a straight line through a single measurement.',
+             'fix': 'Give the ramp more room below the knee: a lower --start, more --steps, or a longer '
+                    '--step-dur.'}
+json.dump(d, open(f, 'w'), indent=1)
+PY
+}
+
 @test "report needs a run id, and says where to find one" {
   run "$CROWDSIM" report
   [ "$status" -eq 2 ]
@@ -144,4 +189,42 @@ PY
   local body; body="$(cat "$CROWDSIM_OUT/report-$RUN.md")"
   [[ "$body" == *"www.example.test"* ]]
   [[ "$body" == *"names your hosts"* ]]
+}
+
+@test "the report leads with the knee, as the claim it is, and with what it is a knee of" {
+  # This is the sentence that gets pasted into a capacity discussion. It has to arrive with the two things
+  # that do not survive retyping: that a swept rate is not a sustained one, and that a knee measured at a
+  # synthetic pool is harsher than one at real traffic.
+  add_knee "$RUN"
+  run "$CROWDSIM" report "$RUN"
+  [ "$status" -eq 0 ]
+  md="$(cat "$CROWDSIM_OUT/report-$RUN.md")"
+  [[ "$md" == *"90 req/s"* ]]
+  [[ "$md" == *"120 req/s"* ]]
+  [[ "$md" == *"pool"* ]]
+  # and before the numbers table, since it is the answer and the table is the evidence
+  knee_at=$(printf '%s' "$md" | grep -n "req/s" | head -1 | cut -d: -f1)
+  tbl_at=$(printf '%s' "$md" | grep -n "^| metric" | head -1 | cut -d: -f1)
+  [ "$knee_at" -lt "$tbl_at" ]
+}
+
+@test "a refused knee is reported as a refusal, not as an absent section" {
+  # A missing knee section reads as "no knee found", and the reader quotes the peak — the one rate nobody
+  # measured the system surviving.
+  refuse_knee "$RUN"
+  run "$CROWDSIM" report "$RUN"
+  [ "$status" -eq 0 ]
+  md="$(cat "$CROWDSIM_OUT/report-$RUN.md")"
+  [[ "$md" == *"knee"* ]]
+  [[ "$md" == *"only one step"* ]]
+  [[ "$md" == *"--step"* ]]
+}
+
+@test "a run from before per-step numbers existed produces a report with no knee section at all" {
+  # Not a refusal: those runs cannot be judged, and inventing a refusal reason for them would be a
+  # statement about a run that never had the data. The fixture written in setup() is exactly such a run.
+  run "$CROWDSIM" report "$RUN"
+  [ "$status" -eq 0 ]
+  md="$(cat "$CROWDSIM_OUT/report-$RUN.md")"
+  [[ "$md" != *"the knee"* ]]
 }

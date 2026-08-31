@@ -42,6 +42,10 @@ export function readHistory(outDir) {
       p95: num(row.p95),
       e504: num(row.e504),
       generator_ok: bool(row.gen_ok),
+      // The knee, when the run could support one. null for every row written before this column existed and
+      // for every run whose knee was refused — a refused knee must never arrive at the page as 0 req/s.
+      knee_clean: num(row.knee_clean === '' ? null : row.knee_clean),
+      knee_crossed: num(row.knee_crossed === '' ? null : row.knee_crossed),
     });
   }
   return rows.reverse();

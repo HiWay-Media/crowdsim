@@ -8,7 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { runToShow, shouldClearResult } from '../../gui/ui/src/lib/runs.js';
+import { runToShow, shouldClearResult, kneeText, stepCurve } from '../../gui/ui/src/lib/runs.js';
 import { parseHash, formatHash, TAB_IDS } from '../../gui/ui/src/lib/hash.js';
 import { orderPair, deltaCell, valueCell, mayRenderNumbers } from '../../gui/ui/src/lib/compare.js';
 import { hostAllowed, allowlistVerdict } from '../../gui/ui/src/lib/allowlist.js';
@@ -159,4 +159,53 @@ test('a modified key press is the browser being asked to do something else', () 
   assert.equal(activatesOn({ key: 'Enter', metaKey: true }), false);
   assert.equal(activatesOn({ key: 'Enter', ctrlKey: true }), false);
   assert.equal(activatesOn({ key: ' ', shiftKey: true }), false);
+});
+
+// ── the knee, in the page (#51) ─────────────────────────────────────────────────────────────────────
+// The plot's dots are "requested peak" against "p95 over the whole ramp": two numbers that describe a rate
+// the system was never held at. With per-step data one run is a curve, so the page can draw the shape
+// instead of a single averaged dot — and has to keep the two apart, since they do not mean the same thing.
+
+test('the knee column states the band it measured, and says when nothing crossed', () => {
+  assert.equal(kneeText({ clean: { requested_rps: 90 }, crossed: { requested_rps: 120 } }).text, '90 → 120');
+  const notFound = kneeText({ clean: { requested_rps: 120 }, crossed: null });
+  assert.match(notFound.text, /≥\s*120|120\+/);
+  assert.match(notFound.title, /did not find|above/i);
+});
+
+test('a refused knee is a dash with the reason, never a number', () => {
+  const r = kneeText({ refused: true, reason: 'only one step ran to completion', fix: 'raise --steps' });
+  assert.equal(r.text, '—');
+  assert.match(r.title, /one step/);
+  assert.equal(r.tone, 'warn');
+});
+
+test('a run that never had per-step data is blank, and is not called refused', () => {
+  // Every run archived before #50. "Refused" would be a statement about a run that never had the data.
+  assert.equal(kneeText(null).text, '');
+  assert.equal(kneeText(undefined).text, '');
+  assert.equal(kneeText(null).tone, null);
+});
+
+test('the step curve is the run\'s own shape: one point per step, rate against p95', () => {
+  const pts = stepCurve([
+    { step: 's1', requested_rps: 60, p95: 200, partial: false },
+    { step: 's2', requested_rps: 90, p95: 400, partial: false },
+    { step: 'peak', requested_rps: 120, p95: 4200, partial: true },
+  ]);
+  assert.deepEqual(pts.map((p) => [p.rate, p.p95]), [[60, 200], [90, 400], [120, 4200]]);
+  assert.deepEqual(pts.map((p) => p.partial), [false, false, true]);
+});
+
+test('a step with no p95 is left out rather than drawn at zero', () => {
+  const pts = stepCurve([
+    { step: 's1', requested_rps: 60, p95: null, partial: false },
+    { step: 's2', requested_rps: 90, p95: 400, partial: false },
+  ]);
+  assert.deepEqual(pts.map((p) => p.rate), [90]);
+});
+
+test('no per-step data means no curve, not an empty line at the origin', () => {
+  assert.deepEqual(stepCurve(null), []);
+  assert.deepEqual(stepCurve([]), []);
 });
