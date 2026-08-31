@@ -4,6 +4,41 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.16.0] — 2026-08-31
+
+The number this tool hands over described a rate the system was never held at. A run climbs from `--start` to
+`--peak` and then holds, and the summary reported one p50/p95/p99 over all of it — a mixture, dominated by the
+cheap early steps. So the knee, the thing the tool is named after, could only be found by running four times
+and comparing, while the shape of the curve was already inside every single run and was averaged away before
+anybody saw it.
+
+### Added
+- **The ramp, step by step.** Every request is tagged with the step it happened in, and the summary carries a
+  `per_step` block — requested rate, achieved rate, p50/p95/p99, failed rate, share past `guillotine_ms`, and
+  the same per class — printed as a table under the per-class one. One run now shows where latency left the
+  SLO. New `k6/lib/steps.js`, with the boundaries built from the same `stages()` the scenarios are: computed
+  twice, they would disagree once, and a step table that does not match the ramp is wrong with authority.
+- **A climbing step reports the range it swept, not a single rate.** A k6 stage ramps linearly from the
+  previous target to its own, so labelling a step `20 req/s` when it went `15 → 20` is the same averaging one
+  level down. The table prints `15→20`, and `20 held` for the hold — the only part of a run where a rate was
+  actually sustained, and therefore the only one worth quoting.
+- **A step the run died inside is marked partial**, with the reason in the summary and under the table: the
+  brake fires while latency is climbing, so a fraction of a step is biased towards its worst part. Reported
+  because it is evidence, marked because it is not a result. A step that sent nothing is absent rather than a
+  row of zeros, which would read as a step that was fast, and requests still in flight when the last stage
+  ends carry no step tag at all — crediting them to the peak would move the slowest requests of the run into
+  the step people quote.
+- The per-step thresholds exist only to make k6 surface the tagged sub-metrics: every one of them is `>=0`
+  and none can abort, asserted in `tests/unit/brake.test.js`. Climbing a ramp is not a brake. A run with no
+  ramp context — a journey, an older caller — gets no per-step block and prints exactly what it printed
+  before, also asserted.
+
+### Fixed
+- **`achieved` per step, measured over the step's own window.** k6's `rate` field on a tagged sub-metric
+  divides the count by the *whole* test duration: the first real run of this feature reported 1.7 req/s for a
+  step that had delivered 7.5, which reads as a catastrophically slow generator and is an artefact of the
+  divisor. Found by running it against the e2e target rather than trusting the metric tree.
+
 ## [1.15.0] — 2026-08-20
 
 Milestone v1.7.0: four things the tool knew and did not hand over. It had measured the page weight, the cache

@@ -82,6 +82,23 @@ export function brakeThresholds(opts) {
     t['http_reqs{class:' + cls + '}'] = ['count>=0'];
     for (const label of cacheLabels) t['cache_hit_' + label + '{class:' + cls + '}'] = ['rate>=0'];
   }
+
+  // ── the ramp's steps (#50) ─────────────────────────────────────────────────────────────────────────
+  // k6 only puts a tagged sub-metric in the summary if some threshold mentions it, which is what the
+  // decorative `>=0` entries above are for. The per-step table needs the same, and needs it to be MORE
+  // careful: a step threshold that could fail would turn climbing the ramp into a brake, so every one of
+  // these is `>=0` and none of them carries abortOnFail — including in a warm-up, where they are the only
+  // thresholds at all.
+  for (const tag of (o.stepTags || [])) {
+    t['http_req_duration{step:' + tag + '}'] = ['p(95)>=0'];
+    t['http_req_failed{step:' + tag + '}'] = ['rate>=0'];
+    t['http_reqs{step:' + tag + '}'] = ['count>=0'];
+    t['cs_over_guillotine{step:' + tag + '}'] = ['rate>=0'];
+    for (const cls of names) {
+      t['http_req_duration{step:' + tag + ',class:' + cls + '}'] = ['p(95)>=0'];
+      t['http_req_failed{step:' + tag + ',class:' + cls + '}'] = ['rate>=0'];
+    }
+  }
   return t;
 }
 

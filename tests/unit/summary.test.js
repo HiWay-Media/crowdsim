@@ -207,3 +207,60 @@ test('a decorative >=0 threshold is never reported as the cause', () => {
   assert.equal(out.aborted_by, null);
   assert.match(renderSummaryText(out, CTX), /completed without crossing/);
 });
+
+// ── the ramp, step by step (#50) ────────────────────────────────────────────────────────────────────
+// The aggregate p95 belongs to no rate the system was held at. These assert that the per-step table reaches
+// the summary and the panel, and — the part that matters — that adding it changed no existing number.
+
+const RAMP_CTX = Object.assign({}, CTX, {
+  ramp: { steps: 3, startRps: 30, peakRps: 100, stepDur: '60s', holdDur: '120s' },
+  durationMs: 300000,
+});
+
+function withSteps(extra) {
+  return healthy(Object.assign({
+    'http_reqs{step:s1}': count(1800, 30),
+    'http_req_duration{step:s1}': trend({ med: 80, 'p(95)': 200, 'p(99)': 300, max: 400 }),
+    'http_req_failed{step:s1}': rate(0, 1800, 0),
+    'cs_over_guillotine{step:s1}': rate(0, 1800, 0),
+    'http_reqs{step:peak}': count(12000, 100),
+    'http_req_duration{step:peak}': trend({ med: 300, 'p(95)': 4200, 'p(99)': 9000, max: 12000 }),
+    'http_req_failed{step:peak}': rate(0.04, 480, 11520),
+    'cs_over_guillotine{step:peak}': rate(0.12, 1440, 10560),
+  }, extra || {}));
+}
+
+test('the summary carries the ramp step by step, and the panel prints it as a table', () => {
+  const out = buildSummary(withSteps(), RAMP_CTX);
+  assert.equal(out.per_step.length, 2, 'only the steps that sent anything');
+  assert.equal(out.per_step[0].step, 's1');
+  assert.equal(out.per_step[1].step, 'peak');
+  assert.equal(out.per_step[1].p95, 4200);
+  const txt = renderSummaryText(out, RAMP_CTX);
+  assert.match(txt, /per step/i);
+  assert.match(txt, /4200 ms|4200/, 'the peak step is not in the table');
+  // The requested rate has to be there: a table of latencies without the rates they belong to is the
+  // aggregate again, in more rows. And a climbing step has to show the range it swept, since it never held
+  // a single rate — only the hold did.
+  assert.match(txt, /\b100\b/);
+  assert.match(txt, /30→53/, 'the first step swept 30 → 53 and the table claims one rate');
+  assert.match(txt, /held/, 'nothing marks the hold as the only sustained rate');
+});
+
+test('a run with no ramp context reports no steps, and every other number is untouched', () => {
+  // Older callers, and the journey shape, may not supply a ramp. The summary must not sprout an empty table.
+  const plain = buildSummary(healthy(), CTX);
+  const stepped = buildSummary(withSteps(), RAMP_CTX);
+  assert.equal(plain.per_step, null);
+  for (const k of ['requests', 'failed_rate', 'dur', 'over_guillotine_rate', 'aborted', 'generator_ok']) {
+    assert.deepEqual(stepped[k], plain[k], `${k} changed when the per-step block was added`);
+  }
+  assert.doesNotMatch(renderSummaryText(plain, CTX), /per step/i);
+});
+
+test('a step the run died inside is printed as partial, not as that rate\'s result', () => {
+  const out = buildSummary(withSteps(), Object.assign({}, RAMP_CTX, { durationMs: 75000 }));
+  const last = out.per_step[out.per_step.length - 1];
+  assert.equal(last.partial, true);
+  assert.match(renderSummaryText(out, RAMP_CTX), /partial/i);
+});

@@ -9,8 +9,9 @@ in which a run must be read, and what every field means.
 1. generator_ok      false → STOP. Discard the run. Nothing below means anything.
 2. target_unreachable true  → connectivity, not capacity. Not a knee.
 3. aborted           true  → you found the knee. That is a success.
-4. per class: the share past guillotine_ms   ← your margin
-5. only then: latency, errors, cache
+4. per step: at which RATE did latency leave the SLO   ← the knee itself
+5. per class: the share past guillotine_ms             ← your margin
+6. only then: the overall latency, errors, cache
 ```
 
 ### 1. `generator_ok: false` → discard the run
@@ -59,7 +60,39 @@ enough to act on. `class` is `null` when an overall threshold fired, and the who
 archived before this existed — never a guess reconstructed from the profile, which would name a class that
 may not be the one that crossed.
 
-### 4. The share past `guillotine_ms`, per class
+### 4. The per-step table, not the aggregate p95
+
+A run climbs from `--start` to `--peak` in `--steps` steps and then holds. The `latency` line at the top of
+the panel is one p95 over **all** of it, so it describes a mixture of rates — mostly the cheap early ones —
+and belongs to no rate the system was ever held at. The table below it is the one that answers the question
+the tool is named after:
+
+```
+  ── per step (the ramp: where the knee is) ──
+  step        req/s asked  achieved      p50       p95       p99    >SLO   failed
+  ───────────────────────────────────────────────────────────────────────────────
+  s1                  2→3       2.3   439 ms    709 ms    798 ms   0.00%    0.00%
+  s2*                 3→5       3.0   660 ms    855 ms    856 ms   0.00%    0.00%
+  * partial: the run ended inside this step, so this row is a fraction of it — usually the worst
+    fraction, since the brake fires while latency is climbing. It is not a result for that rate.
+```
+
+Three things in that table are deliberate:
+
+- **`5→10` is not `10`.** A k6 stage ramps linearly from the previous target to its own, so a climbing step
+  *sweeps* a range of rates rather than holding one. A row labelled with a single number would be the same
+  averaging one level down.
+- **`20 held` is the hold**, and the only part of a run where the requested rate was actually sustained. If
+  you want one rate to quote, it is this one.
+- **`achieved` is measured over that step's own window.** k6's rate field on a tagged sub-metric divides by
+  the whole test duration — it reported 1.7 req/s for a step that delivered 7.5 — so the table computes it
+  from the step's requests and the step's seconds.
+
+A step that sent nothing is absent rather than shown as a row of zeros, which would read as a step that was
+fast. Requests still in flight when the last stage ends carry no step tag at all: crediting them to the peak
+would move the slowest requests of the run into the step people quote.
+
+### 5. The share past `guillotine_ms`, per class
 
 `guillotine_ms` is your reverse proxy's read timeout. Requests slower than it become 504s for real
 visitors, so the interesting column is not the average latency but the **percentage that crossed it**:
@@ -95,6 +128,7 @@ Averages hide the queue, and the queue is what produces the errors.
 | `aborted` | A real threshold failed — the brake stopped the run. (Thresholds ending in `>=0` are decoration used to surface per-class sub-metrics; they are excluded.) |
 | `generator_ok` | `dropped_iterations` ≤ 2% of `requests`. False invalidates everything else. |
 | `target_unreachable` | `failed_rate` > 0.9 and p95 null or < 50 ms. |
+| `per_step` | The ramp, step by step: `requested_rps` (and `from_rps`, the rate the step swept up from), `sustained`, `achieved_rps`, `requests`, `p50/p95/p99`, `failed_rate`, `over_guillotine_rate`, `partial`, and `per_class` for the classes that ran in it. `null` for a run whose caller supplied no ramp. |
 | `aborted_by` | Which threshold stopped it: `{ metric, class, threshold, value }`, or `null` — including on older runs, which did not record it. |
 | `warmup` | What the warm-up was (`"30s at 20 req/s"`), or `null`. The warm-up's own numbers are in `warmup-<run_id>.json` and are never mixed in here. |
 | `is_warmup` | `true` only inside `warmup-<run_id>.json`. That file is not a result: it has no brake and its latencies describe a cold system on purpose. |
@@ -106,7 +140,7 @@ Averages hide the queue, and the queue is what produces the errors.
 | `requests` | Total HTTP requests, all classes. Not page views. |
 | `rps_avg` | Achieved rate. Compare it with `peak_rps_user_target`: a large gap with `generator_ok: true` usually means the brake cut the run short. |
 | `failed_rate` | k6's `http_req_failed` — transport errors and non-2xx/3xx. |
-| `dur.p50` / `p95` / `p99` / `max` | Overall request duration, ms. `null` means no sample. |
+| `dur.p50` / `p95` / `p99` / `max` | Overall request duration, ms, **across the whole ramp** — a mixture of rates, so it is not the latency at your peak. Use `per_step` for that. `null` means no sample. |
 | `dropped_iterations` | Iterations k6 could not start. The input to `generator_ok`. |
 
 ### Errors and the timeout

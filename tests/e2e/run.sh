@@ -137,13 +137,34 @@ check(0.35 < share < 0.65, f"rsc_page got {share:.0%} of requests, expected ~50%
 check(d['cache'].get('proxy') == 1.0, f"proxy hit ratio {d['cache'].get('proxy')}, expected 1.0")
 check(d['cache'].get('cdn') is None, "a layer whose header never appeared must be null, not 0")
 
+# the ramp, step by step (#50). This is the only suite with a real ramp, so it is the only place the step
+# attribution can be checked against requests that actually happened rather than a metric tree by hand.
+steps = d.get('per_step')
+check(isinstance(steps, list) and len(steps) >= 2, f"per_step has {steps and len(steps)} rows for a 2-step ramp + hold")
+if isinstance(steps, list) and steps:
+    check(sum(r['requests'] for r in steps) <= d['requests'],
+          "the steps claim more requests than the run made")
+    # A generous share, not equality: requests in flight when the last stage ends carry no step tag, by
+    # design — crediting them to the peak would move the slowest requests of the run into the quoted step.
+    check(sum(r['requests'] for r in steps) > 0.8 * d['requests'],
+          f"only {sum(r['requests'] for r in steps)} of {d['requests']} requests were attributed to a step")
+    check([r for r in steps if r['is_hold']], "the hold is not its own step")
+    hold = [r for r in steps if r['is_hold']][0]
+    check(hold['sustained'] is True and hold['from_rps'] == hold['requested_rps'],
+          "the hold must be the one step at a single sustained rate")
+    check(all(not r['partial'] for r in steps), "a completed run reported a partial step")
+    # achieved must be over the STEP's window, not the run's: k6's own rate field divides by the whole test
+    # duration and would report ~1.7 req/s for a step that delivered 7.5.
+    check(hold['achieved_rps'] > 0.5 * hold['requested_rps'],
+          f"the hold achieved {hold['achieved_rps']} of {hold['requested_rps']} req/s asked")
+
 rows = [l for l in open(sys.argv[2]).read().split('\n') if l.strip()]
 check(len(rows) == 2, f"history.tsv has {len(rows)} lines, expected header + 1 run")
 check(d['run_id'] in rows[-1], "the history row does not reference this run")
 
 if fail:
     print('\n'.join('  ❌ ' + f for f in fail)); sys.exit(1)
-print('  ✅ summary, mix, cache classification and history all consistent')
+print('  ✅ summary, mix, cache classification, per-step ramp and history all consistent')
 PY
 
 # ─────────────────────────────── leg 1b: discover --verify ──────────────────────────────────────────
@@ -255,6 +276,22 @@ check(brake['p95'] is not None and brake['p95'] > slo['max_p95_ms'],
 check(d['over_guillotine_rate'] is not None, "over_guillotine_rate missing from the summary")
 check(d['requests'] > 0, "the aborted run recorded no requests at all")
 
+# The run that aborted is the one that proves the partial-step rule: it died inside a step, and that step's
+# numbers are a fraction of it — usually its worst part, since the brake fires while latency is climbing.
+# Reported, and marked, never quoted as that rate's result.
+steps = d.get('per_step') or []
+check(len(steps) >= 1, "an aborted run reported no steps at all")
+if steps:
+    check(steps[-1]['partial'] is True, "the step the run died inside is not marked partial")
+    check('partial' in (steps[-1].get('note') or ''), "the partial step carries no explanation")
+    check(all(not r['partial'] for r in steps[:-1]), "a step that completed was marked partial")
+    # And the point of the whole thing: the last clean step is a rate this system survived, and it is lower
+    # than the peak that was asked for.
+    clean = [r for r in steps if not r['partial']]
+    if clean:
+        check(clean[-1]['requested_rps'] <= d['peak_rps_user_target'],
+              "the last clean step claims a rate above the requested peak")
+
 rows = [l for l in open(sys.argv[3]).read().split('\n') if l.strip()]
 check(len(rows) == 3, f"history.tsv has {len(rows)} lines, expected header + 2 runs")
 check(d['run_id'] in rows[-1], "the aborted run has no history row")
@@ -263,7 +300,7 @@ check('True' in rows[-1], "the history row does not record the run as aborted")
 if fail:
     print('\n'.join('  ❌ ' + f for f in fail)); sys.exit(1)
 print(f"  ✅ aborted at p95 {round(brake['p95'])} ms against an SLO of {slo['max_p95_ms']} ms, "
-      "generator held, target reachable, history recorded")
+      f"inside step {steps[-1]['step'] if steps else '?'} (marked partial), generator held, history recorded")
 PY
 
 # ─────────────────────────────── leg 3: a target that never answers ─────────────────────────────────

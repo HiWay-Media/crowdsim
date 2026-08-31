@@ -36,6 +36,7 @@ export function cacheRate(metrics, name) {
  * that can never fail. Counting those as "the brake tripped" would mark every run as aborted.
  */
 import { abortedBy as abortedByLocal } from './brake.js';
+import { stepPlan, perStep } from './steps.js';
 
 export { abortedBy } from './brake.js';
 
@@ -130,6 +131,12 @@ export function buildSummary(metrics, ctx) {
     cache: cacheTotal,
     per_class: perClass,
     mix_target: mixTarget,
+    // The ramp, step by step. The aggregate above describes a mixture of rates — mostly the cheap early
+    // ones — so it is the table below, not `dur.p95`, that says at which rate this system left its SLO.
+    // null when the caller supplied no ramp (a journey run, an older caller): an empty table would read as
+    // "no step crossed anything".
+    per_step: ctx.ramp ? perStep(metrics, stepPlan(ctx.ramp),
+                                 { durationMs: ctx.durationMs, classNames: ctx.classNames }) : null,
   };
 
   out.generator_ok = generatorHeldRate(out.dropped_iterations, out.requests);
@@ -152,6 +159,38 @@ export function abortAttribution(by) {
   const where = by.class ? 'class ' + by.class : by.metric;
   const at = (by.value === null || by.value === undefined) ? '' : ', reached ' + Math.round(by.value);
   return '\n                stopped by ' + where + ' — ' + by.threshold + at;
+}
+
+/**
+ * The ramp as a table: requested rate against what came back at that rate. This is the knee — not `dur.p95`,
+ * which averages the cheap early steps into the expensive last one and reports a latency for a rate the
+ * system was never held at.
+ *
+ * Empty string when there is nothing to show, so a run without a ramp prints exactly what it printed before.
+ */
+export function renderStepTable(out) {
+  const rows = out.per_step;
+  if (!rows || !rows.length) return '';
+  let t = '\n  ── per step (the ramp: where the knee is) ──\n';
+  t += `  ${pad('step', 8)}${rp('req/s asked', 15)}${rp('achieved', 10)}${rp('p50', 9)}` +
+       `${rp('p95', 10)}${rp('p99', 10)}${rp('>SLO', 8)}${rp('failed', 9)}\n`;
+  t += '  ' + '─'.repeat(79) + '\n';
+  for (const r of rows) {
+    // A climbing step swept a range; only the hold sustained one rate. Printing "120" for a step that went
+    // 90 → 120 would hand back exactly the kind of number this table exists to replace.
+    const asked = r.sustained ? r.requested_rps + ' held'
+                              : (r.from_rps === r.requested_rps ? String(r.requested_rps)
+                                                                : r.from_rps + '→' + r.requested_rps);
+    t += `  ${pad(r.step + (r.partial ? '*' : ''), 8)}${rp(asked, 15)}` +
+         `${rp(r.achieved_rps === null ? 'n/a' : r.achieved_rps.toFixed(1), 10)}` +
+         `${rp(ms(r.p50), 9)}${rp(ms(r.p95), 10)}${rp(ms(r.p99), 10)}` +
+         `${rp(pct(r.over_guillotine_rate), 8)}${rp(pct(r.failed_rate), 9)}\n`;
+  }
+  if (rows.some((r) => r.partial)) {
+    t += '  * partial: the run ended inside this step, so this row is a fraction of it — usually the worst\n'
+       + '    fraction, since the brake fires while latency is climbing. It is not a result for that rate.\n';
+  }
+  return t;
 }
 
 export function renderSummaryText(out, ctx) {
@@ -194,5 +233,5 @@ export function renderSummaryText(out, ctx) {
   cache         ${cacheLine}
 
   ── per class ──
-${tbl}`;
+${tbl}${renderStepTable(out)}`;
 }

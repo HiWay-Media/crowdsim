@@ -34,6 +34,7 @@ import exec from 'k6/execution';
 import { Counter, Rate, Trend } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
 import { brakeThresholds } from './lib/brake.js';
+import { stepPlan, stepAt } from './lib/steps.js';
 import { usableClasses, shares, stages as mkStages, vus as mkVus, journeyPlan, rscQuery as mkRscQuery,
          classPath, DEFAULT_RSC_HASHES } from './lib/mix.js';
 import { compileLayers, layerHit, statusBuckets, overGuillotine } from './lib/classify.js';
@@ -171,6 +172,12 @@ const CLASS_NAMES = CLASS_DEFS.map((c) => c.name).concat(SHAPE === 'journey' ? [
 // declare its own max_p95_ms / max_failed_rate and gets its own aborting threshold — the run stops on the
 // FIRST class to cross its own. Sharper, never later: validate refuses a per-class limit that would delay
 // the brake past what the profile asked for.
+// The ramp's steps, from the same stages() the scenarios are built from (lib/steps.js). Every request is
+// tagged with the step it happened in, so the summary can report the rate at which this system left its SLO
+// instead of one p95 averaged over every rate the run passed through.
+const STEP_PLAN = stepPlan(RAMP);
+const STEP_TAGS = (STEP_PLAN || []).map((s) => s.tag);
+
 const thresholds = brakeThresholds({
   classDefs: CLASS_DEFS,
   slo: Object.assign({}, SLO, { brake_class: BRAKE_CLASS }),
@@ -180,6 +187,7 @@ const thresholds = brakeThresholds({
   cacheLabels: CACHE_LABELS,
   shape: SHAPE,
   priming: WARMUP,
+  stepTags: STEP_TAGS,
 });
 
 export const options = {
@@ -230,22 +238,45 @@ function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
 const COUNTERS = { cs_504: c504, cs_502: c502, cs_404: c404, cs_5xx: c5xx };
 
-function record(res, cls) {
-  ttfb.add(res.timings.waiting, { class: cls });
-  overSlo.add(overGuillotine(res.timings.duration, GUILLOTINE), { class: cls });
-  for (const name of statusBuckets(res.status)) COUNTERS[name].add(1, { class: cls });
+function record(res, cls, step) {
+  // The step tag is the one the REQUEST carried, passed in rather than recomputed: at a step boundary the
+  // clock has moved on by the time the response is back, and a request must not be counted in one step by
+  // http_req_duration and in the next by cs_over_guillotine.
+  const t = step ? { class: cls, step: step } : { class: cls };
+  ttfb.add(res.timings.waiting, t);
+  overSlo.add(overGuillotine(res.timings.duration, GUILLOTINE), t);
+  for (const name of statusBuckets(res.status)) COUNTERS[name].add(1, t);
 
   for (const l of CACHE_LAYERS) {
     // null = the layer's header was absent: NOT a miss. Feeding it as 0 would report "0% hit ratio"
     // for a layer that was never in the path — see lib/classify.js.
     const hit = layerHit(l, res.headers);
-    if (hit !== null) l.metric.add(hit, { class: cls });
+    if (hit !== null) l.metric.add(hit, t);
   }
 }
 
+/**
+ * The step this request belongs to, by elapsed run time — the one thing that cannot be known at build time.
+ * Requests still in flight after the last stage get no step tag: crediting them to the peak would move the
+ * slowest requests of the run into the step people quote.
+ */
+function stepTag() {
+  if (!STEP_PLAN) return undefined;
+  const s = stepAt(exec.instance.currentTestRunDuration, STEP_PLAN);
+  return s ? s.tag : undefined;
+}
+
+function tagsFor(cls, name) {
+  const t = { class: cls, name: name };
+  const st = stepTag();
+  if (st) t.step = st;
+  return t;
+}
+
 function get(url, headers, cls, name) {
-  const res = http.get(BASE_URL + url, { headers, tags: { class: cls, name: name }, timeout: TIMEOUT });
-  record(res, cls);
+  const tags = tagsFor(cls, name);
+  const res = http.get(BASE_URL + url, { headers, tags: tags, timeout: TIMEOUT });
+  record(res, cls, tags.step);
   return res;
 }
 
@@ -290,19 +321,19 @@ function fanout(page, prefetchOnly) {
   const reqs = [];
   for (const r of (page.rsc || []).slice(0, prefetchOnly ? 4 : 8)) {
     reqs.push(['GET', BASE_URL + rscQuery(r, reqs.length),
-               null, { headers: rscHeaders(r), tags: { class: 'rsc_page', name: 'prefetch' },
+               null, { headers: rscHeaders(r), tags: tagsFor('rsc_page', 'prefetch'),
                        timeout: TIMEOUT }]);
   }
   if (!prefetchOnly) {
     for (const s of (page.static || []).slice(0, 6)) {
       reqs.push(['GET', BASE_URL + s,
-                 null, { headers: baseHeaders(), tags: { class: 'static', name: 'static' },
+                 null, { headers: baseHeaders(), tags: tagsFor('static', 'static'),
                          timeout: TIMEOUT }]);
     }
   }
   if (!reqs.length) return;
   const rs = http.batch(reqs);                     // batch = concurrent, like a browser
-  for (let i = 0; i < rs.length; i++) record(rs[i], reqs[i][3].tags.class);
+  for (let i = 0; i < rs.length; i++) record(rs[i], reqs[i][3].tags.class, reqs[i][3].tags.step);
 }
 
 // ─────────────────────────────── summary ─────────────────────────────────────────────────────────────
@@ -324,6 +355,10 @@ export function handleSummary(data) {
     classNames: CLASS_NAMES,
     cacheLabels: CACHE_LABELS,
     shares: SHARE,
+    ramp: RAMP,
+    // How long the run actually lasted: a step whose window the run never reached the end of is a fraction
+    // of that step, not a measurement of its rate.
+    durationMs: (data.state && data.state.testRunDurationMs) || 0,
   };
   const out = buildSummary(data.metrics || {}, ctx);
   const res = { stdout: renderSummaryText(out, ctx) };

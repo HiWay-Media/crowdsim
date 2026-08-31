@@ -139,3 +139,44 @@ test('a warm-up has no brake: it is priming a cache, not looking for a knee', ()
   assert.ok(t['http_req_duration{class:html}'].includes('p(95)>=0'));
   assert.ok(t['cache_hit_proxy{class:html}'].includes('rate>=0'));
 });
+
+// ── the per-step sub-metrics have to be asked for ───────────────────────────────────────────────────
+// k6 only puts a tagged sub-metric in the summary if a threshold mentions it. That is why the per-class
+// `p(95)>=0` entries exist, and why the per-step table needs the same trick. The danger is obvious: a
+// threshold that can fail would turn the ramp itself into a brake.
+
+test('per-step sub-metrics are surfaced by thresholds that cannot fail or abort', () => {
+  const t = brakeThresholds({
+    classDefs: [{ name: 'html' }, { name: 'rsc_page' }],
+    slo: { max_p95_ms: 2500, max_failed_rate: 0.05 },
+    maxP95: 2500, maxFailed: 0.05, abortDelay: '30s', cacheLabels: [], shape: 'mix',
+    stepTags: ['s1', 's2', 'peak'],
+  });
+  for (const tag of ['s1', 's2', 'peak']) {
+    for (const m of [`http_req_duration{step:${tag}}`, `http_req_failed{step:${tag}}`,
+                     `http_reqs{step:${tag}}`, `cs_over_guillotine{step:${tag}}`]) {
+      assert.ok(t[m], `${m} has no threshold, so it will not appear in the summary`);
+      for (const entry of t[m]) {
+        const th = typeof entry === 'string' ? entry : entry.threshold;
+        assert.match(th, />=0/, `${m}: ${th} can fail, and a ramp step is not a brake`);
+        if (typeof entry !== 'string') {
+          assert.equal(entry.abortOnFail, undefined, `${m} would abort the run`);
+        }
+      }
+    }
+  }
+  // and per class within a step, for the classes the profile declares
+  assert.ok(t['http_req_duration{step:s1,class:html}']);
+  assert.ok(t['http_req_failed{step:s1,class:html}']);
+});
+
+test('no step tags means no step thresholds: the run is unchanged', () => {
+  const base = {
+    classDefs: [{ name: 'html' }], slo: {}, maxP95: 2500, maxFailed: 0.05,
+    abortDelay: '30s', cacheLabels: [], shape: 'mix',
+  };
+  const without = brakeThresholds(base);
+  const withEmpty = brakeThresholds(Object.assign({}, base, { stepTags: [] }));
+  assert.deepEqual(withEmpty, without);
+  assert.equal(Object.keys(without).some((k) => k.includes('step:')), false);
+});

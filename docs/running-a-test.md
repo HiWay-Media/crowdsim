@@ -148,6 +148,22 @@ and has [no brake of its own](reading-results.md#a-warm-up-is-not-part-of-the-re
 The run climbs in `steps` linear steps from `--start` to `--peak`, then holds. It aborts the moment the
 brake trips — holding a system in collapse hurts real users and adds no information.
 
+**The steps are the measurement, not the run.** Every request is tagged with the step it happened in, so one
+run shows where latency left the SLO instead of one p95 averaged over every rate it passed through:
+
+```
+  ── per step (the ramp: where the knee is) ──
+  step        req/s asked  achieved      p50       p95       p99    >SLO   failed
+  ───────────────────────────────────────────────────────────────────────────────
+  s1                  2→3       2.3   439 ms    709 ms    798 ms   0.00%    0.00%
+  s2*                 3→5       3.0   660 ms    855 ms    856 ms   0.00%    0.00%
+```
+
+That is a knee between 3 and 5 req/s, from a single run. Read
+[the per-step table](reading-results.md#4-the-per-step-table-not-the-aggregate-p95) before quoting anything:
+a climbing step sweeps a range of rates rather than holding one, and `--hold` is the only part of the run
+where a rate was actually sustained. So the ramp is what finds the knee, and the hold is what you quote.
+
 Reaching for the knee means going past the safe ceiling, deliberately:
 
 ```bash
