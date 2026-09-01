@@ -93,8 +93,11 @@ in questo repository.
 - **Mai far girare il container su un laptop macOS/Windows** verso un target remoto: il layer di rete di
   Docker satura prima del target (misurato). k6 nativo in locale, container su host Linux vicino al
   target (e a questo che serve il job Nomad).
-- `usage()` fa `sed -n '1,60p' "$0" | grep '^#'`: l'header di commento **e** l'help. Spostarlo o
-  spingerlo oltre riga 60 rompe `--help` silenziosamente (c'e un test bats che lo verifica).
+- `usage()` estrae l'header di commento **per struttura** (dalla riga 2 alla prima riga non commentata):
+  l'header **e** l'help e puo crescere quanto serve. Prima leggeva `sed -n '1,60p'` e sbagliava in due modi
+  silenziosi: stampava lo shebang senza il `#` come prima riga di `--help`, e troncava l'help appena
+  l'header passava riga 60. Entrambi asseriti in `tests/cli/cli.bats`, che verifica anche che ogni
+  subcomando dispatchato compaia nell'header.
 - Lo script gira con `set -eo pipefail` (**senza `-u`**, di proposito: molte variabili sono opzionali).
   Non aggiungere `-u` senza inizializzare tutto.
 - Il freno fa uscire k6 non-zero: la chiamata e dentro `set +e` + `PIPESTATUS[0]` cosi il wrapper scrive
@@ -153,9 +156,11 @@ in questo repository.
   reading-results, profile, cli, gui, architecture, development
 - Release: `scripts/new-release.sh prepare|tag|notes`; workflow `release.yml` + `image.yml`
 - Test: `make test`, `make test-e2e`, `make image-smoke`; perimetro in `docs/development.md`
+- Doc verificata da sé: `make check-docs` = `scripts/check-doc-versions.sh` + `check-doc-commands.sh` + `check-doc-output.sh --self-test` (l'ultimo asserisce che l'**output citato** nei blocchi di `docs/` esista ancora nei sorgenti; un blocco non verificabile va marcato `<!-- illustrative: … -->`, non lasciato passare in silenzio)
 - GUI: `gui/server/lib/{args,validate,profiles,runner,history,app}.js` + `gui/ui/src/`; avvio con
   `crowdsim serve` (build UI: `npm run gui:build`)
 - Anatomia del profilo: `profiles/example.json` (commentato inline con chiavi `_comment`)
+- Mix misurato: `crowdsim weights <access.log>` (regole in `lib/weights.mjs`, test in `tests/unit/weights.test.js`) · la chiave di profilo `log_match` dice come una classe si riconosce in un log e **non** influenza una run · `crowdsim init --access-log` misura i pesi invece di scriverli come TODO. Il log non viene mai scaricato dal tool né scritto in `out/`
 - A/B cache: `cache-ab/README.md` - Esecuzione remota: `ci/nomad/crowdsim.nomad.hcl` (batch parametrizzato,
   profilo scaricato al dispatch da repo privato)
 - Output di una run: `out/summary-<run_id>.json`, `out/load-<run_id>.log`, `out/history.tsv` (`out/` e

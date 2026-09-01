@@ -29,6 +29,7 @@
   },
 
   "_classes_comment": "The MIX. Weights are the share of user requests/s you measured on your own edge access log during the spike you want to replay — not a guess, and not a uniform split. Only count requests the client makes: server-side sub-requests the app issues by itself are a CONSEQUENCE, and generating them yourself would double-count. `--peak` is the total; each class gets weight/total × peak.",
+  "_log_match_comment": "`log_match` is how `crowdsim weights` recognises a class in that access log: a list of path globs, anchored at the start of the path, where `*` spans slashes. It has NO effect on a run — a profile without it generates identical traffic, it just cannot have its mix measured. Without a rule a class is matched by its `path_prefix` and by membership of its own pool, plus the hard filter that an `rsc` class only ever matches a request carrying the navigation parameter. Nothing is inferred from a URL's shape: whatever no class claims is reported as an unclassified share, which is the number that tells you the mix is incomplete.",
   "classes": [
     {
       "name": "rsc_page",
@@ -63,7 +64,8 @@
       "weight": 9.8,
       "kind": "plain",
       "pool": "static",
-      "_comment": "assets that are served BY THE APP rather than by the CDN. Regenerate this pool after every deploy: it contains build hashes."
+      "log_match": ["/_next/static/*", "/assets/*"],
+      "_comment": "assets that are served BY THE APP rather than by the CDN. Regenerate this pool after every deploy: it contains build hashes. The pool below is empty, so this class is dropped from a run — but log_match still lets `crowdsim weights` count these requests instead of reporting them as unclassified."
     },
     {
       "name": "proxy_only",

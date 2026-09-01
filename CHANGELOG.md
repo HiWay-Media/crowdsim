@@ -4,6 +4,96 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.18.0] — 2026-09-01
+
+Milestone v1.9.0, closed. Every page of this documentation says the class weights must come from your own
+edge access log, and `init` wrote them as a `TODO` for exactly that reason — while nothing in the tool would
+read a log, so the single most important input was left to somebody counting lines in a terminal. The GUI,
+meanwhile, could not express the two flags that keep a cold start out of the numbers, and could not hand over
+the one document a finished run is read from. And the claim these docs make about themselves — that their
+commands were run before being written down — had a hole in it: nothing looks at what those commands *print*,
+which is the part a reader compares against their own terminal.
+
+### Added
+- **`crowdsim weights <access.log>` counts the mix instead of asking you to.** A file, or stdin
+  (`ssh edge 'zcat access.log.*.gz' | crowdsim weights - --profile p.json`) — the tool never fetches a log,
+  because that would mean privileged access to a production edge. It prints the count, the share and the
+  weight to paste per class, what it could not classify, and the window the log covers, and it **writes
+  nothing**: not the profile, not an artefact in `out/`. An access log holds URLs, addresses and user agents,
+  and `out/` is a directory people copy from. Rules in `lib/weights.mjs`, tested in
+  `tests/unit/weights.test.js`; the driver's side in `tests/cli/weights.bats`.
+- **A class is recognised by what the profile declares, never by the shape of a URL.** In order: `kind` as a
+  hard filter (an `rsc` class only ever matches a request carrying the navigation parameter, and a `plain`
+  class only ever matches one without it — the same path is two classes, which is why they are two classes),
+  then the new `log_match` globs, then `path_prefix`, then the class's own pool. `/favicon.ico` is obviously
+  an asset and the command still refuses to file it under `static`: a guessed class is a made-up mix, which
+  is the thing this command exists to replace. What no class claims is reported as an **unclassified share of
+  the counted requests** — never folded into a class, never dropped — with the paths and the patterns that
+  would catch them, because a mix computed from 40% of a log is a mix of something else.
+- **`log_match`, a profile key with no effect on a run.** A list of path globs saying how a class looks in a
+  log. A profile without it generates identical traffic and simply cannot have its mix measured. `validate`
+  refuses a pattern that does not start with `/`: such a pattern can never match, and an unclassified share is
+  a slow way to find that out.
+- **`crowdsim init --access-log <file>` drafts the profile and measures its weights in one step**, through
+  those same rules. The measurement travels into the file, not only to the terminal: `_classes_comment`
+  records how many requests were classified, what share was not, and the window they came from; each measured
+  class says so in its own comment. A class the log never showed keeps its placeholder weight and gains a
+  `TODO: NOT ONCE in the log that was measured` — a class is not deleted because one window did not contain
+  it, which is how a mix loses its long tail. Nothing from the log reaches `out/`: the draft receives counts,
+  shares and a window, never a URL. `allow_hosts` and `safe_peak_rps` stay empty, as always.
+- **A refusal rather than a confident mix.** More than half the lines unparsed is exit 2, quoting the lines
+  as they were read and pointing at `--format` (`request`, `path`, `method`, `status`, `time`, `-`); a field
+  that is not one of those is exit 2 rather than a column read by guesswork. A log that parses but matches
+  nothing at all is exit 4, naming the paths. Non-GET and non-2xx/3xx are excluded and said so: this tool
+  sends GETs only, so a write in the mix is a weight for load that will never be generated, and a 404 in the
+  mix is a weight for requesting URLs that do not exist.
+- **The GUI can warm up.** `--warmup` and `--warmup-peak` existed on the command line and not in
+  `gui/server/lib/args.js`, so every run launched from the page folded its own cold start into the numbers —
+  and the page is where the people least likely to know that are launching runs. The form offers both, the
+  command preview shows them (the preview is the contract), and a blank rate is the ramp's own starting rate,
+  which is what the driver does with it. **A warm-up is load**: the safe ceiling applies to it, the page says
+  which of the two rates is over it before you click, and the refusal is still the driver's exit 3. New
+  `gui/ui/src/lib/warmup.js`, tested in `tests/ui/warmup.test.js`.
+- **The GUI hands over the report.** *Download report (.md)* on a result spawns `crowdsim report`, exactly
+  like every other action, and serves the CLI's own file. The caveats are the point of that document, and a
+  second renderer in the server would be a second opinion about what a run means. `GET
+  /api/history/<run-id>/report`.
+- **One run has an address.** `#history=<run-id>` opens that run's result, the same way
+  `#history=<a>,<b>` opens a comparison — so a result can be handed over, report button included, instead of
+  telling somebody which row to click.
+- **`scripts/check-doc-output.sh`: the output quoted in the documentation is output the tool still
+  produces.** It takes the distinctive wording out of every quoted block — validator refusals, panel lines,
+  report sections, GUI banners — and asserts it still exists in the source it comes from. Wording only:
+  numbers came from a real run on somebody's machine and will never match again, so a phrase is cut at any
+  digit, path, URL, percentage or placeholder, and at column boundaries. A block that cannot be checked
+  mechanically is **marked** `<!-- illustrative: why -->` and counted, not skipped in silence. `--self-test`
+  plants a refusal the tool has never printed and asserts the checker catches it, naming file and line: a
+  checker nobody has watched fail is a checker nobody knows the shape of. In CI, and in `make check-docs`
+  alongside the other two.
+
+### Changed
+- **`crowdsim --help` no longer opens with `!/usr/bin/env bash`, and no longer stops at line 60.** The
+  comment header is still the help text — it cannot drift from the script — but it is now extracted by
+  structure, from line 2 to the first line that is not a comment. The old `sed -n '1,60p' | grep '^#'` had
+  two silent failure modes and both were live: the shebang was printed as the first line of the help, and the
+  header was one line from the ceiling that would have truncated it. `tests/cli/cli.bats` asserts both ends,
+  and that every dispatched subcommand is named in the header.
+- `history.tsv`, the exit-code contract and every existing flag are untouched. A profile with no `log_match`,
+  a run with no warm-up and a GUI request without either field produce byte-identical commands to 1.17.0,
+  asserted in `tests/gui/args.test.js`.
+
+### Fixed
+- **`init` drafted a pool reference that did not resolve.** The `pages` pool was written as
+  `@<basename>`, which is read relative to the *profile*, so `crowdsim init --out ~/p.json` produced a
+  profile whose pool file was not where the reference pointed. It is now a path relative to the draft's own
+  directory. Found while measuring a mix against a freshly drafted profile: 80% of the log came back
+  unclassified because the pool could not be read.
+- **`init` taught the wrong key for the navigation parameter.** It drafted `rsc.query`, and the generator
+  reads `rsc.param` (`k6/live-event.js`) — harmless while the value was the default `_rsc`, and silently
+  wrong for any site that names it something else: every navigation request in the run would be a URL that
+  site never serves. `init` now writes `param`, and `validate` warns when a profile carries `rsc.query`,
+  naming the value that would be lost.
+
 ## [1.17.0] — 2026-08-31
 
 The tool reported "completed" or "aborted" and left everybody to turn that into a capacity figure by hand,

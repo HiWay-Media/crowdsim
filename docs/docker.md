@@ -60,8 +60,8 @@ queue needs time to build.
 ### Pull a released tag
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.17.0     # exact version — use this
-docker pull ghcr.io/hiway-media/crowdsim:1.17       # latest patch of 1.2
+docker pull ghcr.io/hiway-media/crowdsim:1.18.0     # exact version — use this
+docker pull ghcr.io/hiway-media/crowdsim:1.18       # latest patch of 1.2
 docker pull ghcr.io/hiway-media/crowdsim:latest    # last release
 ```
 
@@ -134,7 +134,7 @@ docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" \
   -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.17.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.18.0 crowdsim serve
 ```
 
 Or `make image-run`, which does exactly this against `crowdsim:dev` and prints a freshly generated token.
@@ -181,7 +181,7 @@ docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" \
   -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.17.0 \
+  ghcr.io/hiway-media/crowdsim:1.18.0 \
   crowdsim load --profile /profile.json --target edge --peak 60
 ```
 
@@ -209,14 +209,34 @@ by that same container, so the same caveat applies to the runs, not to the page.
 ```bash
 docker run --rm --network host -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.17.0 crowdsim probe --profile /profile.json
+  ghcr.io/hiway-media/crowdsim:1.18.0 crowdsim probe --profile /profile.json
 
-# same shape for: discover --limit 400 · load --dry-run · history
+# same shape for: discover --limit 400 · load --dry-run · history · report <run-id> · init
 ```
 
 Always start with `probe`: it tells you what answered, what each layer said about caching, and how heavy
 one page is. Then `discover` if you need a URL pool. Then `load --dry-run` to see the exact k6 invocation
 without sending anything.
+
+**`weights`, on a log the container cannot reach by itself.** The class mix is counted from an access log you
+hand over — the tool never fetches one — so inside a container the log arrives as a read-only mount or on
+stdin. `-i` is what makes the pipe work; without it docker gives the container a closed stdin and the
+command reads nothing — `❌ the log is empty: no lines to classify.`, exit 2 — no matter what you piped:
+
+```bash
+# a log on this host
+docker run --rm -v "$PWD/my-profile.json:/profile.json:ro" -v /var/log/nginx:/logs:ro \
+  ghcr.io/hiway-media/crowdsim:1.18.0 crowdsim weights /logs/access.log --profile /profile.json
+
+# a log that never lands on disk here
+ssh edge 'zcat /var/log/nginx/access.log.*.gz' \
+  | docker run --rm -i -v "$PWD/my-profile.json:/profile.json:ro" \
+      ghcr.io/hiway-media/crowdsim:1.18.0 crowdsim weights - --profile /profile.json
+```
+
+No `/out` mount is needed and none is used: this subcommand writes nothing, which is deliberate — an access
+log holds URLs, addresses and user agents, and `out/` is a directory people copy from. It needs no allowlist
+either, because it generates no traffic.
 
 ---
 

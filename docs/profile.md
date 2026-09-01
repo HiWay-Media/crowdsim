@@ -95,6 +95,7 @@ gets `weight / total × peak`.
 | `rsc_state_path` | no | The path used to build `Next-Router-State-Tree`, when it differs from the requested one (search). |
 | `max_p95_ms` | no | This class's own p95 limit, sharper than the profile's, which aborts the run for this class alone — see [A class may set its own limit](#a-class-may-set-its-own-limit). |
 | `max_failed_rate` | no | This class's own failed-rate limit, same rule. |
+| `log_match` | no | Path globs identifying this class in an access log, for [`crowdsim weights`](cli.md#weights). No effect on a run — see [`log_match`](#log_match). |
 
 Rules the tool enforces, and why:
 
@@ -107,6 +108,29 @@ Rules the tool enforces, and why:
   rendered 404 counted as a static asset.
 - **Keep search separate.** It is frequently the most expensive class per request; averaged into the
   others it hides the thing that actually falls over.
+
+### `log_match`
+
+How `crowdsim weights` recognises this class in an access log. A list of path globs, anchored at the start of
+the path, where `*` spans slashes:
+
+```json
+{ "name": "static", "weight": 9.8, "pool": "static",
+  "log_match": ["/_next/static/*", "/assets/*"] }
+```
+
+It has **no effect on a run**: a profile without it generates identical traffic, it just cannot have its mix
+measured. Which is the point of declaring it — the weights are the one input this tool insists must come from
+a measurement, and [`weights`](cli.md#weights) is what turns a log into them.
+
+With no `log_match`, a class is still recognised by its `path_prefix` and by membership of its own pool, plus
+the hard filter that an `rsc` class only ever matches a request carrying the navigation parameter. That is
+enough for classes drawing on a `discover` pool of real page paths, and not enough for a class whose pool is
+a list of build-hashed asset URLs — which is exactly where a rule is worth declaring.
+
+Nothing is inferred from the shape of a URL: whatever no class claims is reported as an **unclassified
+share**, and that number is what tells you the mix is incomplete. `validate` refuses a pattern that does not
+start with `/`, because such a pattern can never match and an unclassified share is a slow way to find out.
 
 ---
 

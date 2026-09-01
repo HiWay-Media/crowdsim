@@ -42,11 +42,14 @@ PY
   [ "$status" -eq 0 ]
   [ -f "$OUTFILE" ]
   python3 - "$OUTFILE" <<'PY'
-import json, sys
+import json, os, sys
 d = json.load(open(sys.argv[1]))
 # the target and the page weight came from the probe; the pool from discover
 assert d['targets']['list']['edge']['base_url'] == 'https://www.example.test', d['targets']
-assert d['pools']['pages'].startswith('@pool-'), d['pools']
+# the pool reference is resolved from the DRAFT's own directory, so it has to point at the real file
+ref = d['pools']['pages']
+assert ref.startswith('@'), d['pools']
+assert os.path.exists(os.path.join(os.path.dirname(os.path.abspath(sys.argv[1])), ref[1:])), ref
 # provenance: a profile whose parts came from nowhere is a profile nobody can defend
 blob = json.dumps(d)
 assert '20260805T120000Z' in blob, 'the probe run is not named anywhere'

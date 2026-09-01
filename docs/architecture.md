@@ -4,6 +4,9 @@ Why crowdsim is built out of these pieces, and where each decision lives.
 
 ## The shape of it
 
+<!-- illustrative: a hand-drawn map of the pieces, not output any command prints. scripts/check-doc-output.sh
+     skips it for that reason: there is nothing here to compare against a terminal. -->
+
 ```
         profile.json ─────────────────────────────────┐
         (yours, private: hosts, pools, mix, SLO)      │

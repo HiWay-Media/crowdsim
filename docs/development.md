@@ -72,6 +72,49 @@ depended on memory; `scripts/new-release.sh prepare` now moves them, and CI fail
 `scripts/check-doc-commands.sh` asserts that every `--flag` the documentation hands to `crowdsim` is one the
 driver parses, and runs the commands that need nothing at all. What needs a target, a profile or docker is
 out of scope and says so — pretending to check it would be a green tick with nothing behind it.
+And `scripts/check-doc-output.sh` closes the gap those two leave: the commands check cannot see what a
+command *prints*, and the docs are full of it — validator refusals, panel lines, report sections, GUI banners.
+Those blocks are what a reader compares against their own terminal, so a stale one is worse than a missing
+one. `make check-docs` runs all three.
+
+<!-- illustrative: this is check-doc-output.sh's own output, and that script excludes itself from the
+     sources it searches — otherwise --self-test would find its own planted sentence and pass. So it cannot
+     assert this block, and says so here rather than appearing to. -->
+
+```
+▶ self-test: a fabricated refusal must be caught
+        docs/cli.md:694
+✅ the checker catches a quote the tool does not produce, and names the file and line
+
+▶ and the real documentation:
+  ⚑ docs/architecture.md:10 marked illustrative — not asserted
+  ⚑ docs/development.md:84 marked illustrative — not asserted
+✅ 57 quoted phrases in 18 output blocks are still produced by the tool (2 marked illustrative, 3 with no assertable wording)
+```
+
+How it decides, and what it refuses to claim:
+
+- **A block is tool output if it contains the tool's own markers** (`✅ ❌ ⚠️ ▶ ╔ ⛔`) — not by its language
+  tag. A shell block has none of them, and neither has a JSON example.
+- **Wording is asserted, never numbers.** Every number in a quoted block came from a real run on somebody's
+  machine and will never match again. A phrase is cut at any token carrying a digit, a path, a URL, a
+  percentage or a placeholder, so `p95 240 ms` is never asserted and *past the read timeout* is. Two or more
+  spaces is a column boundary, not a sentence: the validator prints the field name and the message from two
+  different places, and a phrase spanning that gap exists only on screen.
+- **Phrases, not sentences, and a window rather than the whole thing.** A rendered line is often an
+  interpolated value between two string fragments, so the full sentence may exist nowhere while every part of
+  it does. The assertion is that *some* run of four or more consecutive words from the line is still in the
+  source. Long enough to fail when a message is rewritten, short enough to survive interpolation — which is
+  what `--self-test` keeps honest: it plants a refusal the tool has never printed and asserts the checker
+  catches it, naming the file and the line.
+- **A block that cannot be checked mechanically is marked, not skipped in silence.** Put
+  `<!-- illustrative: why -->` immediately before the fence — the ASCII map in
+  [architecture.md](architecture.md) is one, because nothing prints it. Marked blocks are counted and listed
+  on every run, and so are blocks whose prose was too short or too numeric to assert, so a silent zero is
+  visible rather than reassuring.
+
+This is the check the v1.7.0 documentation needed and did not have: a quoted `validate` refusal turned out
+never to have existed in that wording, and it was caught by running the command one more time than usual.
 
 **The e2e suite runs twice in CI: once against the newest k6, once against the version the image pins.** The
 generator that ships had never been the generator the evidence came from — 0.52.0 against 2.x, two majors
@@ -131,8 +174,11 @@ infrastructure and is never a target.
 
 `bin/crowdsim` is one bash script. Things that will bite:
 
-- **The comment header is the `--help`.** `usage()` is `sed -n '1,60p' | grep '^#'`; push a line past 60 and
-  help silently loses it. A CLI test guards the boundary.
+- **The comment header is the `--help`.** `usage()` extracts it by structure — from line 2 to the first line
+  that is not a comment — so it can grow, and the shebang stays out of it. It used to read `sed -n '1,60p'`
+  and fail two ways in silence: `crowdsim --help` opened with `!/usr/bin/env bash`, and the help lost every
+  line pushed past sixty. A CLI test asserts both ends, and that every dispatched subcommand is named in the
+  header: a subcommand missing from `--help` does not exist as far as a reader is concerned.
 - `set -eo pipefail`, deliberately **without** `-u`: many variables are optional. Do not add `-u` without
   initialising everything.
 - The k6 call sits inside `set +e` with `PIPESTATUS[0]`, so a tripped brake still writes the summary and the

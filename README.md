@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.17.0        # or :1.17, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.18.0        # or :1.18, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.17.0 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.18.0 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.17.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.18.0 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -134,6 +134,7 @@ crowdsim validate p.json                                  # every rule at once, 
 crowdsim record  session.har                              # a browser HAR export → a journey file
 crowdsim history                                          # one line per run, with the knee each measured
 crowdsim compare <run-a> <run-b>                          # the delta, or a refusal if they differ
+crowdsim weights access.log --profile p.json               # the class mix, counted on your own edge log
 crowdsim init                                             # a first profile, drafted from what was measured
 crowdsim report  <run-id>                                 # the run as markdown, caveats attached
 crowdsim serve                                            # the same thing with a GUI, on loopback
@@ -150,13 +151,15 @@ crowdsim report <run-id> --out ticket.md                 # what to paste, with w
 First time, with no profile of your own yet: `probe` and `discover` once against
 [`profiles/example.json`](profiles/example.json) with your `base_url` and allowlist in it, then
 `crowdsim init` drafts the real profile from what those two measured — leaving the allowlist and the safe
-ceiling blank, because no tool gets to decide those for you.
+ceiling blank, because no tool gets to decide those for you. Add `--access-log <file>` and the class
+weights are counted from your own traffic instead of drafted as a `TODO`; `crowdsim weights` does the same
+for a profile that already exists. The log is handed over, never fetched, and nothing from it is written.
 
 ## The GUI
 
 `crowdsim serve` puts a page in front of the same CLI: pick a profile and a target, see the mix the peak
-implies, read the exact command before agreeing to it, launch, watch the log stream, read the result, compare
-it with previous runs. The step-by-step guide, with screenshots, is **[docs/gui.md](docs/gui.md)**.
+implies, read the exact command before agreeing to it, launch (with an optional warm-up whose numbers are
+thrown away), watch the log stream, read the result, hand it over as a report, compare it with previous runs. The step-by-step guide, with screenshots, is **[docs/gui.md](docs/gui.md)**.
 
 ```bash
 npm install && npm run gui:build      # once
@@ -197,16 +200,18 @@ launched from the page are the same kind of object, and appear in the same histo
 ## Tests
 
 ```bash
-make test         # unit + GUI + CLI — generates no load whatsoever
+make test         # unit + front end + GUI + CLI — generates no load whatsoever
 make test-k8s     # ci/kubernetes: safety invariants on the manifests (needs kubectl, no cluster)
 make test-e2e     # a real 12 req/s run against an nginx container on loopback (needs docker + k6)
 make image-smoke  # builds the image, then asserts it is still the tool, gates intact (docker)
+make check-docs   # the three claims the docs make about themselves: versions, commands, quoted output
 ```
 
 | Suite | What it covers |
 |---|---|
 | `tests/unit/` (`node --test`) | the generator's arithmetic and verdicts, extracted into `k6/lib/`: mix renormalisation, the ramp, VU provisioning, cache classification, `generator_ok`, `target_unreachable`. The tested code is the code k6 imports. |
 | `tests/cli/` (`bats`) | `bin/crowdsim` end to end against a stub k6: both safety gates, exit-code contract, profile and target resolution, empty-pool handling, history, and that the brake tripping still exits 0. |
+| `tests/ui/` (`node --test`) | the front end's decisions, as plain modules imported from `gui/ui/src/lib/`: which run the page shows, when a result stops belonging to the form, the knee as a table cell, the warm-up rate and the safe ceiling that counts it — and the wording that cannot be softened (safe peak, a refusal, `unknown` ≠ `MISS`). |
 | `tests/gui/` (`node --test`) | the API over a real socket: path traversal out of the profile directory, the override confirmation, one-run-at-a-time, gate refusals passed through with their exit code, no webhook leakage. |
 | `tests/e2e/` | three legs on loopback, one per conclusion the tool produces: a fast nginx (the chain works, and a healthy target does **not** trip the brake), a slow single-worker origin (**the brake does abort a run**, early, with the generator still holding the rate), and an unreachable target (**connectivity, not capacity** — using a reserved `.test` domain that is never resolved). Skips cleanly without docker or k6. |
 | `tests/image/` | the published artefact: the driver finds the generator, the GUI starts, and the gates survived the build — including that no allowlist default was baked in. Runs in CI before anything is pushed. |

@@ -384,6 +384,34 @@ for r in runs:
         assert r[k] is None or isinstance(r[k], (int, float)), f"{k} came through as {r[k]!r}"
 print(f"  ✅ GUI lists {len(runs)} runs, {len(aborted)} of them aborted, knee carried per run")'
 
+# ── the report, handed over BY the GUI (#53) ─────────────────────────────────────────────────────────
+# The page can now produce the artefact somebody reading a finished run wants next. It must be the CLI's
+# own document — caveats attached — and not markdown rendered a second time by the server.
+FIRST_RUN="$(curl -fsS http://127.0.0.1:18787/api/history \
+  | python3 -c 'import json,sys; print(json.load(sys.stdin)["runs"][0]["run_id"])')"
+curl -fsS -D "$OUT/report.head" "http://127.0.0.1:18787/api/history/$FIRST_RUN/report" > "$OUT/report.md" \
+  || die "the GUI could not produce a report for $FIRST_RUN"
+python3 - "$OUT/report.head" "$OUT/report.md" "$OUT/report-$FIRST_RUN.md" <<'PY'
+import os, sys
+head = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+body = open(sys.argv[2], encoding='utf-8').read()
+fail = []
+def check(c, m):
+    if not c: fail.append(m)
+
+check('text/markdown' in head.lower(), 'the report did not come back as markdown')
+check('attachment' in head.lower(), 'the report is not offered as a file to save')
+check('crowdsim' in body.lower(), 'the report body does not look like a crowdsim report')
+# The caveats are the reason this document exists: a report without them is a number in a ticket.
+check('caveat' in body.lower() or 'colder than real traffic' in body.lower() or 'pool' in body.lower(),
+      'the report carries no caveats — the part that does not survive retyping')
+# Written by the CLI, at the CLI's own path, rather than rendered by the server.
+check(os.path.exists(sys.argv[3]), 'crowdsim report did not write its file: the server rendered its own')
+if fail:
+    print('\n'.join('  ❌ ' + f for f in fail)); sys.exit(1)
+print(f'  ✅ the GUI hands over the CLI\'s own report ({len(body)} bytes), caveats included')
+PY
+
 # ── the page itself, in a real browser ───────────────────────────────────────────────────────────────
 # tests/ui asserts the front end's decisions as plain modules, which is fast and covers the reasoning — and
 # cannot prove that a component renders any of it. This does: one real browser, the real bundle, the real
@@ -419,9 +447,15 @@ else
   else
     "$CHROME" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=6000 \
       --dump-dom "http://127.0.0.1:18787/#history" > "$OUT/page.html" 2>/dev/null || true
-    python3 - "$OUT/page.html" <<'PY2' || die "the rendered page is not showing the archive (see $OUT/page.html)"
+    # The same page with one run open, by address (#53): a result is the thing people hand to each other,
+    # and its report is a button on that card. Without the fragment nothing is selected and the card — the
+    # place the report is offered from — is not on the page at all.
+    "$CHROME" --headless=new --disable-gpu --no-sandbox --virtual-time-budget=6000 \
+      --dump-dom "http://127.0.0.1:18787/#history=$FIRST_RUN" > "$OUT/page-run.html" 2>/dev/null || true
+    python3 - "$OUT/page.html" "$OUT/page-run.html" <<'PY2' || die "the rendered page is not showing the archive (see $OUT/page.html)"
 import re, sys
 html = open(sys.argv[1], encoding='utf-8', errors='replace').read()
+one = open(sys.argv[2], encoding='utf-8', errors='replace').read()
 fail = []
 def check(cond, msg):
     if not cond: fail.append(msg)
@@ -451,6 +485,12 @@ check(not points or all('tabindex' in p.lower() for p in points),
 # The knee column (#51). Every run in this archive either has a measured band or is a refusal, and the page
 # must show which — a blank column reads as "no knee found", after which somebody quotes the requested peak.
 check('<th>knee</th>' in html, "the archive table has no knee column")
+
+# A run opened by address, and the report offered from it (#53). tests/gui proves the endpoint; only the
+# rendered page shows there is something to click.
+check('Result' in one, "#history=<run-id> did not open that run's result")
+check('Download report' in one, "the result view offers no way to hand the run over as a report")
+check('caveats' in one, "the report button does not say what the document is for")
 if fail:
     print("\n".join("  ❌ " + f for f in fail)); sys.exit(1)
 print(f"  ✅ the page rendered {len(ids)} runs from the archive, clean and knee told apart, knee column present")

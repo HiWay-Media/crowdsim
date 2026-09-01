@@ -109,6 +109,16 @@ export function buildLoadArgs(run, profilePath, profileName, opts) {
     if (!CLASS_LIST.test(String(r.skipClasses))) throw new InvalidRun('skipClasses', 'skipClasses must be a comma-separated list of class names');
     args.push('--skip-classes', String(r.skipClasses));
   }
+  // A warm-up is load. It is passed through like any other flag and gated by the driver exactly like the
+  // peak — including the safe ceiling, which `bin/crowdsim` re-checks with the warm-up rate in place of the
+  // peak. Priming a cache is not a way around a ceiling, and this file is not where that would be decided.
+  if (r.warmup !== undefined && r.warmup !== '') args.push('--warmup', duration(r.warmup, 'warmup'));
+  if (r.warmupPeak !== undefined && r.warmupPeak !== '') {
+    if (r.warmup === undefined || r.warmup === '') {
+      throw new InvalidRun('warmup', 'a warm-up rate without a warm-up duration would do nothing: set both');
+    }
+    args.push('--warmup-peak', int(r.warmupPeak, 'warmupPeak', 1, 100000));
+  }
   if (r.touchAndGo) args.push('--touch-and-go');
   if (r.insecure) args.push('--insecure');
   if (r.slack) args.push('--slack');

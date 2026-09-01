@@ -25,6 +25,21 @@ export const SAFE_PEAK = {
   previewArmed: 'You are reading it armed; starting it still requires the profile name typed by hand, for '
     + 'this run only.',
   within: (safePeak) => `Within the profile's safe ceiling${safePeak !== null ? ` (${safePeak} req/s)` : ''}.`,
+  /**
+   * A warm-up is load. Naming which of the two rates is over the ceiling matters: told that a 60 req/s run
+   * is refused, nobody looks at the warm-up field — and the driver's exit 3 does not name it either.
+   */
+  warmupOver: (rate, safePeak) => `The warm-up alone runs at ${rate} req/s, above this profile's safe `
+    + `ceiling of ${safePeak} req/s. A warm-up generates real load and passes the same gate as the peak.`,
+};
+
+export const WARMUP = {
+  /** Not "faster results": the point is that the number means something else without it. */
+  why: 'The first seconds of a run measure an empty cache, a cold pool and an unJITted app, and they sit '
+    + 'inside the p95 you are about to quote. A warm-up runs the generator first and throws those numbers '
+    + "away — they go to the run's own warmup- summary file, which has no brake and is not a result.",
+  /** A blank rate is not "no rate": it is --start, which is what the driver does with it. */
+  rateDefault: (start) => `Blank means the ramp's own starting rate (${start} req/s).`,
 };
 
 export const REFUSAL = {

@@ -291,3 +291,48 @@ test('a field refused for what it is is not also reported as a TODO: one diagnos
   assert.equal(r.errors.filter(x => x.path === 'slo.max_p95_ms').length, 1,
     JSON.stringify(r.errors.filter(x => x.path === 'slo.max_p95_ms')));
 });
+
+// ── log_match: how `crowdsim weights` recognises a class in an access log ────────────────────────────
+
+test('log_match must be a list of patterns, not a single pattern', () => {
+  const p = clone(example);
+  p.classes[0].log_match = '/news/*';
+  const r = validateProfile(p);
+  assert.ok(r.errors.some((x) => x.path === 'classes[0].log_match'), JSON.stringify(r.errors));
+});
+
+test('a pattern that does not start with / is refused, because it could never match', () => {
+  const p = clone(example);
+  p.classes[0].log_match = ['*.css'];
+  const r = validateProfile(p);
+  assert.ok(r.errors.some((x) => x.path === 'classes[0].log_match[0]'), JSON.stringify(r.errors));
+});
+
+test('a valid log_match is accepted and changes nothing about the run', () => {
+  const p = clone(example);
+  p.classes[0].log_match = ['/news/*', '/'];
+  const r = validateProfile(p);
+  assert.deepEqual(r.errors, [], JSON.stringify(r.errors));
+  assert.ok(!r.warnings.some((w) => /log_match/.test(w.path)));
+});
+
+test('an empty log_match warns rather than passing as a rule', () => {
+  const p = clone(example);
+  p.classes[0].log_match = [];
+  const r = validateProfile(p);
+  assert.ok(r.warnings.some((x) => x.path === 'classes[0].log_match'), JSON.stringify(r.warnings));
+});
+
+test('rsc.query is the wrong key and the run would silently use _rsc: warn, naming the value lost', () => {
+  const p = clone(example);
+  delete p.rsc.param;
+  p.rsc.query = 'x_nav';
+  const r = validateProfile(p);
+  const w = r.warnings.find((x) => x.path === 'rsc.query');
+  assert.ok(w, JSON.stringify(r.warnings));
+  assert.match(w.message, /x_nav/);
+  // with the right key spelled correctly there is nothing to say
+  const q = clone(example);
+  q.rsc.param = 'x_nav';
+  assert.ok(!validateProfile(q).warnings.some((x) => x.path === 'rsc.query'));
+});

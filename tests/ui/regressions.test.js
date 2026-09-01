@@ -53,7 +53,7 @@ test('1.7.0: the tab lived only in React state, so a reload lost it', () => {
   assert.equal(formatHash('history', null), 'history');
   // And a comparison can be linked to, which is the same fix taken one step further.
   const pair = ['20260805T090000Z', '20260805T093000Z'];
-  assert.deepEqual(parseHash(`#${formatHash('history', pair)}`), { tab: 'history', pair });
+  assert.deepEqual(parseHash(`#${formatHash('history', pair)}`), { tab: 'history', pair, one: null });
 });
 
 test('1.7.0: a run id printed inline was never recognised, so a probe result was unreachable', () => {

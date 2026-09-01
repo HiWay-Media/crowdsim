@@ -25,6 +25,8 @@
 #   history     one line per run, to see whether the knee moves over time
 #   compare     the delta between two runs, and a refusal when they are not comparable
 #   report      one run as pasteable markdown, with the caveats that do not survive retyping
+#   weights     count YOUR access log into the class mix: the one input this tool demands and used to
+#               refuse to help measure. Reads a file or stdin, writes nothing (needs node)
 #   init        draft a first profile from what probe/discover/record already measured (safety left blank)
 #   record      turn a browser HAR export into a journey file for --shape journey (needs node)
 #   validate    check a profile against every rule at once, without generating anything (needs node)
@@ -40,7 +42,10 @@
 #                     [--safe-peak 150] [--i-know-this-breaks-production] [--touch-and-go] [--dry-run]
 #                     [--warmup 30s] [--warmup-peak 20]
 #   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10] [--third <t.conf>] [--run] | --new-leg <t.conf>
-#   crowdsim compare  <run-a> <run-b> [--json]  ·  crowdsim init [--out <profile.json>]
+#   crowdsim weights  [<access.log>] --profile <f.json> [--format "time method path status"]
+#                     [--top 10] [--json]     ·  or:  … | crowdsim weights - --profile <f.json>
+#   crowdsim compare  <run-a> <run-b> [--json]
+#   crowdsim init     [--out <profile.json>] [--access-log <access.log>]
 #   crowdsim report   <run-id> [--compare <run-id>] [--out <file.md>]
 #   crowdsim record   <file.har> [--out <journey.json>] [--origin <url>] [--rsc-query _rsc] [--force]
 #   crowdsim validate <f.json>
@@ -57,7 +62,7 @@
 #
 # Exit: 0 = executed (a run stopped by the brake is an OUTCOME, not an error) · 2 = usage
 #       3 = safety gate · 4 = target unreachable · 5 = k6 missing
-# Requires: k6, curl, python3 (and node for `validate` and `serve`).
+# Requires: k6, curl, python3 (and node for `validate`, `record`, `weights` and `serve`).
 
 set -eo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -75,7 +80,12 @@ VERIFY=0
 POSITIONAL=()
 GUI_PORT=""; GUI_BIND=""
 
-usage() { sed -n '1,60p' "$0" | grep -E '^#' | sed 's/^# \{0,1\}//'; }
+# The comment header IS the help text: it cannot drift from the script, which is why it is written for a
+# reader and not for a parser. Extracted by structure — from line 2 (the shebang is not documentation) up
+# to the first line that is not a comment — and not by a line count: the previous version read lines 1-60
+# and so printed `!/usr/bin/env bash` as the first line of `crowdsim --help`, and silently truncated the
+# help the moment the header grew past sixty lines.
+usage() { sed -n '2,${/^#/!q; s/^# \{0,1\}//p;}' "$0"; }
 say()   { printf '%s\n' "$*"; }
 ok()    { printf '  ✅ %s\n' "$*"; }
 warn()  { printf '  ⚠️  %s\n' "$*"; }
@@ -135,7 +145,7 @@ while [ $# -gt 0 ]; do
     --abort-delay) ABORT_DELAY="$2"; shift 2;;
     --port) GUI_PORT="$2"; shift 2;;
     --bind) GUI_BIND="$2"; shift 2;;
-    --json) COMPARE_JSON=1; shift;;
+    --json) COMPARE_JSON=1; WEIGHTS_JSON=1; shift;;
     --bench) BENCH=1; shift;;
     --run) RUN_LEGS=1; shift;;
     --warmup) WARMUP_DUR="$2"; shift 2;;
@@ -145,6 +155,9 @@ while [ $# -gt 0 ]; do
     --new-leg) NEW_LEG="$2"; shift 2;;
     --out) JOURNEY_OUT="$2"; REPORT_OUT="$2"; INIT_OUT="$2"; shift 2;;
     --origin) RECORD_ORIGIN="$2"; shift 2;;
+    --format) LOG_FORMAT="$2"; shift 2;;
+    --top) LOG_TOP="$2"; shift 2;;
+    --access-log) ACCESS_LOG="$2"; shift 2;;
     --rsc-query) RSC_QUERY_OVERRIDE="$2"; shift 2;;
     --force) FORCE_OVERWRITE=1; shift;;
     --verify) VERIFY=1; shift;;
@@ -154,12 +167,15 @@ while [ $# -gt 0 ]; do
     --dry-run) DRY=1; shift;;
     --i-know-this-breaks-production) FORCE=1; shift;;
     -h|--help) usage; exit 0;;
+    # A single `-` is the conventional name for stdin, and `weights` is the one subcommand whose input
+    # normally arrives that way: an access log usually cannot be copied off the host that holds it.
+    -) if [ "$CMD" = "weights" ]; then POSITIONAL+=("-"); shift; else die "unknown option: -" 2; fi;;
     # `crowdsim validate my-site.json` reads better than requiring --profile for a command whose only
     # argument IS the profile, and the same goes for the two run ids `compare` works on. Everywhere else a
     # bare word is still a mistake worth stopping for.
     *) if [ "$CMD" = "validate" ] && [ -z "$PROFILE_F" ]; then PROFILE_F="$1"; shift
        elif [ "$CMD" = "compare" ] || [ "$CMD" = "record" ] || [ "$CMD" = "report" ] \
-            || [ "$CMD" = "init" ]; then POSITIONAL+=("$1"); shift
+            || [ "$CMD" = "init" ] || [ "$CMD" = "weights" ]; then POSITIONAL+=("$1"); shift
        else die "unknown option: $1" 2; fi;;
   esac
 done
@@ -1093,11 +1109,54 @@ PY
 #
 # Nothing here is computed: every figure comes from the summary, and anything the archive does not contain is
 # absent instead of estimated. A comparison is `crowdsim compare`, not a second delta.
+# ─────────────────────────────── weights: the mix, measured ──────────────────────────────────────────
+# The class mix is the one input this tool insists must be measured — every page of the documentation says
+# the weights have to come from your own edge log, and `init` writes them as a TODO for that reason. Nothing
+# here read a log, so the most important number in a profile was left to somebody counting lines by hand.
+#
+# What this deliberately does NOT do is go and fetch the log. That would mean privileged access to a
+# production edge, which this project does not want: the log arrives as a file, or on stdin.
+#
+# The rules live in lib/weights.mjs, where they are tested. That means node — stated, like `record` and
+# `validate`, rather than discovered halfway through.
+weights_runner() {
+  if ! command -v node >/dev/null 2>&1; then
+    die "crowdsim weights needs node (18+): the classification rules live in lib/weights.mjs, where
+  they are tested" 5
+  fi
+  local runner="$ROOT/lib/weights-cli.mjs"
+  if [ ! -f "$runner" ]; then die "missing $runner (is CROWDSIM_ROOT right?)" 5; fi
+  printf '%s' "$runner"
+}
+
+cmd_weights() {
+  need_profile
+  local runner; runner="$(weights_runner)"
+  local log="${POSITIONAL[0]:-}"
+  local -a args=("$runner" --profile "$PROFILE_F")
+  # No file and no `-`: reading stdin is the normal case, and the runner is the one that refuses when
+  # stdin is a terminal — it can tell, and it prints the two forms that work.
+  if [ -n "$log" ] && [ "$log" != "-" ]; then
+    [ -f "$log" ] || die "no such file: $log" 2
+    args+=("$log")
+  fi
+  if [ -n "${LOG_FORMAT:-}" ]; then args+=(--format "$LOG_FORMAT"); fi
+  if [ -n "${LOG_TOP:-}" ]; then args+=(--top "$LOG_TOP"); fi
+  if [ "${WEIGHTS_JSON:-0}" = "1" ]; then args+=(--json); fi
+  # exec, so the runner owns stdin and its exit code is ours. Nothing is written anywhere: an access log
+  # holds URLs, addresses and user agents, and out/ is a directory people copy from.
+  exec node "${args[@]}"
+}
+
 # ─────────────────────────────── init: the first profile ─────────────────────────────────────────────
 # The profile is the whole configuration, and writing the first one is the highest step in this tool. Most of
 # it has already been measured by the time somebody asks: `probe` knows the page weight and which cache
 # layers answered, `discover --verify` has a pool of URLs that actually render, `record` has a real fan-out.
 # Those artefacts sit in out/ and nothing assembled them.
+#
+# With --access-log it also fills in the class weights, from the operator's own log, through the same rules
+# `crowdsim weights` uses. Everything else it cannot measure stays a TODO: a plausible number is worse than
+# an obvious hole, because a hole gets filled in.
 #
 # Two things this must never do, and they are the reason it exists rather than a template in the README:
 #  · fill in safety.allow_hosts — that would be crowdsim authorising a host on your behalf;
@@ -1120,12 +1179,21 @@ cmd_init() {
   somewhere else and move it deliberately, or keep it in your own private repo." 2
   fi
 
+  # Checked here rather than after the draft exists: a half-drafted profile that then failed for want of
+  # node would leave a file the next run refuses to overwrite.
+  local weights_cli=""
+  if [ -n "${ACCESS_LOG:-}" ]; then
+    [ -f "$ACCESS_LOG" ] || die "no such file: $ACCESS_LOG" 2
+    weights_cli="$(weights_runner)"
+  fi
+
   mkdir -p "$(dirname "$out")"
   local rc=0
-  python3 - "$OUT_DIR" "$out" <<'PY' || rc=$?
+  python3 - "$OUT_DIR" "$out" "${ACCESS_LOG:-}" <<'PY' || rc=$?
 import glob, json, os, sys
 
 out_dir, dest = sys.argv[1], sys.argv[2]
+access_log = sys.argv[3] if len(sys.argv) > 3 else ''
 
 def newest(prefix, needs=None):
     for f in sorted(glob.glob(os.path.join(out_dir, prefix + '-*.json')), reverse=True):
@@ -1153,7 +1221,14 @@ if not probe and not disc:
 base_url = (probe or disc).get('base_url')
 weight = (probe or {}).get('bytes')
 layers = (probe or {}).get('layers') or []
-pool_file = os.path.basename((disc or {}).get('pool_path') or '') or None
+# Relative to the DRAFT, not to out/: the reference is resolved from the profile's own directory, so a
+# draft written anywhere else pointed at a pool file that was not there. `init --out ~/p.json` produced a
+# profile whose pool silently could not be read.
+_pool_path = (disc or {}).get('pool_path') or ''
+pool_file = None
+if _pool_path:
+    _abs = _pool_path if os.path.isabs(_pool_path) else os.path.join(out_dir, os.path.basename(_pool_path))
+    pool_file = os.path.relpath(os.path.abspath(_abs), os.path.dirname(os.path.abspath(dest)))
 verified = (disc or {}).get('verified')
 
 provenance = []
@@ -1190,21 +1265,26 @@ profile = {
                         'frontend actually serves.',
     'classes': [
         {'name': 'html', 'weight': 40, 'pool': 'pages',
-         '_comment': 'TODO: weight from your edge log. slo.brake_class names this class, because the '
-                     'document is what falls over first on a server-rendered frontend. A class may also '
-                     'declare its own max_p95_ms, which may only be sharper than the profile\'s.'},
+         '_comment': 'TODO: weight from your edge log — or hand the log over with `crowdsim init '
+                     '--access-log <file>` and this number is measured instead. slo.brake_class names this '
+                     'class, because the document is what falls over first on a server-rendered frontend. A '
+                     'class may also declare its own max_p95_ms, which may only be sharper than the '
+                     'profile\'s.'},
         {'name': 'rsc_page', 'weight': 45, 'pool': 'pages', 'kind': 'rsc',
          '_comment': 'TODO: framework navigation requests (React Server Components, Turbo, Inertia). '
                      'Remove this class if your frontend does not make them.'},
         {'name': 'static', 'weight': 15, 'pool': 'assets',
+         'log_match': ['/_next/static/*', '/assets/*', '/static/*'],
          '_comment': 'TODO: point `assets` at a pool of real static URLs — a static pool contains build '
-                     'hashes and goes stale on every deploy.'},
+                     'hashes and goes stale on every deploy. log_match is how `crowdsim weights` finds '
+                     'these requests in an access log; TODO: check those three globs against your own '
+                     'paths, they are the common ones and not necessarily yours.'},
     ],
     'pools': {
         'pages': ('@' + pool_file) if pool_file else ['/', 'TODO-add-real-paths'],
         'assets': ['TODO-add-real-asset-paths'],
     },
-    'rsc': {'mode': 'repeat', 'query': '_rsc',
+    'rsc': {'mode': 'repeat', 'param': '_rsc',
             '_comment': 'repeat reproduces what a real Next.js build does (few distinct navigation URLs). '
                         'random measures the opposite hypothesis. Do not swap them between runs you compare.'},
     'cache_headers': [
@@ -1246,16 +1326,105 @@ json.dump(profile, open(dest, 'w', encoding='utf-8'), indent=1, ensure_ascii=Fal
 print(f"  ✅ drafted {dest}")
 for line in provenance:
     print(f"     from {line}")
+# With a log to read, the mix is measured in a second pass and the closing summary belongs to it: printing
+# "the weights are a starting point" here and "measured" a moment later would be two answers to one question.
+if not access_log:
+    print("")
+    print("  It will NOT run yet, by design:")
+    print("     · safety.allow_hosts and safety.safe_peak_rps are empty — fill them in;")
+    print("     · the class weights are a starting point, not your traffic mix — `crowdsim init")
+    print("       --access-log <file>` measures them from your own log instead;")
+    print("     · slo.max_p95_ms and slo.guillotine_ms are TODO, and the second must be your proxy's read")
+    print("       timeout, or the 504s a run produces will be invisible to it.")
+    print("")
+    print(f"  Then:  crowdsim validate {dest}")
+PY
+  if [ "$rc" != "0" ]; then rm -f "$out"; exit "$rc"; fi
+  if [ -z "${ACCESS_LOG:-}" ]; then return 0; fi
+
+  # The mix, measured, through exactly the rules `crowdsim weights` uses — against the draft that was just
+  # written, because a class is recognised by what the profile declares and the draft IS the profile now.
+  say ""
+  say "▶ measuring the mix on $ACCESS_LOG"
+  local mix rc2=0
+  # stdout only: the runner writes its warnings to stderr, and folding them into the capture put a "⚠️" line
+  # in front of the JSON — which parsed as nothing at all.
+  mix="$(node "$weights_cli" "$ACCESS_LOG" --profile "$out" --json)" || rc2=$?
+  if [ "$rc2" != "0" ]; then
+    # The draft is kept: it is correct, only its weights are still a guess. Deleting it would throw away the
+    # probe and discover artefacts it assembled because a log did not parse.
+    warn "the log could not be turned into a mix (exit $rc2) — $out keeps its placeholder weights"
+    say "     Fix the log or the format, then:  crowdsim weights $ACCESS_LOG --profile $out"
+    exit "$rc2"
+  fi
+  # --json carries counts, shares and the window and NO paths: the draft lands in out/, and an access log's
+  # URLs are not this tool's data to keep.
+  # The mix travels as an argument, not on stdin: the heredoc below already owns stdin, and a pipe into it
+  # silently delivered nothing — caught the first time this ran.
+  python3 - "$out" "$mix" <<'PYMIX'
+import json, sys
+dest = sys.argv[1]
+mix = json.loads(sys.argv[2])
+profile = json.load(open(dest, encoding='utf-8'))
+
+DRAFT_TODO = ('TODO: weight from your edge log — or hand the log over with `crowdsim init --access-log '
+              '<file>` and this number is measured instead. ')
+by = {c['name']: c for c in mix['classes']}
+measured, absent = [], []
+for c in profile['classes']:
+    m = by.get(c['name'])
+    if m and m['weight']:
+        c['weight'] = m['weight']
+        c['_comment'] = (f"weight measured: {m['count']} requests, {m['share']*100:.1f}% of what was "
+                         f"classified. " + str(c.get('_comment', '')).replace(DRAFT_TODO, ''))
+        measured.append(c['name'])
+    else:
+        # A class the log never showed keeps its placeholder weight and gains a TODO rather than being
+        # deleted: it may be traffic this window did not contain, and dropping a class silently is how a
+        # mix loses its tail.
+        c['_comment'] = ('TODO: NOT ONCE in the log that was measured — either this window did not contain '
+                         'it, or no rule recognises it (see log_match). The weight below is still the '
+                         'placeholder, not a measurement. ' + str(c.get('_comment', '')))
+        absent.append(c['name'])
+
+win = mix.get('window') or {}
+window = (f"{win['from']} → {win['to']}" if win.get('from') and win.get('to')
+          else 'a window the log did not timestamp in any format this tool reads')
+unc = mix['unclassified']
+gap = ''
+if unc['count']:
+    gap = (f" ⚠️ {unc['share']*100:.1f}% of the counted requests matched no class at all, so these weights "
+           f"describe {(1-unc['share'])*100:.1f}% of the traffic: run `crowdsim weights` on the same log to "
+           "see what they were, and declare the classes they belong to.")
+profile['_classes_comment'] = (
+    f"The MIX, MEASURED: {mix['classified']} of {mix['counted']} GET requests classified over {window}. "
+    "Weights are relative; the generator renormalises them. ⚠️ This is your traffic in THAT window — a mix "
+    "measured in a quiet hour does not reproduce a spike, because the classes that grow under load are "
+    "exactly the ones a quiet window under-weights. Re-measure on the spike you want to replay." + gap)
+profile['_provenance'] = list(profile.get('_provenance') or []) + [
+    f"an access log of {mix['lines']} lines: {mix['classified']} requests classified into "
+    f"{len(measured)} class(es) over {window}"]
+
+json.dump(profile, open(dest, 'w', encoding='utf-8'), indent=1, ensure_ascii=False)
+
+print(f"  ✅ mix measured: {mix['classified']} of {mix['counted']} GET requests classified, "
+      f"from {mix['lines']} lines")
+for c in mix['classes']:
+    mark = '' if c['weight'] else '   ← not once in this log: weight left as the placeholder'
+    print(f"     {c['name']:<14} {c['weight']:>6.1f}{mark}")
+if unc['count']:
+    print(f"  ⚠️  {unc['share']*100:.1f}% unclassified: these weights describe "
+          f"{(1-unc['share'])*100:.1f}% of the traffic, not all of it.")
+    print(f"      See what did not match:  crowdsim weights <log> --profile {dest}")
+print(f"     window: {window}")
 print("")
 print("  It will NOT run yet, by design:")
 print("     · safety.allow_hosts and safety.safe_peak_rps are empty — fill them in;")
-print("     · the class weights are a starting point, not your traffic mix;")
 print("     · slo.max_p95_ms and slo.guillotine_ms are TODO, and the second must be your proxy's read")
 print("       timeout, or the 504s a run produces will be invisible to it.")
 print("")
 print(f"  Then:  crowdsim validate {dest}")
-PY
-  if [ "$rc" != "0" ]; then rm -f "$out"; exit "$rc"; fi
+PYMIX
 }
 
 cmd_report() {
@@ -1999,6 +2168,7 @@ case "$CMD" in
   history)  cmd_history;;
   compare)  cmd_compare;;
   report)   cmd_report;;
+  weights)  cmd_weights;;
   init)     cmd_init;;
   record)   cmd_record;;
   validate) cmd_validate;;

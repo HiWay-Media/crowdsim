@@ -7,7 +7,8 @@ import { ProbeTable, DiscoverTable } from './PreflightTables.jsx';
 import HostPanel from './HostPanel.jsx';
 import { runToShow, shouldClearResult } from '../lib/runs.js';
 import { allowlistVerdict } from '../lib/allowlist.js';
-import { SAFE_PEAK } from '../lib/messages.js';
+import { SAFE_PEAK, WARMUP } from '../lib/messages.js';
+import { warmupRate, pastSafeCeiling } from '../lib/warmup.js';
 import { LineBuffer } from '../lib/logbuffer.js';
 import { streamState, describeStream } from '../lib/stream.js';
 
@@ -20,6 +21,9 @@ import { streamState, describeStream } from '../lib/stream.js';
 const DEFAULTS = {
   peak: 60, start: 15, steps: 4, stepDur: '60s', hold: '120s',
   shape: 'mix', rscMode: 'repeat', maxP95: '', max5xx: '', skipClasses: '',
+  // Off by default, like the CLI: a warm-up doubles the load a run puts on a target, and that is a choice
+  // to make rather than a default to discover afterwards.
+  warmup: '', warmupPeak: '',
   touchAndGo: false, insecure: false, slack: false,
 };
 
@@ -107,7 +111,12 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
   const sum = profile && profile.validation ? profile.validation.summary : null;
   const chosen = sum ? sum.targets.find((t) => t.name === target) : null;
   const safePeak = sum ? sum.safe_peak_rps : null;
-  const pastSafe = safePeak !== null && Number(form.peak) > safePeak;
+  // A warm-up is load, so the ceiling applies to it too: the driver re-runs the same gate with the warm-up
+  // rate in place of the peak, and a page that only looked at the peak would show "within the ceiling" and
+  // then hand back an exit 3 nobody could explain.
+  const ceiling = pastSafeCeiling(form, safePeak);
+  const pastSafe = ceiling.past;
+  const warmRate = warmupRate(form);
 
   const host = useMemo(() => {
     if (!chosen || !chosen.base_url) return null;
@@ -141,6 +150,8 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
       maxP95: form.maxP95 === '' ? undefined : Number(form.maxP95),
       max5xx: form.max5xx === '' ? undefined : Number(form.max5xx),
       skipClasses: form.skipClasses || undefined,
+      warmup: form.warmup === '' ? undefined : form.warmup,
+      warmupPeak: form.warmupPeak === '' ? undefined : Number(form.warmupPeak),
       touchAndGo: form.touchAndGo,
       insecure: form.insecure,
       slack: form.slack,
@@ -276,6 +287,17 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
           <label>Abort over failed rate<input type="number" step="0.01" value={form.max5xx} placeholder={sum && sum.slo.max_failed_rate} onChange={set('max5xx')} /></label>
           <label>Skip classes<input value={form.skipClasses} onChange={set('skipClasses')} placeholder="proxy_only,static" /></label>
         </div>
+        <div className="row">
+          <label>Warm-up<input value={form.warmup} onChange={set('warmup')} placeholder="off — e.g. 30s" /></label>
+          <label>Warm-up rate (req/s)
+            <input type="number" min="1" value={form.warmupPeak} onChange={set('warmupPeak')}
+                   placeholder={form.start === '' ? 'start' : String(form.start)} disabled={!form.warmup} />
+          </label>
+          <span className="note grow">
+            {WARMUP.why}
+            {form.warmup ? <> {WARMUP.rateDefault(warmRate === null ? form.start : warmRate)}</> : null}
+          </span>
+        </div>
         <div className="row checks">
           <label className="check"><input type="checkbox" checked={form.touchAndGo} onChange={set('touchAndGo')} /> touch and go
             <span className="note">steep ramp, no hold, faster brake — still expect 20–40s of errors</span></label>
@@ -288,7 +310,14 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
         <div className={pastSafe ? 'gate danger' : 'gate'}>
           {pastSafe ? (
             <>
-              <strong>{SAFE_PEAK.consequence(form.peak, safePeak, host)}</strong>
+              <strong>
+                {ceiling.by === 'warmup'
+                  ? SAFE_PEAK.warmupOver(ceiling.rate, safePeak)
+                  : SAFE_PEAK.consequence(form.peak, safePeak, host)}
+              </strong>
+              {ceiling.by === 'both'
+                ? <p>{SAFE_PEAK.warmupOver(warmRate, safePeak)}</p>
+                : null}
               <p>{SAFE_PEAK.explain(host)}</p>
               <div className="row">
                 <label className="check">

@@ -73,7 +73,19 @@ Read the two things that matter before anything else:
   exit 3. It is computed here from the same rules the CLI applies, so it is not a guess.
 - **the mix bars** — what your peak means *per class*. `60 req/s` is not 60 page loads: this profile turns it
   into 22.8 html + 28.2 framework navigations + 9 assets, using the weights you measured on your own edge
-  log. This is the number people get wrong when they reason about a peak.
+  log (`crowdsim weights` counts them — see the [CLI reference](cli.md#weights)). This is the number people
+  get wrong when they reason about a peak.
+
+**The warm-up, in the same card.** `Warm-up` (a duration, blank means off) and `Warm-up rate` run the
+generator once before the measured run and throw those numbers away. The first seconds of any run measure an
+empty cache, a cold pool and an unJITted app, and they sit inside the p95 you are about to quote — and the
+page is where the people least likely to know that are launching runs. A blank rate means the ramp's own
+starting rate, which is what the driver does with it, and the field says so.
+
+A warm-up is load, so the safe ceiling applies to it: a run whose peak is inside the ceiling and whose
+warm-up is above it needs the same override, and the page says **which of the two rates** is over before you
+click. The driver re-runs the same gate with the warm-up rate in place of the peak, so the refusal is exit 3
+from `bin/crowdsim`, not a second opinion from the server.
 
 ### 3. Read the command before you agree to it
 
@@ -161,7 +173,16 @@ SLO](profile.md#a-class-may-set-its-own-limit) and "you found the knee" no longe
 the summary's `aborted_by` and nowhere else: runs archived before that field existed show the verdict without
 the detail, rather than a culprit reconstructed from the profile.
 
-Reload the page and it is still there. The server keeps the run list, and the page asks for it on load.
+**Download report (.md)**, top right of the result, writes the run as markdown for the place the result
+actually goes: a ticket, a PR, an incident timeline. It is produced by `crowdsim report` on the server — the
+same document the CLI writes, in the same file under `out/` — and not by a second renderer here: the caveats
+are the whole point of that document, and two renderers eventually disagree about what a run means. What
+travels with the numbers is what they are worth.
+
+Reload the page and it is still there. The server keeps the run list, and the page asks for it on load. A run
+in the archive also has an address of its own — `#history=<run-id>` opens that run's result, the same way
+`#history=<run-a>,<run-b>` opens a comparison — which is how you hand somebody a result, report button
+included, instead of telling them which row to click.
 
 **Then read [Reading results](reading-results.md).** It is short, and it is the page that stops you quoting a
 number that means nothing. The first field is `generator_ok`: if it is false, discard the run.
@@ -320,6 +341,11 @@ says so: you are reading it armed. Reading it buys nothing — starting it still
 Nothing about the override is remembered: the confirmation is not stored, not defaulted, and is stripped from
 the run record. Without both acts, the API answers `400` naming the `confirm` field.
 
+**A warm-up counts as load.** The same block appears when the warm-up rate is above the ceiling and the peak
+is not, and it names the warm-up rather than the peak — being told a 60 req/s run was refused sends nobody to
+look at the warm-up field. `bin/crowdsim` enforces it: it re-runs the peak gate with the warm-up rate in
+place of the peak, so the GUI adds nothing to that decision and cannot take anything away from it.
+
 Why it exists at all, rather than being CLI-only: somebody who needs to reach the knee will do it either way,
 and pushing them to hand-assemble a command line buys a copy-paste window — the wrong rate against the wrong
 target — not consent. The friction stays where it is useful: an explicit act that names the thing being risked.
@@ -362,6 +388,7 @@ better interface: it is the thing the API calls anyway.
 | `POST` | `/api/runs/:id/stop` | Graceful stop |
 | `GET` | `/api/history` | `out/history.tsv`, newest first |
 | `GET` | `/api/history/:runId` | Summary, history row, comparable runs, run log |
+| `GET` | `/api/history/:runId/report` | The run as markdown, written by `crowdsim report` and served as a file (`text/markdown`, `Content-Disposition: attachment`) |
 | `GET` | `/api/compare?a=&b=` | The delta between two runs, from `crowdsim compare --json`. `422` with `refused[]` when they are not comparable |
 
 ```bash

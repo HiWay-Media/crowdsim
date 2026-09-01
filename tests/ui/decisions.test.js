@@ -50,8 +50,8 @@ test('starting a new run clears the previous result, because a stale result besi
 
 // ── the tab, and the comparison pair, in the URL fragment ────────────────────────────────────────────
 test('the fragment carries the tab, so a reload lands where you were', () => {
-  assert.deepEqual(parseHash('#history'), { tab: 'history', pair: null });
-  assert.deepEqual(parseHash('#profiles'), { tab: 'profiles', pair: null });
+  assert.deepEqual(parseHash('#history'), { tab: 'history', pair: null, one: null });
+  assert.deepEqual(parseHash('#profiles'), { tab: 'profiles', pair: null, one: null });
 });
 
 test('an unknown or empty fragment falls back to the run tab rather than a blank page', () => {
@@ -64,7 +64,7 @@ test('an unknown or empty fragment falls back to the run tab rather than a blank
 test('a comparison has an address, and only a well-formed pair is honoured', () => {
   const a = '20260805T090000Z';
   const b = '20260805T093000Z';
-  assert.deepEqual(parseHash(`#history=${a},${b}`), { tab: 'history', pair: [a, b] });
+  assert.deepEqual(parseHash(`#history=${a},${b}`), { tab: 'history', pair: [a, b], one: null });
   assert.equal(formatHash('history', [a, b]), `history=${a},${b}`);
   assert.equal(formatHash('run', null), 'run');
 
@@ -208,4 +208,21 @@ test('a step with no p95 is left out rather than drawn at zero', () => {
 test('no per-step data means no curve, not an empty line at the origin', () => {
   assert.deepEqual(stepCurve(null), []);
   assert.deepEqual(stepCurve([]), []);
+});
+
+test('one run has an address too: a result is the thing people paste most often (#53)', () => {
+  const a = '20260805T090000Z';
+  const b = '20260805T093000Z';
+  assert.deepEqual(parseHash(`#history=${a}`), { tab: 'history', pair: null, one: a });
+  assert.equal(formatHash('history', a), `history=${a}`);
+  assert.equal(formatHash('history', [a]), `history=${a}`);
+  // Never both: two ids are a comparison, one is a result, and a fragment meaning either would open
+  // differently depending on who read it.
+  assert.equal(parseHash(`#history=${a},${b}`).one, null);
+  assert.equal(parseHash(`#history=${a}`).pair, null);
+  // Still checked here and not only on the server: this value becomes part of a spawn argv.
+  for (const bad of ['#history=nope', '#history=--help', '#history=../../etc/passwd', '#history=']) {
+    assert.equal(parseHash(bad).one, null, `fragment ${bad}`);
+  }
+  assert.equal(formatHash('history', 'not-a-run-id'), 'history');
 });

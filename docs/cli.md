@@ -13,6 +13,7 @@ crowdsim validate p.json                                  # every rule at once, 
 crowdsim history                                          # one line per run: does the knee move?
 crowdsim compare <run-a> <run-b>                          # the delta, or a refusal if they differ
 crowdsim record  session.har                              # a browser HAR export → a journey file
+crowdsim weights access.log --profile p.json              # the class mix, counted on your own log
 crowdsim init                                             # a first profile, drafted from what was measured
 crowdsim report  <run-id>                                 # one run as markdown you can paste in a ticket
 crowdsim serve                                            # the GUI, on loopback
@@ -246,10 +247,109 @@ structural checks ran"* and carries on with what `resolve_profile` checks by its
 missing pool files, empty pools). What it cannot catch that way is exactly the interesting half — a brake
 class that does not exist, an allowlist of `*`, a read timeout below the p95 SLO.
 
+### `weights`
+
+```bash
+crowdsim weights /var/log/nginx/access.log --profile my-site.json
+ssh edge 'zcat /var/log/nginx/access.log.*.gz' | crowdsim weights - --profile my-site.json
+```
+
+The class mix, counted on your own access log. This is the one input the tool insists must be measured —
+every page here says the weights come from your edge log, and `init` writes them as a `TODO` for exactly
+that reason — and until now nothing in the tool would read one, so the most important number in a profile
+was left to somebody counting lines by hand.
+
+It does **not** go and fetch the log. That would mean privileged access to a production edge, which this
+project deliberately does not want: the log arrives as a file you hand over, or on stdin.
+
+```
+▶ 12 lines · 12 GET requests counted · 11 classified
+     1 non-GET excluded: this tool sends GETs only
+
+  class         kind      requests    share   weight
+  rsc_page      rsc              6    54.5%     54.5
+  html          plain            4    36.4%     36.4
+  static        plain            1     9.1%      9.1
+
+  unclassified                   1     8.3%          of the counted requests
+
+  What nothing matched — the interesting part, because the mix above describes
+  91.7% of the traffic and not all of it:
+               1  /favicon.ico
+
+  Decide which class each of those belongs to, then declare it — crowdsim will not guess:
+     { "name": "…", "log_match": ["/*"], … }
+
+  Paste into the profile (weights are relative; the generator renormalises them):
+  "classes": [
+    { "name": "rsc_page", "weight": 54.5, "kind": "rsc", … },
+    { "name": "html", "weight": 36.4, … },
+    { "name": "static", "weight": 9.1, … }
+  ]
+
+  ⚠️  This is your traffic between 2026-09-01T12:01:00 and 2026-09-01T12:22:00, by the log's own
+      timestamps. A mix measured in a quiet hour does not reproduce a spike: the classes that
+      grow under load are exactly the ones a quiet window under-weights.
+  Nothing was written: no profile touched, no artefact in out/. An access log is not this
+  tool's data to keep.
+```
+
+**How a class is recognised.** By what the profile declares, in this order — nothing is inferred from the
+shape of a URL:
+
+1. **`kind`** is a hard filter, not a score. An `rsc` class only ever matches a request carrying the
+   navigation parameter (`rsc.param`, usually `_rsc`), and a `plain` class only ever matches one without it.
+   The same path is two different classes with and without it, which is the whole reason they are two
+   classes.
+2. **`log_match`** — the path globs the class declares (see [Profile reference](profile.md#log_match)).
+3. **`path_prefix`** — already declared, already unambiguous.
+4. **the class's own pool** — the paths crowdsim would actually request for it.
+
+First match in profile order wins, so a specific class declared before a broad one keeps its traffic.
+
+**What it will not do:**
+
+- **Guess.** `/favicon.ico` is obviously an asset and the command still refuses to file it under `static`,
+  because a guessed class is a made-up mix — the thing this command exists to replace. Give the class a
+  `log_match` and it is counted.
+- **Hide the gap.** Unclassified requests are a share **of the counted requests**, never folded into a class
+  and never dropped. A mix computed from 40% of a log is a mix of something else, and past 10% unclassified
+  the output says so in as many words.
+- **Compute a mix from a log it mostly could not read.** Over half the lines unparsed is exit **2**, with the
+  failing lines quoted as they were read and a pointer to `--format` — not a confident mix built from
+  whatever happened to fit.
+- **Write anything.** Not the profile, not an artefact in `out/`, not a temp copy. An access log holds URLs,
+  addresses and user agents; `out/` is a directory people copy from and a repository is one they commit from.
+
+**Excluded from the mix, and said so:** non-GET requests (this tool sends GETs and nothing else, so a write
+in the mix is a weight for load that will never be generated) and non-2xx/3xx (a 404 in the mix is a weight
+for requesting URLs that do not exist — the same reasoning `record` applies to a browser recording).
+
+**A log that is not the combined format:** describe its columns.
+
+```bash
+crowdsim weights app.log --profile my-site.json --format "time method path status"
+```
+
+Known fields: `request` (a `"GET /x HTTP/1.1"` token), `path`, `method`, `status`, `time`, and `-` for a
+column to skip. A field this command does not know is exit 2 rather than a column read by guesswork. With no
+`--format` the request is found **by shape** — the token that reads like a request line — so a proxy that
+logs an extra field in front still parses.
+
+| Exit | Means |
+|---|---|
+| 0 | a mix was printed |
+| 2 | usage, an unreadable profile, or a log this command could not parse |
+| 4 | the log parsed and **nothing** in it matched a class: the profile does not describe this traffic |
+
+**Feeding it straight into a first profile:** `crowdsim init --access-log <file>` drafts the profile and then
+measures the weights through these same rules, in one step. See [`init`](#init).
+
 ### `init`
 
 ```bash
 crowdsim init --out my-site.json
+crowdsim init --out my-site.json --access-log /var/log/nginx/access.log
 ```
 
 Drafts a profile from the artefacts already in `out/`, and says which run each part came from:
@@ -261,7 +361,8 @@ Drafts a profile from the artefacts already in `out/`, and says which run each p
 
   It will NOT run yet, by design:
      · safety.allow_hosts and safety.safe_peak_rps are empty — fill them in;
-     · the class weights are a starting point, not your traffic mix;
+     · the class weights are a starting point, not your traffic mix — `crowdsim init
+       --access-log <file>` measures them from your own log instead;
      · slo.max_p95_ms and slo.guillotine_ms are TODO, and the second must be your proxy's read
        timeout, or the 504s a run produces will be invisible to it.
 
@@ -293,9 +394,43 @@ draft until a human fills them in:
   6 errors · 0 warnings — errors must be fixed before a run means anything
 ```
 
-Everything else it cannot measure is a `TODO` rather than a plausible value, for the same reason. The **class
-weights especially**: crowdsim does not read edge logs, by choice, and a mix nobody measured is a guess
-wearing a number — the draft says so where the weights are.
+Everything else it cannot measure is a `TODO` rather than a plausible value, for the same reason.
+
+**The class weights, measured.** Hand over an access log and the draft's placeholder weights are replaced by
+counted ones, through exactly the rules [`weights`](#weights) uses — one command instead of drafting, running
+`weights`, and pasting:
+
+```
+  ✅ drafted my-site.json
+     from probe 20260901T100000Z: target, page weight 46231 B, 0 declared cache layer(s)
+     from discover 20260901T101000Z: pool out/pool-20260901T101000Z.json, 2 of 2 verified to render
+
+▶ measuring the mix on /var/log/nginx/access.log
+  ✅ mix measured: 11 of 12 GET requests classified, from 13 lines
+     html             36.4
+     rsc_page         54.5
+     static            9.1
+  ⚠️  8.3% unclassified: these weights describe 91.7% of the traffic, not all of it.
+      See what did not match:  crowdsim weights <log> --profile my-site.json
+     window: 2026-09-01T12:01:00 → 2026-09-01T12:22:00
+
+  It will NOT run yet, by design:
+     · safety.allow_hosts and safety.safe_peak_rps are empty — fill them in;
+     · slo.max_p95_ms and slo.guillotine_ms are TODO, and the second must be your proxy's read
+       timeout, or the 504s a run produces will be invisible to it.
+
+  Then:  crowdsim validate my-site.json
+```
+
+The measurement travels **into the profile**, not only to the terminal: `_classes_comment` records how many
+requests were classified, what share was not, and the window they came from, and `_provenance` gains a line
+for the log. Each measured class says so in its own comment. What the log never showed keeps its placeholder
+weight and gains a `TODO: NOT ONCE in the log that was measured` — a class is not deleted because one window
+did not contain it, which is how a mix loses its long tail.
+
+Nothing from the log reaches `out/` on this path either: the draft receives counts, shares and the window,
+never a URL. If the log cannot be parsed, the draft is **kept** with its placeholder weights (it is right;
+only the mix is still a guess) and the command exits with the parser's own code.
 
 - With no `probe` and no `discover` artefact it exits **4** and names the two commands to run first, instead
   of writing a hollow file.
@@ -396,6 +531,10 @@ Only `load` uses most of them; unknown flags are an error (exit 2) rather than b
 | `--ttl <s>` | `10` | cache-ab | Cache TTL for the candidate leg. |
 | `--port <n>` | `8787` | serve | GUI port. |
 | `--bind <addr>` | `127.0.0.1` | serve | GUI bind address. Anything but loopback needs a token. |
+| `--format <fields>` | combined | weights | Column names of a log that is not the combined format: `request`, `path`, `method`, `status`, `time`, `-`. |
+| `--top <n>` | `10` | weights | How many unclassified paths to show. |
+| `--access-log <file>` | — | init | Measure the class weights from this log instead of drafting them as a `TODO`. |
+| `--json` | off | compare, weights | Machine-readable output. For `weights` it carries counts, shares and the window — never a path from the log. |
 | `--out <file>` | — | record, report, init | Where to write the journey file, the report, or the drafted profile. |
 | `-h`, `--help` | — | all | The usage header. |
 | `-V`, `--version` | — | — | The version, including inside the image where nothing else can say. |
@@ -423,8 +562,8 @@ They are an API: the Nomad job, CI and the GUI all branch on them.
 | `0` | Executed | Also when the brake tripped — that is an outcome, not an error |
 | `2` | Usage | Unknown flag or subcommand, missing/unparseable profile, unknown target, `--shape journey` without `journey.file` |
 | `3` | A safety gate refused it | No allowlist, host not allowlisted, peak above the ceiling without the override, GUI asked to bind off-loopback without a token |
-| `4` | Target unreachable | `probe` got ≥400 or no answer |
-| `5` | Missing prerequisite | k6 absent, docker absent for `cache-ab`, node absent for `serve` |
+| `4` | Nothing usable in the input | `probe` got ≥400 or no answer; `record` found no page in the HAR; `weights` classified nothing in the log; `init` found no artefacts to assemble |
+| `5` | Missing prerequisite | k6 absent, docker absent for `cache-ab`, node absent for `serve`, `validate`, `record` or `weights` |
 
 ### `compare`
 

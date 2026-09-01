@@ -56,7 +56,25 @@ export const api = {
   // verdict here: the refusals are the feature, and two copies of them would eventually disagree.
   compare: (a, b) => call('GET', `/api/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`),
   historyRun: (runId) => call('GET', `/api/history/${encodeURIComponent(runId)}`),
+  // The report is markdown, not JSON, and it is produced by `crowdsim report` on the server. Fetched here
+  // rather than linked with an <a href>, because a link cannot carry the bearer token the off-loopback mode
+  // requires — a download that works on loopback and silently 401s behind a token is worse than a button.
+  reportMarkdown: (runId) => text('GET', `/api/history/${encodeURIComponent(runId)}/report`),
 };
+
+async function text(method, url) {
+  const headers = {};
+  const token = getToken();
+  if (token) headers.Authorization = `Bearer ${token}`;
+  const res = await fetch(url, { method, headers });
+  const body = await res.text();
+  if (!res.ok) {
+    let json = null;
+    try { json = body ? JSON.parse(body) : null; } catch (e) { /* not json */ }
+    throw new ApiError((json && json.error) || `${method} ${url} failed (${res.status})`, res.status, json);
+  }
+  return body;
+}
 
 /**
  * Live log. EventSource cannot send an Authorization header, so when a token is configured it goes in the

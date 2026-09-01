@@ -46,6 +46,10 @@ The first time through, `init` sits in the middle of that line rather than at th
 easier once the tool has measured the page weight, the cache layers and a pool that renders. Every run after
 that starts at `probe`.
 
+One input is not on that line because it comes from outside the tool: the **class mix**. `crowdsim weights`
+counts it from an access log you hand over, and `crowdsim init --access-log` does it as part of the draft —
+[step 3b](#3b-init--the-first-profile-from-what-was-just-measured-first-time-only).
+
 ### 1. `doctor`
 
 ```bash
@@ -108,6 +112,19 @@ from. What it leaves blank is what matters: `safety.allow_hosts` and `safety.saf
 class weights are labelled a starting point rather than a mix, and everything else it cannot measure is a
 `TODO` instead of a plausible number. `validate` refuses the file until you have been through them. Details
 in the [CLI reference](cli.md#init).
+
+**The one TODO you can close with a measurement.** The class weights have to come from your own edge access
+log, and the tool will now count one for you:
+
+```bash
+crowdsim init --out my-site.json --access-log /var/log/nginx/access.log
+# or, on a profile that already exists:
+ssh edge 'zcat /var/log/nginx/access.log.*.gz' | crowdsim weights - --profile my-site.json
+```
+
+The log is handed over — nothing goes and fetches it, and nothing from it is written to `out/`. Read the
+unclassified share before pasting anything: a mix computed from part of a log is a mix of something else. See
+[`weights`](cli.md#weights).
 
 Bootstrapping question, answered: the first `probe` and `discover` need *a* profile, so start from
 [`profiles/example.json`](../profiles/example.json) with your own `base_url` and allowlist, and let `init`

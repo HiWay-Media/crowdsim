@@ -8,7 +8,7 @@ SHELL := /usr/bin/env bash
 .DEFAULT_GOAL := help
 
 .PHONY: help install test test-unit test-cli test-gui test-ui test-e2e test-k8s lint gui gui-dev gui-build \
-        image image-smoke image-run docs docs-serve clean
+        image image-smoke image-run check-docs docs docs-serve clean
 
 # The docs toolchain is Python and is not needed to build or test the tool itself, so it lives in a
 # throwaway virtualenv rather than in the repository's dependencies.
@@ -100,6 +100,11 @@ image-run: ## run the GUI from the image on http://127.0.0.1:8787 (token printed
 	  -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$$token" \
 	  -v "$$PWD/profiles:/profiles" -v "$$PWD/out:/out" \
 	  $(IMAGE) crowdsim serve
+
+check-docs: ## the three claims the documentation makes about itself: versions, commands, quoted output
+	scripts/check-doc-versions.sh
+	scripts/check-doc-commands.sh
+	scripts/check-doc-output.sh --self-test
 
 $(DOCS_VENV)/bin/mkdocs:
 	python3 -m venv $(DOCS_VENV)

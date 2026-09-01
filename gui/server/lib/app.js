@@ -268,6 +268,39 @@ export function createApp(opts) {
     return res.status(body.refused && body.refused.length ? 422 : 200).json(body);
   }));
 
+  // One run as markdown, produced by `crowdsim report` — not by a second renderer here.
+  //
+  // The report is the artefact somebody reading a finished run wants next: it carries the caveats attached
+  // to the numbers, because the caveats are what does not survive being retyped into a ticket. The GUI had
+  // no way to produce it, so the caveats were exactly what got left behind on the way out of the page.
+  //
+  // Written to out/ by the CLI at its own default path, then handed over. The alternative — rendering the
+  // markdown here — is a second opinion about what a run means, and the first time the two disagreed the
+  // wrong one would be in an incident document.
+  app.get('/api/history/:runId/report', wrap((req, res) => {
+    const RUN_ID = /^\d{8}T\d{6}Z$/;
+    const runId = String(req.params.runId || '');
+    if (!RUN_ID.test(runId)) throw new InvalidRun('runId', 'not a run id, as printed by crowdsim history');
+    if (!readSummary(outDir, runId)) return res.status(404).json({ error: 'no summary for that run id' });
+
+    const r = spawnSync(o.crowdsimBin, ['report', runId], {
+      encoding: 'utf8',
+      timeout: 20000,
+      env: Object.assign({}, process.env, o.env || {}, { CROWDSIM_OUT: outDir }),
+    });
+    if (r.error) {
+      throw Object.assign(new Error(`could not write the report: ${r.error.message}`), { status: 500 });
+    }
+    const file = path.join(outDir, `report-${runId}.md`);
+    if (r.status !== 0 || !fs.existsSync(file)) {
+      throw Object.assign(new Error(`crowdsim report exited ${r.status}: ${(r.stderr || r.stdout || '').trim()}`),
+        { status: 500 });
+    }
+    res.type('text/markdown; charset=utf-8')
+      .set('Content-Disposition', `attachment; filename="crowdsim-report-${runId}.md"`)
+      .send(fs.readFileSync(file, 'utf8'));
+  }));
+
   app.get('/api/history/:runId', wrap((req, res) => {
     const summary = readSummary(outDir, req.params.runId);
     if (!summary) return res.status(404).json({ error: 'no summary for that run id' });

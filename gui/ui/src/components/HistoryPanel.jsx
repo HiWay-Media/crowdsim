@@ -29,7 +29,10 @@ export default function HistoryPanel() {
   // A comparison is a thing people quote to each other, so it has an address: #history=<a>,<b>. Parsing it
   // (and refusing anything that is not two run ids) is lib/hash.js, with its tests.
   useEffect(() => {
-    const { pair: ids } = parseHash(window.location.hash);
+    const { pair: ids, one } = parseHash(window.location.hash);
+    // A single run id in the fragment opens that run's result. It is how a result gets handed to somebody
+    // — including its report, which is a button on that card — without telling them which row to click.
+    if (one) setSelected(one);
     if (!ids) return;
     setPicked(ids);
     api.compare(ids[0], ids[1])
@@ -65,6 +68,12 @@ export default function HistoryPanel() {
   useEffect(() => {
     if (!selected) return;
     api.historyRun(selected).then(setDetail).catch((e) => setError(e.message));
+    // The address follows the selection, unless a comparison already owns the fragment: two ids mean a
+    // comparison and overwriting it with one would silently close the thing somebody was linked to.
+    if (!parseHash(window.location.hash).pair) {
+      const next = formatHash('history', selected);
+      if (window.location.hash.replace(/^#/, '') !== next) window.location.hash = next;
+    }
   }, [selected]);
 
   return (

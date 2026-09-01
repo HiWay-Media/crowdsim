@@ -13,11 +13,30 @@ setup() { crowdsim_setup; }
   [[ "$output" == *"THIS TOOL GENERATES REAL LOAD"* ]]
 }
 
-@test "the usage header is inside the window usage() reads" {
-  # usage() is `sed -n '1,60p' | grep '^#'`: comments pushed past line 60 vanish from --help silently.
-  run bash -c "grep -n 'Requires: k6, curl, python3' '$CROWDSIM' | cut -d: -f1"
+@test "the whole comment header reaches --help, and the shebang does not" {
+  # usage() used to be `sed -n '1,60p' | grep '^#'`, which had two silent failure modes: it printed the
+  # shebang stripped of its `#` as the FIRST line of --help, and it truncated the help the moment the header
+  # grew past sixty lines. It is now extracted by structure — line 2 to the first non-comment line — so both
+  # ends are asserted here rather than a line count nobody would notice breaking.
+  run "$CROWDSIM" --help
   [ "$status" -eq 0 ]
-  [ "$output" -le 60 ]
+  case "$output" in
+    *"/usr/bin/env bash"*) printf 'the shebang is being printed as help\n' >&2; return 1;;
+  esac
+  # the last line of the header, whatever line number it now lives on
+  case "$output" in
+    *"Requires: k6, curl, python3"*) ;;
+    *) printf 'the help stops before the end of the header\n' >&2; return 1;;
+  esac
+  # and every subcommand the dispatcher accepts is named in it: a subcommand missing from --help does not
+  # exist as far as anyone reading the tool is concerned
+  local sub
+  for sub in doctor discover probe load cache-ab history compare report weights init record validate serve; do
+    case "$output" in
+      *"$sub"*) ;;
+      *) printf '%s is dispatched but not in the header\n' "$sub" >&2; return 1;;
+    esac
+  done
 }
 
 @test "no subcommand prints usage and exits 2" {

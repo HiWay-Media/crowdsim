@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 /*
  * A run result, in the order in which it has to be read:
@@ -9,6 +9,7 @@ import React from 'react';
  */
 import { abortDetail } from '../lib/messages.js';
 import { kneeText } from '../lib/runs.js';
+import { api } from '../api.js';
 
 const pct = (x) => (x === null || x === undefined ? 'n/a' : `${(x * 100).toFixed(2)}%`);
 const ms = (x) => (x === null || x === undefined ? 'n/a' : `${Math.round(x)} ms`);
@@ -16,9 +17,46 @@ const ms = (x) => (x === null || x === undefined ? 'n/a' : `${Math.round(x)} ms`
 export default function SummaryCard({ summary, compare }) {
   const s = summary;
   const classes = Object.keys(s.per_class || {}).filter((c) => s.per_class[c].reqs);
+  const [reportError, setReportError] = useState(null);
+  const [reporting, setReporting] = useState(false);
+
+  // The report is written by `crowdsim report` on the server and handed over as a file. Nothing about a run
+  // is rendered into markdown here: the caveats are the point of that document, and a second renderer is a
+  // second opinion about what a run means.
+  async function downloadReport() {
+    setReportError(null);
+    setReporting(true);
+    let url = null;
+    try {
+      const md = await api.reportMarkdown(s.run_id);
+      url = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `crowdsim-report-${s.run_id}.md`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (e) {
+      setReportError(e.message);
+    } finally {
+      if (url) URL.revokeObjectURL(url);
+      setReporting(false);
+    }
+  }
+
   return (
     <section className="card wide">
-      <h2>Result <span className="mono">{s.run_id}</span></h2>
+      <h2>
+        Result <span className="mono">{s.run_id}</span>
+        <button type="button" className="heading-action" onClick={downloadReport} disabled={reporting}>
+          {reporting ? 'writing…' : 'Download report (.md)'}
+        </button>
+      </h2>
+      <p className="note">
+        The report carries the caveats attached to the numbers — what this run is worth, not only what it
+        measured. That is the part that does not survive being retyped into a ticket.
+      </p>
+      {reportError ? <div className="banner bad">Could not write the report: {reportError}</div> : null}
 
       {!s.generator_ok ? (
         <div className="banner bad">

@@ -372,3 +372,41 @@ test('history carries the knee, and a row from before it existed is not invented
     assert.equal(newest.knee_crossed, null);
   });
 });
+
+// ── the report, produced by the CLI and handed over (#53) ────────────────────────────────────────────
+// The GUI had no way to produce the one artefact somebody reading a finished run wants next, so the
+// caveats — the whole point of that document — were what got left behind on the way out of the page.
+
+test('a finished run can be handed over as markdown, written by crowdsim report', async () => {
+  await withServer({}, async ({ api, outDir }) => {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.copyFileSync(path.join(root, 'tests/cli/fixtures/summary-good.json'),
+      path.join(outDir, 'summary-20260805T100000Z.json'));
+
+    const r = await api('GET', '/api/history/20260805T100000Z/report');
+    assert.equal(r.status, 200);
+    assert.match(r.text, /FAKE REPORT BODY/);
+    // The server hands over the CLI's file rather than rendering its own: the artefact is on disk where
+    // `crowdsim report` puts it, which is also where the CLI's users already look for it.
+    assert.ok(fs.existsSync(path.join(outDir, 'report-20260805T100000Z.md')));
+  });
+});
+
+test('a run id with no summary is a 404, and a path is not a run id', async () => {
+  await withServer({}, async ({ api }) => {
+    assert.equal((await api('GET', '/api/history/20260805T100000Z/report')).status, 404);
+    assert.equal((await api('GET', '/api/history/nope/report')).status, 400);
+    assert.equal((await api('GET', '/api/history/..%2F..%2Fetc%2Fpasswd/report')).status, 400);
+  });
+});
+
+test('when crowdsim report fails, the failure is reported and not an empty file', async () => {
+  await withServer({ env: { FAKE_EXIT: '2' } }, async ({ api, outDir }) => {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.copyFileSync(path.join(root, 'tests/cli/fixtures/summary-good.json'),
+      path.join(outDir, 'summary-20260805T100000Z.json'));
+    const r = await api('GET', '/api/history/20260805T100000Z/report');
+    assert.equal(r.status, 500);
+    assert.match(r.json.error, /exited 2/);
+  });
+});

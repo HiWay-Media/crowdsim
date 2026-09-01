@@ -11,6 +11,20 @@ trap 'echo "interrupted: winding down and keeping the summary"; exit 0' INT
 echo "ARGV: $*"
 echo "  run       20260805T101112Z"
 
+# `report <run-id>` writes a markdown file where the real one does, so the API test can assert that the
+# server hands over the CLI's artefact instead of rendering its own.
+if [ "${1:-}" = "report" ]; then
+  if [ "${FAKE_EXIT:-0}" != "0" ]; then
+    echo "no summary for ${2:-}" >&2
+    exit "${FAKE_EXIT}"
+  fi
+  mkdir -p "$CROWDSIM_OUT"
+  printf '# crowdsim %s\n\n## Is this run valid?\n\nFAKE REPORT BODY\n' "${2:-}" \
+    > "$CROWDSIM_OUT/report-${2:-unknown}.md"
+  echo "  ✅ wrote $CROWDSIM_OUT/report-${2:-}.md"
+  exit 0
+fi
+
 if [ -n "${FAKE_SUMMARY_SRC:-}" ]; then
   mkdir -p "$CROWDSIM_OUT"
   cp "$FAKE_SUMMARY_SRC" "$CROWDSIM_OUT/summary-20260805T101112Z.json"

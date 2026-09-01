@@ -62,6 +62,13 @@ jobs:
       - name: the documentation describes the tool that exists
         run: scripts/check-doc-commands.sh
 
+      # And the third claim: that the output the documentation QUOTES is output the tool still produces.
+      # The commands check cannot see what a command prints, and those blocks are the part a reader compares
+      # against their own terminal. --self-test plants a fabricated refusal first and asserts it is caught:
+      # a checker nobody has watched fail is a checker nobody knows the shape of.
+      - name: the documentation quotes output the tool still produces
+        run: scripts/check-doc-output.sh --self-test
+
       - name: CLI tests (safety gates, exit codes, release helper)
         run: make test-cli
 

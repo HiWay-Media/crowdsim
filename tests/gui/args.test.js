@@ -102,3 +102,40 @@ test('probe and discover build their own narrow commands', () => {
   // neither can be talked into generating load
   assert.ok(!buildProbeArgs({ peak: 9000, force: true, confirm: 'x' }, P).join(' ').includes('peak'));
 });
+
+// ── the warm-up: two flags the CLI had and the page did not (#53) ────────────────────────────────────
+
+test('a warm-up is passed through as its own two flags', () => {
+  const argv = buildLoadArgs({ target: 'edge', peak: 60, warmup: '30s', warmupPeak: 20 }, P, NAME);
+  const joined = argv.join(' ');
+  assert.ok(joined.includes('--warmup 30s'), joined);
+  assert.ok(joined.includes('--warmup-peak 20'), joined);
+});
+
+test('a warm-up rate without a duration is refused: it would do nothing at all', () => {
+  assert.throws(() => buildLoadArgs({ peak: 60, warmupPeak: 20 }, P, NAME),
+    (e) => e instanceof InvalidRun && e.field === 'warmup');
+});
+
+test('the warm-up duration is validated as a duration, and its rate as an integer', () => {
+  assert.throws(() => buildLoadArgs({ peak: 60, warmup: 'a while' }, P, NAME),
+    (e) => e instanceof InvalidRun && e.field === 'warmup');
+  assert.throws(() => buildLoadArgs({ peak: 60, warmup: '30s', warmupPeak: 'fast' }, P, NAME),
+    (e) => e instanceof InvalidRun && e.field === 'warmupPeak');
+  assert.throws(() => buildLoadArgs({ peak: 60, warmup: '30s', warmupPeak: 0 }, P, NAME),
+    (e) => e instanceof InvalidRun && e.field === 'warmupPeak');
+});
+
+test('no warm-up means no flags: a run that did not ask for one gets exactly what it got before', () => {
+  const argv = buildLoadArgs({ target: 'edge', peak: 60, warmup: '', warmupPeak: '' }, P, NAME);
+  assert.deepEqual(argv, ['load', '--profile', P, '--target', 'edge', '--peak', '60']);
+});
+
+test('a warm-up does not arm the override, and the override still needs the typed name', () => {
+  // The safe-peak gate for a warm-up lives in bin/crowdsim, which re-runs it with the warm-up rate. What
+  // must not happen here is the GUI granting the override because a warm-up was requested.
+  const argv = buildLoadArgs({ peak: 60, warmup: '30s', warmupPeak: 900 }, P, NAME);
+  assert.ok(!argv.includes('--i-know-this-breaks-production'));
+  assert.throws(() => buildLoadArgs({ peak: 60, warmup: '30s', warmupPeak: 900, force: true }, P, NAME),
+    (e) => e instanceof InvalidRun && e.field === 'confirm');
+});

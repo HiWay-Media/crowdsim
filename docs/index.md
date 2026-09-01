@@ -34,6 +34,7 @@ caching would actually buy you — instead of estimating it from logs after the 
 | understand what it does that `hey`/`vegeta`/`wrk` do not | [Architecture](architecture.md) |
 | run it from a container | [Docker](docker.md) |
 | write a profile for your own site | [Profile reference](profile.md) |
+| measure the class mix from your own access log | [`weights`](cli.md#weights) |
 | plan and execute a real test | [Running a test](running-a-test.md) |
 | know whether a result means anything | [Reading results](reading-results.md) |
 | use the browser interface | [GUI](gui.md) |
@@ -46,7 +47,7 @@ caching would actually buy you — instead of estimating it from logs after the 
 ## The three things worth knowing before you start
 
 **1. `--peak` is total user requests per second, not page loads.** A profile declares request *classes*
-with the weights you measured on your own edge log; each class gets `weight/total × peak`. On a
+with the weights you measured on your own edge log (`crowdsim weights <access.log>` counts them for you); each class gets `weight/total × peak`. On a
 server-rendered frontend one document pulls N framework navigation requests plus M assets — all served by
 the same process. Fire a flat URL list instead and you measure a load that does not exist, usually a
 reassuring one.
