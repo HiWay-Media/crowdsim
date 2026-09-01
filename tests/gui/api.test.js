@@ -410,3 +410,32 @@ test('when crowdsim report fails, the failure is reported and not an empty file'
     assert.match(r.json.error, /exited 2/);
   });
 });
+
+test('the same run can be handed over as a page with charts', async () => {
+  await withServer({}, async ({ api, outDir }) => {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.copyFileSync(path.join(root, 'tests/cli/fixtures/summary-good.json'),
+      path.join(outDir, 'summary-20260805T100000Z.json'));
+
+    const r = await api('GET', '/api/history/20260805T100000Z/report?format=html');
+    assert.equal(r.status, 200);
+    assert.match(r.text, /FAKE HTML REPORT BODY/);
+    assert.ok(fs.existsSync(path.join(outDir, 'report-20260805T100000Z.html')));
+
+    // and the markdown one is still the default: a caller that asks for nothing gets what it always got
+    const md = await api('GET', '/api/history/20260805T100000Z/report');
+    assert.match(md.text, /FAKE REPORT BODY/);
+    assert.ok(!/FAKE HTML/.test(md.text));
+  });
+});
+
+test('a format the server does not produce is a 400, not a guess', async () => {
+  await withServer({}, async ({ api, outDir }) => {
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.copyFileSync(path.join(root, 'tests/cli/fixtures/summary-good.json'),
+      path.join(outDir, 'summary-20260805T100000Z.json'));
+    const r = await api('GET', '/api/history/20260805T100000Z/report?format=pdf');
+    assert.equal(r.status, 400);
+    assert.equal(r.json.field, 'format');
+  });
+});

@@ -59,7 +59,10 @@ export const api = {
   // The report is markdown, not JSON, and it is produced by `crowdsim report` on the server. Fetched here
   // rather than linked with an <a href>, because a link cannot carry the bearer token the off-loopback mode
   // requires — a download that works on loopback and silently 401s behind a token is worse than a button.
-  reportMarkdown: (runId) => text('GET', `/api/history/${encodeURIComponent(runId)}/report`),
+  // format 'md' for a ticket, 'html' for the same run drawn. The server spawns `crowdsim report` either
+  // way: the page renders no report of its own, in either format.
+  report: (runId, format) => text('GET', `/api/history/${encodeURIComponent(runId)}/report`
+    + `?format=${encodeURIComponent(format || 'md')}`),
 };
 
 async function text(method, url) {

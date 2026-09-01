@@ -19,6 +19,15 @@ if [ "${1:-}" = "report" ]; then
     exit "${FAKE_EXIT}"
   fi
   mkdir -p "$CROWDSIM_OUT"
+  # --html writes a different file, exactly as the real driver does: the endpoint must pick the right one
+  # rather than serving whichever happens to exist.
+  case "$*" in
+    *--html*)
+      printf '<!doctype html>\n<title>crowdsim %s</title>\n<p>FAKE HTML REPORT BODY</p>\n' "${2:-}" \
+        > "$CROWDSIM_OUT/report-${2:-unknown}.html"
+      echo "  ✅ wrote $CROWDSIM_OUT/report-${2:-}.html"
+      exit 0;;
+  esac
   printf '# crowdsim %s\n\n## Is this run valid?\n\nFAKE REPORT BODY\n' "${2:-}" \
     > "$CROWDSIM_OUT/report-${2:-unknown}.md"
   echo "  ✅ wrote $CROWDSIM_OUT/report-${2:-}.md"

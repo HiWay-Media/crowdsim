@@ -37,6 +37,7 @@ caching would actually buy you — instead of estimating it from logs after the 
 | measure the class mix from your own access log | [`weights`](cli.md#weights) |
 | plan and execute a real test | [Running a test](running-a-test.md) |
 | know whether a result means anything | [Reading results](reading-results.md) |
+| hand a run to somebody else, drawn | [`report --html`](cli.md#--html-the-same-run-drawn) |
 | use the browser interface | [GUI](gui.md) |
 | look up a flag or an exit code | [CLI reference](cli.md) |
 | change the code, or cut a release | [Development](development.md) |

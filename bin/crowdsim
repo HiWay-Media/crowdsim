@@ -24,7 +24,8 @@
 #               the tweak under evaluation and one as-is → measured hit ratio and offload
 #   history     one line per run, to see whether the knee moves over time
 #   compare     the delta between two runs, and a refusal when they are not comparable
-#   report      one run as pasteable markdown, with the caveats that do not survive retyping
+#   report      one run as pasteable markdown, with the caveats that do not survive retyping · --html
+#               draws it instead: the ramp as a curve, the knee, per class, in one offline file
 #   weights     count YOUR access log into the class mix: the one input this tool demands and used to
 #               refuse to help measure. Reads a file or stdin, writes nothing (needs node)
 #   init        draft a first profile from what probe/discover/record already measured (safety left blank)
@@ -47,6 +48,7 @@
 #   crowdsim compare  <run-a> <run-b> [--json]
 #   crowdsim init     [--out <profile.json>] [--access-log <access.log>]
 #   crowdsim report   <run-id> [--compare <run-id>] [--out <file.md>]
+#                     [--html]   the same run as a self-contained page with charts (needs node)
 #   crowdsim record   <file.har> [--out <journey.json>] [--origin <url>] [--rsc-query _rsc] [--force]
 #   crowdsim validate <f.json>
 #   crowdsim serve    [--port 8787] [--bind 127.0.0.1]
@@ -161,6 +163,7 @@ while [ $# -gt 0 ]; do
     --rsc-query) RSC_QUERY_OVERRIDE="$2"; shift 2;;
     --force) FORCE_OVERWRITE=1; shift;;
     --verify) VERIFY=1; shift;;
+    --html) REPORT_HTML=1; shift;;
     --touch-and-go) TOUCH_AND_GO=1; shift;;
     --insecure) INSECURE=1; shift;;
     --slack) SLACK=1; shift;;
@@ -1435,6 +1438,27 @@ cmd_report() {
   local summary="$OUT_DIR/summary-$run.json"
   if [ ! -f "$summary" ]; then
     die "no summary for $run in $OUT_DIR — is that a run id? (crowdsim history)" 2
+  fi
+
+  # ── --html: the same run as a page with charts ──────────────────────────────────────────────────
+  # A ramp is a curve, and a table of eight rows asks the reader to draw it in their head. The markdown
+  # report stays exactly as it was: it is the right thing for a ticket, and it needs no node.
+  if [ "${REPORT_HTML:-0}" = "1" ]; then
+    if [ -n "${REPORT_COMPARE:-}" ]; then
+      die "--html reports one run. A delta between two runs is \`crowdsim compare\` (and the markdown
+  report embeds it with --compare): drawing two runs on one pair of axes without compare's refusals
+  would put a confident picture behind two different experiments." 2
+    fi
+    if ! command -v node >/dev/null 2>&1; then
+      die "crowdsim report --html needs node (18+): the charts live in lib/report-html.mjs, where their
+  geometry is tested. The markdown report needs nothing: crowdsim report $run" 5
+    fi
+    local renderer="$ROOT/lib/report-html-cli.mjs"
+    [ -f "$renderer" ] || die "missing $renderer (is CROWDSIM_ROOT right?)" 5
+    local html_out="${REPORT_OUT:-$OUT_DIR/report-$run.html}"
+    node "$renderer" "$summary" --out "$html_out" --version "$(crowdsim_version)"
+    say "     open it in a browser, attach it, or print it to PDF — it fetches nothing and renders offline"
+    return 0
   fi
 
   local out="${REPORT_OUT:-$OUT_DIR/report-$run.md}"

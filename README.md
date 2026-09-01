@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.18.0        # or :1.18, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.19.0        # or :1.19, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.18.0 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.19.0 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.18.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.19.0 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -137,6 +137,7 @@ crowdsim compare <run-a> <run-b>                          # the delta, or a refu
 crowdsim weights access.log --profile p.json               # the class mix, counted on your own edge log
 crowdsim init                                             # a first profile, drafted from what was measured
 crowdsim report  <run-id>                                 # the run as markdown, caveats attached
+crowdsim report  <run-id> --html                          # the same run drawn: the ramp, the knee, per class
 crowdsim serve                                            # the same thing with a GUI, on loopback
 ```
 
@@ -146,6 +147,7 @@ crowdsim serve                                            # the same thing with 
 crowdsim discover --profile p.json --verify && crowdsim probe --profile p.json
 crowdsim load --profile p.json --peak 60 --warmup 30s    # stays under the profile's safe ceiling
 crowdsim report <run-id> --out ticket.md                 # what to paste, with what it is worth
+crowdsim report <run-id> --html                          # and the same run drawn, to attach
 ```
 
 First time, with no profile of your own yet: `probe` and `discover` once against
@@ -159,7 +161,8 @@ for a profile that already exists. The log is handed over, never fetched, and no
 
 `crowdsim serve` puts a page in front of the same CLI: pick a profile and a target, see the mix the peak
 implies, read the exact command before agreeing to it, launch (with an optional warm-up whose numbers are
-thrown away), watch the log stream, read the result, hand it over as a report, compare it with previous runs. The step-by-step guide, with screenshots, is **[docs/gui.md](docs/gui.md)**.
+thrown away), watch the log stream, read the result, hand it over as a report — markdown to paste, or the
+same run drawn — and compare it with previous runs. The step-by-step guide, with screenshots, is **[docs/gui.md](docs/gui.md)**.
 
 ```bash
 npm install && npm run gui:build      # once

@@ -55,6 +55,10 @@
       "description": "Everything this tool knows how to do, it does well the second time. The first time you have to already know it: `crowdsim --help` opens with the line `!/usr/bin/env bash`, `crowdsim load --help` answers with the same sixty lines as every other subcommand, nothing completes a subcommand or a flag in a shell, `report` and `compare` want a 16-character UTC timestamp copied out of another command's output, `history` prints fourteen columns for every run ever recorded and takes no arguments at all, and the path to a first profile is six commands with hand-editing in between and nothing that says which one you are on. None of that is a missing feature — it is the cost of using the features that exist, paid on every run. Every item here was found by running the commands, not by reading the code, and none of them touches a gate: no default allowlist, no interactive prompt, no brake that is easier to get past."
     },
     {
+      "title": "v1.11.0",
+      "description": "A result somebody else can read. Every number this tool produces is a curve — rate against latency, per step — and the only place that curve was ever drawn is the GUI: the moment a result left the page it went back to being a table of eight rows, and the reader was asked to draw the ramp in their head. One milestone, one feature, because the feature is small and the rules around it are not: a chart is the most persuasive thing this tool can produce, so the interesting half of the work is what it refuses to draw."
+    },
+    {
       "title": "Backlog",
       "description": "Accepted but unscheduled. Nothing here blocks a release."
     }
@@ -991,6 +995,26 @@
         "- No prompts, no wizard, no `-y`: this repository has no interactive confirmations by design, and a guided setup is exactly where one would be added by accident.",
         "- `docs/index.md` §Start here and the README's Use section both lead with it, and `docs/running-a-test.md` is rewritten around the state it reports rather than around a numbered list a reader has to keep their place in.",
         "- bats over the state detection: no artefacts, artefacts but a draft profile, a valid profile ready to run."
+      ]
+    },
+    {
+      "key": "report-html-charts",
+      "title": "A run leaves the GUI as a table: the ramp is a curve and nothing outside the page draws it",
+      "milestone": "v1.11.0",
+      "labels": ["area:cli", "validity", "documentation"],
+      "body": [
+        "`crowdsim report` writes markdown, which is the right thing for a ticket and cannot show the SHAPE of a ramp. The shape is the point: `per_step` (1.16.0) and `knee` (1.17.0) made a single run a curve, and the GUI has plotted it since — and only the GUI. Everywhere else a result is eight rows and an instruction to imagine the line.",
+        "",
+        "The data is already in `out/summary-<run>.json`. What is missing is an artefact somebody can attach.",
+        "",
+        "**Done when**",
+        "- `crowdsim report <run> --html` writes one self-contained page: the ramp as a curve with the SLO and the read timeout on it, the knee as a band between the last clean rate and the first crossed one, p95 per class against the limit each class is actually held to, and the cache per layer.",
+        "- **Nothing is fetched.** No script, no font, no stylesheet, no image — a report that needs the network is not an attachment. Asserted by a test that greps the output.",
+        "- **An invalid run gets no latency chart.** `generator_ok: false` means no step measured the rate it claims, and a curve drawn from it looks exactly like a healthy system absorbing load. It gets exactly one chart: requested rate against delivered rate, the evidence of why it is invalid. Same for an unreachable target.",
+        "- **A threshold is drawn only when the run recorded it**, and one that does not fit the scale is named rather than silently dropped. That means the summary has to carry the limits it was judged against: reading a threshold out of a prose sentence is not a source.",
+        "- **`unknown` is not a miss and not 0%**, and a partial step is drawn as a partial step.",
+        "- The geometry is pure and unit-tested — coordinates asserted as numbers, because a wrong scale throws nothing and produces a confident wrong picture. The e2e suite draws every run in its archive from real data and checks the per-run rule.",
+        "- The GUI offers it next to the markdown one, by spawning the same command; the docs carry a real screenshot."
       ]
     }
   ]

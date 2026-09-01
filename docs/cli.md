@@ -16,6 +16,7 @@ crowdsim record  session.har                              # a browser HAR export
 crowdsim weights access.log --profile p.json              # the class mix, counted on your own log
 crowdsim init                                             # a first profile, drafted from what was measured
 crowdsim report  <run-id>                                 # one run as markdown you can paste in a ticket
+crowdsim report  <run-id> --html                          # the same run drawn: the ramp, the knee, per class
 crowdsim serve                                            # the GUI, on loopback
 ```
 
@@ -444,6 +445,7 @@ only the mix is still a guess) and the command exits with the parser's own code.
 crowdsim report 20260820T125256Z                      # → out/report-<run-id>.md
 crowdsim report 20260820T125256Z --compare 20260819T171100Z
 crowdsim report 20260820T125256Z --out ticket.md
+crowdsim report 20260820T125256Z --html               # → out/report-<run-id>.html, with charts
 ```
 
 One run as markdown, written for the place the result actually goes: a ticket, a PR, an incident timeline.
@@ -481,6 +483,55 @@ carrying a percentage.
 
 The report describes your infrastructure — it names your hosts. It says so in its own footer, and `out/` is
 gitignored for the same reason.
+
+#### `--html`: the same run, drawn
+
+```bash
+crowdsim report 20260820T125256Z --html                 # → out/report-<run-id>.html
+crowdsim report 20260820T125256Z --html --out incident.html
+```
+
+A ramp is a curve, and a table of eight rows asks the reader to draw it in their head. The GUI has plotted it
+since 1.17.0 — and only the GUI, so the moment a result left the page it went back to being a table. This is
+the same run as one self-contained page: the ramp with the SLO and the read timeout on it, the knee as a band
+between the last clean rate and the first crossed one, p95 per class against the limit each class is actually
+held to, and the cache per layer.
+
+![The drawn report: validity, the knee, and the ramp as a curve with the SLO, the read timeout and the knee band](assets/screens/report-html.png)
+
+One file, no dependencies: no script, no font, no stylesheet, nothing fetched. It opens offline, attaches to a
+ticket, and prints to PDF (⌘P) with the tables expanded. Needs `node` — the chart geometry lives in
+`lib/report-html.mjs`, where it is tested; the markdown report needs nothing but `python3`, and is unchanged.
+
+**What the charts refuse to draw.** A chart is the most persuasive thing this tool can produce, so each of
+these is a rule with a test behind it:
+
+- **An invalid run gets no latency chart at all.** `generator_ok: false` means no step measured the rate it
+  claims, and a curve drawn from it looks exactly like a healthy system absorbing load. What such a run does
+  get is the one chart that shows *why* it is invalid — requested rate against delivered rate. Same for a
+  target that never answered: a p95 of nearly zero is not a fast system.
+- **A knee recorded next to a verdict that voids it is shown as not counting.** `crowdsim` refuses a knee on
+  an invalid run, but an older summary can carry both; the verdict wins, and the page says so rather than
+  drawing the band.
+- **A threshold line is drawn only when the run recorded the threshold.** `summary.slo` exists from 1.19.0; a
+  run archived before that gets a curve with no limit line, and a sentence saying why. A line at a guessed
+  limit moves the knee for the reader.
+- **A threshold that does not fit the scale is named, not silently dropped.** A read timeout ten times the
+  p95 would flatten the curve into the bottom of the picture, so it is left off — and said to be left off,
+  because a line that is simply absent reads as a limit nothing came near.
+- **A partial step is drawn as a partial step**: hollow marker, dashed segment, and a note. The brake fires
+  while latency is climbing, so the step it fired in is a fraction of one, biased towards its worst part.
+- **`unknown` is not a miss and not 0%.** A cache layer whose header never appeared has no hit ratio at all;
+  a zero bar would read as a cache that answered and missed every time — usually a wrong header name in the
+  profile, which is a different bug with a different fix.
+
+Every chart carries the same numbers as a table underneath it (open in print, collapsed on screen) and
+describes itself in words for a screen reader — a chart nobody can quote from is a chart somebody retypes by
+eye.
+
+`--html` reports **one** run. `--html --compare` is a usage error: a delta between two runs is
+[`compare`](#compare), and drawing two runs on one pair of axes without its refusals would put a confident
+picture behind two different experiments. The markdown report embeds the comparison, refusals included.
 
 ### `history`
 
@@ -535,6 +586,7 @@ Only `load` uses most of them; unknown flags are an error (exit 2) rather than b
 | `--top <n>` | `10` | weights | How many unclassified paths to show. |
 | `--access-log <file>` | — | init | Measure the class weights from this log instead of drafting them as a `TODO`. |
 | `--json` | off | compare, weights | Machine-readable output. For `weights` it carries counts, shares and the window — never a path from the log. |
+| `--html` | off | report | The run as a self-contained page with charts instead of markdown. Needs node. |
 | `--out <file>` | — | record, report, init | Where to write the journey file, the report, or the drafted profile. |
 | `-h`, `--help` | — | all | The usage header. |
 | `-V`, `--version` | — | — | The version, including inside the image where nothing else can say. |

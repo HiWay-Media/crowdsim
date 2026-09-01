@@ -165,6 +165,7 @@ in questo repository.
   profilo scaricato al dispatch da repo privato)
 - Output di una run: `out/summary-<run_id>.json`, `out/load-<run_id>.log`, `out/history.tsv` (`out/` e
   gitignorata: non committarla mai)
+- **Report disegnato**: `crowdsim report <run> --html` → una pagina autonoma (zero risorse esterne, niente script) con la rampa come curva, la banda del ginocchio, p95 per classe contro il limite di quella classe, cache per layer. Geometria pura e testata in `lib/report-html.mjs` + `tests/unit/report-html.test.js`: uno scale sbagliato non lancia niente, produce un grafico convincente e falso. **Regola non negoziabile**: una run con `generator_ok: false` o `target_unreachable` NON prende grafici di latenza — solo quello che mostra perché è invalida. Il summary porta `slo` (dal 1.19.0) perché una soglia non si ricostruisce da una frase.
 - **Roadmap = `.github/roadmap.json`** (sorgente unica: label, milestone, issue).
   `scripts/sync-roadmap.sh --dry-run` prima, poi senza flag; il workflow `roadmap-sync` lo rigioca al push
   su main. Il sync e additivo: **non chiude issue e non riscrive i body** esistenti, quindi una decisione

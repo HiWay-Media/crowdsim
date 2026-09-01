@@ -283,21 +283,29 @@ export function createApp(opts) {
     if (!RUN_ID.test(runId)) throw new InvalidRun('runId', 'not a run id, as printed by crowdsim history');
     if (!readSummary(outDir, runId)) return res.status(404).json({ error: 'no summary for that run id' });
 
-    const r = spawnSync(o.crowdsimBin, ['report', runId], {
+    // Two formats, one spawn: markdown for a ticket, HTML for the same run drawn — the ramp as a curve, the
+    // knee, per class. Only these two, and anything else is a 400 rather than a guess: the value ends up in
+    // an argv.
+    const format = String(req.query.format || 'md');
+    if (format !== 'md' && format !== 'html') {
+      throw new InvalidRun('format', 'format must be md or html');
+    }
+    const argv = format === 'html' ? ['report', runId, '--html'] : ['report', runId];
+    const r = spawnSync(o.crowdsimBin, argv, {
       encoding: 'utf8',
-      timeout: 20000,
+      timeout: 30000,
       env: Object.assign({}, process.env, o.env || {}, { CROWDSIM_OUT: outDir }),
     });
     if (r.error) {
       throw Object.assign(new Error(`could not write the report: ${r.error.message}`), { status: 500 });
     }
-    const file = path.join(outDir, `report-${runId}.md`);
+    const file = path.join(outDir, `report-${runId}.${format}`);
     if (r.status !== 0 || !fs.existsSync(file)) {
       throw Object.assign(new Error(`crowdsim report exited ${r.status}: ${(r.stderr || r.stdout || '').trim()}`),
         { status: 500 });
     }
-    res.type('text/markdown; charset=utf-8')
-      .set('Content-Disposition', `attachment; filename="crowdsim-report-${runId}.md"`)
+    res.type(format === 'html' ? 'text/html; charset=utf-8' : 'text/markdown; charset=utf-8')
+      .set('Content-Disposition', `attachment; filename="crowdsim-report-${runId}.${format}"`)
       .send(fs.readFileSync(file, 'utf8'));
   }));
 

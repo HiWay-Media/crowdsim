@@ -203,6 +203,25 @@ infrastructure and is never a target.
 - `JOURNEY` is passed only in journey shape; otherwise k6 would open a file it never uses, and a profile
   naming a missing journey would die in the init context with a stack trace instead of a load test.
 
+## Changing a chart
+
+`lib/report-html.mjs` is pure: a summary object in, an HTML string out. No fs, no network, no clock, no
+randomness — which is what makes the geometry testable, and geometry is the part that fails silently. A wrong
+scale throws nothing; it produces a beautiful, confident, wrong picture. So `tests/unit/report-html.test.js`
+asserts coordinates as numbers: that x increases along the ramp, that a higher p95 is a *smaller* y, that the
+knee band starts on the clean step and ends on the crossed one.
+
+Two rules that are not about drawing:
+
+- **A run whose numbers mean nothing gets no chart of those numbers.** `generator_ok: false` or
+  `target_unreachable` and the latency charts are gone — the page keeps only the one that shows why. The e2e
+  suite checks this per run against real data, because it produces one valid run and two that are not.
+- **Nothing is fetched.** No script, no font, no stylesheet, no image. A report that needs the network is not
+  an attachment, and a test greps the output for `<script`, `<link`, `@import` and ` src=`.
+
+The `.html` path needs node; the markdown report must keep working without it. That is why they are two paths
+and not one renderer with a flag.
+
 ## Changing the profile rules
 
 They live in `lib/validate.mjs` — one implementation, used by `crowdsim validate` (through

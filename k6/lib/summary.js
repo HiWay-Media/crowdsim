@@ -122,6 +122,18 @@ export function buildSummary(metrics, ctx) {
       p99: g('http_req_duration', 'p(99)'), max: g('http_req_duration', 'max'),
     },
     guillotine_ms: ctx.guillotineMs,
+    // The thresholds this run was judged against, written down rather than left to be reconstructed. They
+    // were already in the context — the brake and the knee use them — and only the sentence in
+    // `knee.crossed.why` carried the number out of the run, which is a bad place to read a threshold from:
+    // `crowdsim report --html` needs the SLO to draw a line on the ramp, and parsing prose for it would
+    // produce a chart whose limit line is a guess. A run archived before this key exists gets no line, and
+    // the report says so instead of inventing one.
+    slo: {
+      max_p95_ms: (ctx.slo && ctx.slo.max_p95_ms) || null,
+      max_failed_rate: ctx.slo && ctx.slo.max_failed_rate !== undefined ? ctx.slo.max_failed_rate : null,
+      guillotine_ms: ctx.guillotineMs,
+      per_class: ctx.classSlo || {},
+    },
     // The caveat travels with the numbers. A summary that does not say whether the caches were primed leaves
     // the first question in the room — "was it warm?" — with no answer in the file.
     warmup: ctx.warmup || null,

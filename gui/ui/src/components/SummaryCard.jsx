@@ -18,21 +18,25 @@ export default function SummaryCard({ summary, compare }) {
   const s = summary;
   const classes = Object.keys(s.per_class || {}).filter((c) => s.per_class[c].reqs);
   const [reportError, setReportError] = useState(null);
-  const [reporting, setReporting] = useState(false);
+  const [reporting, setReporting] = useState(null);
 
   // The report is written by `crowdsim report` on the server and handed over as a file. Nothing about a run
-  // is rendered into markdown here: the caveats are the point of that document, and a second renderer is a
-  // second opinion about what a run means.
-  async function downloadReport() {
+  // is rendered here in either format: the caveats are the point of that document, and a second renderer is
+  // a second opinion about what a run means.
+  //   md   — for a ticket, a PR, an incident timeline
+  //   html — the same run drawn: the ramp as a curve with the knee on it, per class, offline
+  async function downloadReport(format) {
     setReportError(null);
-    setReporting(true);
+    setReporting(format);
     let url = null;
     try {
-      const md = await api.reportMarkdown(s.run_id);
-      url = URL.createObjectURL(new Blob([md], { type: 'text/markdown' }));
+      const body = await api.report(s.run_id, format);
+      url = URL.createObjectURL(new Blob([body], {
+        type: format === 'html' ? 'text/html' : 'text/markdown',
+      }));
       const a = document.createElement('a');
       a.href = url;
-      a.download = `crowdsim-report-${s.run_id}.md`;
+      a.download = `crowdsim-report-${s.run_id}.${format}`;
       document.body.appendChild(a);
       a.click();
       a.remove();
@@ -40,7 +44,7 @@ export default function SummaryCard({ summary, compare }) {
       setReportError(e.message);
     } finally {
       if (url) URL.revokeObjectURL(url);
-      setReporting(false);
+      setReporting(null);
     }
   }
 
@@ -48,13 +52,20 @@ export default function SummaryCard({ summary, compare }) {
     <section className="card wide">
       <h2>
         Result <span className="mono">{s.run_id}</span>
-        <button type="button" className="heading-action" onClick={downloadReport} disabled={reporting}>
-          {reporting ? 'writing…' : 'Download report (.md)'}
+        <button type="button" className="heading-action" onClick={() => downloadReport('html')}
+                disabled={Boolean(reporting)}>
+          {reporting === 'html' ? 'drawing…' : 'Report with charts (.html)'}
+        </button>
+        <button type="button" className="heading-action" onClick={() => downloadReport('md')}
+                disabled={Boolean(reporting)}>
+          {reporting === 'md' ? 'writing…' : 'Report (.md)'}
         </button>
       </h2>
       <p className="note">
-        The report carries the caveats attached to the numbers — what this run is worth, not only what it
-        measured. That is the part that does not survive being retyped into a ticket.
+        Either report carries the caveats attached to the numbers — what this run is worth, not only what it
+        measured. That is the part that does not survive being retyped into a ticket. The `.html` one draws
+        the ramp as a curve with the knee on it and fetches nothing, so it still renders offline in a year;
+        the `.md` one is the one to paste.
       </p>
       {reportError ? <div className="banner bad">Could not write the report: {reportError}</div> : null}
 

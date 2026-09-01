@@ -228,3 +228,69 @@ PY
   md="$(cat "$CROWDSIM_OUT/report-$RUN.md")"
   [[ "$md" != *"the knee"* ]]
 }
+
+# ── --html: the same run, drawn (charts) ─────────────────────────────────────────────────────────────
+# A ramp is a curve, and a table asks the reader to draw it in their head. What is asserted here is the
+# driver's side: the right file, the refusals, and that an invalid run does not get a latency chart. The
+# chart geometry is unit-tested in tests/unit/report-html.test.js.
+
+@test "report --html writes a self-contained page next to the markdown one" {
+  add_knee "$RUN"
+  run "$CROWDSIM" report "$RUN" --html
+  [ "$status" -eq 0 ]
+  [ -f "$CROWDSIM_OUT/report-$RUN.html" ]
+  # nothing fetched: no script, no external stylesheet, no remote asset
+  run bash -c "grep -icE '<script|<link|@import| src=' '$CROWDSIM_OUT/report-$RUN.html' || true"
+  [ "$(printf '%s' "$output" | tr -d '[:space:]')" = "0" ]
+  run bash -c "grep -c 'p95 latency per ramp step' '$CROWDSIM_OUT/report-$RUN.html'"
+  [ "$status" -eq 0 ]
+}
+
+@test "the markdown report is untouched by the new flag" {
+  run "$CROWDSIM" report "$RUN"
+  [ "$status" -eq 0 ]
+  [ -f "$CROWDSIM_OUT/report-$RUN.md" ]
+  [ ! -f "$CROWDSIM_OUT/report-$RUN.html" ]
+}
+
+@test "--out is honoured for the page too" {
+  add_knee "$RUN"
+  run "$CROWDSIM" report "$RUN" --html --out "$BATS_TEST_TMPDIR/incident.html"
+  [ "$status" -eq 0 ]
+  [ -f "$BATS_TEST_TMPDIR/incident.html" ]
+}
+
+@test "an invalid run gets the page, and no latency chart on it" {
+  write_summary "$RUN" 0 0
+  add_knee "$RUN"
+  run "$CROWDSIM" report "$RUN" --html
+  [ "$status" -eq 0 ]
+  run bash -c "grep -c 'DISCARD THIS RUN' '$CROWDSIM_OUT/report-$RUN.html'"
+  [ "$status" -eq 0 ]
+  run bash -c "grep -c 'p95 latency per ramp step' '$CROWDSIM_OUT/report-$RUN.html' || true"
+  [ "$(printf '%s' "$output" | tr -d '[:space:]')" = "0" ]
+}
+
+@test "--html and --compare together is a usage error, not two runs on one pair of axes" {
+  write_summary 20260805T093000Z 1 0
+  run "$CROWDSIM" report "$RUN" --html --compare 20260805T093000Z
+  [ "$status" -eq 2 ]
+  case "$output" in
+    *"crowdsim compare"*) ;;
+    *) printf 'the refusal does not point at the command that owns the delta\n' >&2; return 1;;
+  esac
+}
+
+@test "without node the page says so, and names the report that needs nothing" {
+  run env PATH="$(path_without_node)" "$CROWDSIM" report "$RUN" --html
+  [ "$status" -eq 5 ]
+  case "$output" in
+    *"lib/report-html.mjs"*) ;;
+    *) printf 'the message does not name where the charts live\n' >&2; return 1;;
+  esac
+}
+
+@test "a run id with no summary is still a usage error with --html" {
+  run "$CROWDSIM" report 20260101T000000Z --html
+  [ "$status" -eq 2 ]
+}

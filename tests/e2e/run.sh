@@ -412,6 +412,61 @@ if fail:
 print(f'  ✅ the GUI hands over the CLI\'s own report ({len(body)} bytes), caveats included')
 PY
 
+# ── the same run, drawn (charts) ─────────────────────────────────────────────────────────────────────
+# The page with charts is generated from a REAL summary here, which is the only place its geometry meets
+# real data: a scale that collapses when every step has the same p95, an axis with one point, a knee band
+# whose ends are the same step. The unit tests cover the arithmetic; this covers the data.
+# Every run in the archive, not just the newest: this suite deliberately produces one clean run, one the
+# brake aborted and one against a target that never answered, and the RULE differs per run — a run whose
+# numbers mean nothing must NOT get a latency curve. Asserting only the newest tested whichever leg
+# happened to run last, and the first version of this check failed for exactly that reason.
+for run in $(curl -fsS http://127.0.0.1:18787/api/history \
+  | python3 -c 'import json,sys; print(" ".join(r["run_id"] for r in json.load(sys.stdin)["runs"]))'); do
+  curl -fsS -D "$OUT/report-html-$run.head" \
+    "http://127.0.0.1:18787/api/history/$run/report?format=html" > "$OUT/report-$run.page.html" \
+    || die "the GUI could not draw a report for $run"
+done
+python3 - "$OUT" <<'PY'
+import glob, os, re, sys
+out = sys.argv[1]
+fail, plotted = [], 0
+def check(c, m):
+    if not c: fail.append(m)
+
+pages = sorted(glob.glob(os.path.join(out, 'report-*.page.html')))
+check(len(pages) == 3, f'{len(pages)} pages drawn, expected one per run in the archive')
+for page in pages:
+    run = os.path.basename(page)[len('report-'):-len('.page.html')]
+    html = open(page, encoding='utf-8').read()
+    head = open(os.path.join(out, f'report-html-{run}.head'), encoding='utf-8', errors='replace').read()
+    check('text/html' in head.lower(), f'{run}: did not come back as HTML')
+    check(html.startswith('<!doctype html>'), f'{run}: not a complete document')
+    check(os.path.exists(os.path.join(out, f'report-{run}.html')),
+          f'{run}: crowdsim report --html did not write its own file')
+    # Self-contained: a report that needs the network is not an attachment.
+    for pattern in (r'<script', r'<link', r'@import', r'\ssrc='):
+        check(not re.search(pattern, html, re.I), f'{run}: the page fetches or runs something: {pattern}')
+    # Every coordinate must be a number. A NaN in an attribute renders as an empty chart and throws
+    # nothing — exactly the silent failure this suite exists for.
+    check('NaN' not in html, f'{run}: a chart coordinate is NaN, so a chart renders empty')
+    check('>undefined<' not in html, f'{run}: an undefined value reached the page')
+    check('<svg' in html, f'{run}: no chart at all')
+    # The rule, per run: a run whose numbers mean nothing gets no latency curve, and says why.
+    voided = 'DISCARD THIS RUN' in html or 'The target never answered' in html
+    curve = 'p95 latency per ramp step' in html
+    if voided:
+        check(not curve, f'{run}: a run with no valid numbers was given a latency curve anyway')
+    elif curve:
+        plotted += 1
+        check(html.count('<circle') >= 1, f'{run}: the ramp is not plotted as points')
+        check('the knee is in here' in html or 'No knee from this run' in html,
+              f'{run}: neither a knee band nor a reason there is none')
+check(plotted >= 1, 'no run in the archive was drawn as a curve, so the chart path never ran')
+if fail:
+    print('\n'.join('  ❌ ' + f for f in fail)); sys.exit(1)
+print(f'  ✅ {len(pages)} runs drawn from real data, {plotted} as a curve, the voided ones without one')
+PY
+
 # ── the page itself, in a real browser ───────────────────────────────────────────────────────────────
 # tests/ui asserts the front end's decisions as plain modules, which is fast and covers the reasoning — and
 # cannot prove that a component renders any of it. This does: one real browser, the real bundle, the real
@@ -489,7 +544,8 @@ check('<th>knee</th>' in html, "the archive table has no knee column")
 # A run opened by address, and the report offered from it (#53). tests/gui proves the endpoint; only the
 # rendered page shows there is something to click.
 check('Result' in one, "#history=<run-id> did not open that run's result")
-check('Download report' in one, "the result view offers no way to hand the run over as a report")
+check('Report (.md)' in one, "the result view offers no way to hand the run over as a report")
+check('Report with charts' in one, "the result view does not offer the drawn report")
 check('caveats' in one, "the report button does not say what the document is for")
 if fail:
     print("\n".join("  ❌ " + f for f in fail)); sys.exit(1)

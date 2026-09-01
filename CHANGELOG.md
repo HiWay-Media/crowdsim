@@ -4,6 +4,60 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.0] — 2026-09-01
+
+Every number this tool produces is a curve — rate against latency, per step — and the only place that curve
+was ever drawn is the GUI. The moment a result left the page it went back to being a table of eight rows, with
+the reader asked to draw the ramp in their head. `report` now draws it. The interesting half of the work is
+what the charts refuse to draw: a chart is the most persuasive thing this tool can produce, and a chart of a
+run that measured nothing is the most persuasive wrong answer available to it.
+
+### Added
+- **`crowdsim report <run-id> --html`: the same run as one self-contained page.** The ramp as a curve with
+  the SLO and the read timeout drawn on it, the knee as a band between the last clean rate and the first
+  crossed one, p95 per class against the limit each class is actually held to, and the cache per layer. One
+  file, no dependencies: no script, no font, no stylesheet, nothing fetched — it opens offline, attaches to a
+  ticket, and prints to PDF with the tables expanded. Needs `node`; the markdown report is unchanged and
+  still needs nothing but `python3`.
+- **An invalid run gets no latency chart, and one chart it does get.** `generator_ok: false` means no step
+  measured the rate it claims, and a curve drawn from it looks exactly like a healthy system absorbing load.
+  Such a run gets the requested-against-delivered chart — the evidence of *why* it is invalid — and nothing
+  else: no ramp, no per-class bars, not even a p95 tile. Same for a target that never answered: a p95 of
+  nearly zero is not a fast system. And a knee recorded next to a verdict that voids it is shown as **not
+  counting**, because an older summary can carry both and the knee is the number that gets quoted in rooms
+  this tool is not in.
+- **A threshold line only where there is a threshold, and one that does not fit is named.** A limit line at a
+  guessed value moves the knee for the reader, so a run archived before the summary carried its thresholds
+  gets a curve with no line and a sentence saying why. A read timeout ten times the p95 is left off the scale
+  rather than flattening the curve into the bottom of the picture — and said to be left off, because a line
+  that is simply absent reads as a limit nothing came near.
+- **The rest of the drawing rules, each with a test.** A partial step is a hollow marker, a dashed segment and
+  a note (the brake fires while latency is climbing, so that step is a fraction of one, biased towards its
+  worst part). A cache layer whose header never appeared is `unknown`, never a 0% bar — that is usually a
+  wrong header name in the profile, a different bug with a different fix. A step that emitted no p95 is absent
+  rather than plotted at zero. Every chart carries the same numbers as a table underneath it and describes
+  itself in words, for a screen reader and for when the SVG does not render at all.
+- **The summary records the limits the run was judged against**: `slo.max_p95_ms`, `slo.max_failed_rate`,
+  `slo.guillotine_ms` and `slo.per_class`. They were already in the generator's context — the brake and the
+  knee use them — and the only way the numbers left a run was the sentence in `knee.crossed.why`. A threshold
+  is not something to reconstruct from prose.
+- **The GUI offers both**, by spawning the same command: *Report (.md)* and *Report with charts (.html)*,
+  through `GET /api/history/<run-id>/report?format=md|html`. Any other format is a 400 — the value ends up in
+  an argv.
+- Geometry is pure and unit-tested in `lib/report-html.mjs` + `tests/unit/report-html.test.js`, with
+  coordinates asserted as numbers: that x increases along the ramp, that a higher p95 is a *smaller* y, that
+  the knee band starts on the clean step and ends on the crossed one. A wrong scale throws nothing. The e2e
+  suite then draws **every** run in its archive from real data and checks the rule per run — the first version
+  of that check asserted a curve on the newest run, which happened to be the unreachable one, and the suite
+  was right to fail.
+
+### Changed
+- `--html` reports one run: `--html --compare` is a usage error (exit 2) naming `crowdsim compare`. Drawing
+  two runs on one pair of axes without that command's refusals would put a confident picture behind two
+  different experiments. The markdown report still embeds the comparison, refusal included.
+- `docs/cli.md` carries a real screenshot of the page, taken from a real run against a slow origin on
+  loopback. Taking it found a threshold label sitting on top of a data point, which is the reason to take it.
+
 ## [1.18.0] — 2026-09-01
 
 Milestone v1.9.0, closed. Every page of this documentation says the class weights must come from your own

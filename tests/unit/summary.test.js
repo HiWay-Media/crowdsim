@@ -298,3 +298,23 @@ test('a run with no ramp has no knee field to misread', () => {
   assert.equal(out.knee, null);
   assert.doesNotMatch(renderSummaryText(out, CTX), /knee/i);
 });
+
+// ── the thresholds travel with the numbers (report --html) ───────────────────────────────────────────
+
+test('the summary records the limits the run was judged against', () => {
+  const out = buildSummary(healthy(), Object.assign({}, CTX, {
+    slo: { max_p95_ms: 700, max_failed_rate: 0.05 },
+    classSlo: { rsc_page: { maxP95: 300 } },
+  }));
+  assert.equal(out.slo.max_p95_ms, 700);
+  assert.equal(out.slo.max_failed_rate, 0.05);
+  assert.equal(out.slo.guillotine_ms, out.guillotine_ms);
+  assert.deepEqual(out.slo.per_class, { rsc_page: { maxP95: 300 } });
+});
+
+test('a caller that declares no SLO gets nulls, not zeroes: a limit of 0 would be a limit', () => {
+  const out = buildSummary(healthy(), Object.assign({}, CTX, { slo: undefined, classSlo: undefined }));
+  assert.equal(out.slo.max_p95_ms, null);
+  assert.equal(out.slo.max_failed_rate, null);
+  assert.deepEqual(out.slo.per_class, {});
+});

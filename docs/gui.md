@@ -173,11 +173,16 @@ SLO](profile.md#a-class-may-set-its-own-limit) and "you found the knee" no longe
 the summary's `aborted_by` and nowhere else: runs archived before that field existed show the verdict without
 the detail, rather than a culprit reconstructed from the profile.
 
-**Download report (.md)**, top right of the result, writes the run as markdown for the place the result
-actually goes: a ticket, a PR, an incident timeline. It is produced by `crowdsim report` on the server — the
-same document the CLI writes, in the same file under `out/` — and not by a second renderer here: the caveats
-are the whole point of that document, and two renderers eventually disagree about what a run means. What
-travels with the numbers is what they are worth.
+Two buttons, top right of the result. **Report (.md)** writes the run as markdown for the place the result
+actually goes: a ticket, a PR, an incident timeline. **Report with charts (.html)** writes the same run
+[drawn](cli.md#--html-the-same-run-drawn) — the ramp as a curve with the SLO and the knee band on it, p95 per
+class against each class's own limit, the cache per layer — as one self-contained file that opens offline and
+prints to PDF. Both are produced by `crowdsim report` on the server, in the same files under `out/` that the
+CLI writes, and not by a second renderer here: the caveats are the whole point of those documents, and two
+renderers eventually disagree about what a run means. What travels with the numbers is what they are worth.
+
+The refusals travel too. A run the generator could not sustain gets no latency curve in the page — only the
+chart that shows why it is invalid — for the same reason the banner above tells you to discard it.
 
 Reload the page and it is still there. The server keeps the run list, and the page asks for it on load. A run
 in the archive also has an address of its own — `#history=<run-id>` opens that run's result, the same way
@@ -388,7 +393,7 @@ better interface: it is the thing the API calls anyway.
 | `POST` | `/api/runs/:id/stop` | Graceful stop |
 | `GET` | `/api/history` | `out/history.tsv`, newest first |
 | `GET` | `/api/history/:runId` | Summary, history row, comparable runs, run log |
-| `GET` | `/api/history/:runId/report` | The run as markdown, written by `crowdsim report` and served as a file (`text/markdown`, `Content-Disposition: attachment`) |
+| `GET` | `/api/history/:runId/report[?format=md\|html]` | The run as markdown (default) or as a page with charts, written by `crowdsim report` and served as a file. Any other `format` is a `400` |
 | `GET` | `/api/compare?a=&b=` | The delta between two runs, from `crowdsim compare --json`. `422` with `refused[]` when they are not comparable |
 
 ```bash

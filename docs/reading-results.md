@@ -210,6 +210,19 @@ than classes are scheduled). `mix_target` lists the same targets in one place.
 A class with `reqs: 0` did not run: it was skipped, dropped for an empty pool, or does not exist in this
 shape. The text table leaves it out rather than printing a row of zeroes.
 
+### The limits it was judged against
+
+| Field | Meaning |
+|---|---|
+| `slo.max_p95_ms` | The p95 the brake and the knee were judged against, for the classes that declare no limit of their own. |
+| `slo.max_failed_rate` | Same, for the failed rate. |
+| `slo.guillotine_ms` | Your reverse proxy's read timeout — the same value as `guillotine_ms`, kept here so the whole set travels together. |
+| `slo.per_class` | Per-class limits, where a class declares a sharper one. |
+
+Recorded from 1.19.0 so a result can be read without the profile that produced it — a threshold is not
+something to reconstruct from a sentence, and `report --html` needs it to draw a limit line. A run archived
+before this key exists has no line on its chart, and the page says so rather than guessing one.
+
 ## `history.tsv`
 
 One appended line per run, written by the driver — the GUI reads the same file, so runs launched from a
@@ -229,13 +242,20 @@ crowdsim history          # printed as a table
 ## Handing a run to somebody else
 
 ```bash
-crowdsim report 20260820T125356Z --out ticket.md
+crowdsim report 20260820T125356Z --out ticket.md      # markdown, to paste
+crowdsim report 20260820T125356Z --html               # the same run drawn, to attach
 ```
 
 The numbers are the easy part to paste; the caveats are what gets lost, and a p95 with no caveats becomes a
 capacity figure in somebody else's slide. [`report`](cli.md#report) writes the run as markdown with the
 caveats attached to it — validity first, then what happened, then the numbers, then what they are worth. A
 run with `generator_ok: false` comes out as **DISCARD THIS RUN** with no latency table at all.
+
+[`--html`](cli.md#--html-the-same-run-drawn) writes the same run as one self-contained page, with the ramp as
+a curve: the SLO and the read timeout as lines on it, the knee as a band between the last clean rate and the
+first crossed one. It is the same order and the same caveats — and the same refusals, which is the point of
+drawing it at all: an invalid run gets no latency curve there either, only the chart that shows why it is
+invalid. It fetches nothing, so it opens offline and prints to PDF.
 
 ## A warm-up is not part of the result
 
