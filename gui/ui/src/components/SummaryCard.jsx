@@ -63,9 +63,9 @@ export default function SummaryCard({ summary, compare }) {
       </h2>
       <p className="note">
         Either report carries the caveats attached to the numbers — what this run is worth, not only what it
-        measured. That is the part that does not survive being retyped into a ticket. The `.html` one draws
-        the ramp as a curve with the knee on it and fetches nothing, so it still renders offline in a year;
-        the `.md` one is the one to paste.
+        measured. That is the part that does not survive being retyped into a ticket. The HTML one draws the
+        ramp as a curve with the knee on it and fetches nothing, so it still renders offline in a year; the
+        markdown one is the one to paste.
       </p>
       {reportError ? <div className="banner bad">Could not write the report: {reportError}</div> : null}
 

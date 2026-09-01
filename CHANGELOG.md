@@ -4,6 +4,26 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.1] — 2026-09-01
+
+Documentation catching up with two releases of its own product. The GUI screenshots still showed the page as
+it was before the warm-up fields and the report buttons existed, and the architecture page still described a
+`lib/` with one module in it.
+
+### Fixed
+- **The two GUI screenshots are the GUI that ships.** `gui-run-form.png` was taken before `--warmup` reached
+  the form and `gui-result.png` before the report buttons did, so the page in the documentation had neither.
+  Retaken against a real server with a real archive, and cropped to the same framing as the rest.
+- **The result card no longer prints its own backticks.** The note under the report buttons was written as
+  markdown and rendered as JSX, so it read `` `.html` `` on screen. It says HTML and markdown instead. Found
+  by looking at the screenshot rather than at the diff, which is what the screenshot is for.
+- **The run form's field list in `docs/gui.md` names the warm-up**, and the panel list says where the report
+  buttons are. A field that exists and is not in the reference is a field nobody knows to use.
+- **`docs/architecture.md` lists what `lib/` actually holds** — `validate.mjs`, `har.mjs`, `weights.mjs`,
+  `report-html.mjs`, each pure, unit-tested and reached through a thin `*-cli.mjs` — instead of the single
+  module it had when the page was written, under a filename (`validate.js`) that has not existed for
+  releases.
+
 ## [1.19.0] — 2026-09-01
 
 Every number this tool produces is a curve — rate against latency, per step — and the only place that curve

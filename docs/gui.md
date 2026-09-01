@@ -65,7 +65,7 @@ CROWDSIM_ALLOW_TARGETS='www.example.test' crowdsim serve
 
 The page tells you which way it went, top right, and whether the chosen target passes:
 
-![The run form: profile, target, allowlist verdict, rate, and the mix a peak implies](assets/screens/gui-run-form.png)
+![The run form: profile, target, the allowlist verdict, the rate and the warm-up, and the mix a peak implies](assets/screens/gui-run-form.png)
 
 Read the two things that matter before anything else:
 
@@ -159,7 +159,7 @@ a second one.
 
 When it ends you get the verdict, in the order that keeps you honest:
 
-![The result: the verdict, the measured knee, the per-class table and the run's own files](assets/screens/gui-result.png)
+![The result: the two report buttons, the verdict, the measured knee, the per-class table and the comparable runs](assets/screens/gui-result.png)
 
 The blue banner is **the knee**: the highest rate this run measured the system surviving, and the rate at
 which it stopped — with the two caveats that never survive retyping attached to it, that a swept rate is not a
@@ -202,10 +202,13 @@ number that means nothing. The first field is `generator_ok`: if it is false, di
   belongs to the profile it came from) and disarms the safe-peak override.
 - **Target** — shows `base_url`, any `Host` override, the bypass, the classes it skips, and the allowlist
   verdict.
-- **Rate** — peak, start, steps, step duration, hold, shape, rsc mode, SLO overrides, skip list, and three
+- **Rate** — peak, start, steps, step duration, hold, shape, rsc mode, SLO overrides, skip list, the warm-up
+  (a duration, blank means off, and a rate that defaults to the ramp's own starting rate), and three
   switches: touch-and-go, skip TLS verification, Slack recap (greyed out unless a webhook is configured).
 - **Buttons** — Run · Dry run (composes everything, sends no traffic) · Probe · Discover URLs. Stop appears
   while a run is in flight.
+- **On the result** — Report (.md) to paste, and Report with charts (.html) to attach. Both spawn
+  `crowdsim report`; neither is rendered by the page.
 
 ### This machine
 

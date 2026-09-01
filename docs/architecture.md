@@ -33,6 +33,9 @@ Why crowdsim is built out of these pieces, and where each decision lives.
   gui/server (express) ── spawns ──▶ bin/crowdsim        gui/ui (react)
         └── reads out/ and profiles/, stores nothing of its own
         └── lib/validate.mjs ◀── also used by `crowdsim validate`, doctor and load (one rule set)
+
+  lib/ (node, optional)  validate.mjs · har.mjs · weights.mjs · report-html.mjs
+        └── each one pure, unit-tested, and reached through a thin *-cli.mjs the driver spawns
 ```
 
 ## Why a bash driver and a JS generator
@@ -141,7 +144,10 @@ for. See [Docker](docker.md).
 bin/crowdsim              the driver: gates, resolution, reporting  (also its own --help)
 k6/live-event.js          the generator: scenarios, requests, metrics
 k6/lib/                   pure logic, imported by the generator and by the tests
-lib/                      validate.js (the profile rules) + validate-cli.mjs, shared by CLI and GUI
+lib/                      the driver's node-side logic, each with a thin *-cli.mjs and unit tests:
+                          validate.mjs (the profile rules, shared by CLI and GUI), har.mjs (a browser
+                          recording → a journey), weights.mjs (an access log → the class mix),
+                          report-html.mjs (a summary → a page with charts)
 gui/server/lib/           args (flag composition), profiles, runner, history, app
 gui/ui/src/               React: RunPanel, ProfilePanel, HistoryPanel, MixBars, SummaryCard
 profiles/example.json     the only profile in this repo, documented inline
