@@ -51,6 +51,10 @@
       "description": "Two numbers the tool still averages away. Every result it produces is one p95 for a whole ramp \u2014 30 req/s and 120 req/s inside the same figure \u2014 so the knee, the thing this tool is named after, can only be found by running four times and comparing. And the one input it insists must be measured, the class mix, is the one it refuses to help measure: the documentation says on every page that weights come from your own edge log, and `init` writes them as a TODO. This milestone makes a single run show where the knee is, and turns the mix from a guess with a decimal point into a measurement. Nothing here loosens a gate, invents a number, or asks for access to anything privileged."
     },
     {
+      "title": "v1.10.0",
+      "description": "Everything this tool knows how to do, it does well the second time. The first time you have to already know it: `crowdsim --help` opens with the line `!/usr/bin/env bash`, `crowdsim load --help` answers with the same sixty lines as every other subcommand, nothing completes a subcommand or a flag in a shell, `report` and `compare` want a 16-character UTC timestamp copied out of another command's output, `history` prints fourteen columns for every run ever recorded and takes no arguments at all, and the path to a first profile is six commands with hand-editing in between and nothing that says which one you are on. None of that is a missing feature — it is the cost of using the features that exist, paid on every run. Every item here was found by running the commands, not by reading the code, and none of them touches a gate: no default allowlist, no interactive prompt, no brake that is easier to get past."
+    },
+    {
       "title": "Backlog",
       "description": "Accepted but unscheduled. Nothing here blocks a release."
     }
@@ -894,6 +898,99 @@
         "- The page can show what `doctor` reports about this host, including the measured generator ceiling and the caveat attached to it.",
         "- Running the benchmark from the page is explicit and never automatic: it generates load, locally, and a report that starts generating traffic on its own is not a report.",
         "- The crowdsim version is visible, because a page served by a stale server is indistinguishable from a current one — which is how a three-release-old server survived an audit."
+      ]
+    },
+    {
+      "key": "help-per-subcommand",
+      "title": "`crowdsim --help` starts with `!/usr/bin/env bash`, and every subcommand answers with the same 60 lines",
+      "milestone": "v1.10.0",
+      "labels": ["area:cli", "documentation"],
+      "body": [
+        "`usage()` is `sed -n '1,60p' \"$0\" | grep -E '^#' | sed 's/^# \\{0,1\\}//'`, so it also catches the shebang and prints it stripped of its `#`. The first line of the first thing a new user runs is `!/usr/bin/env bash`. Verified: `crowdsim --help | head -1`.",
+        "",
+        "The second half of the same problem: `crowdsim load --help`, `crowdsim report --help` and `crowdsim doctor --help` all print those identical 60 lines. `load` alone has sixteen flags, and finding them means reading the synopsis of twelve subcommands first. There is no way to ask this tool about one command.",
+        "",
+        "The header staying the help text is a good property — it cannot drift from the script, and this repository has the rule written down that pushing it past line 60 breaks `--help` silently. Keep the property; stop shipping the shebang inside it, and give one subcommand a way to answer for itself.",
+        "",
+        "**Done when**",
+        "- `crowdsim --help` no longer prints the shebang, and the fix is a filter on the extraction, not a comment moved somewhere it can be moved back.",
+        "- `crowdsim <subcommand> --help` prints that subcommand's synopsis, its own flags, and one worked copy-pasteable example — and exits 0, not 2.",
+        "- The per-subcommand text lives in the same header the global help comes from: two sources would disagree once, and a help page that contradicts the tool is worse than a long one.",
+        "- bats asserts line 1 of `--help`, that each of the twelve subcommands answers `--help` with something shorter than the global text, and that a flag the driver parses appears in its own subcommand's help — so a new flag that is never documented fails the suite.",
+        "- The 60-line contract is either preserved and re-asserted by a test, or replaced by an extraction that cannot be broken by an edit above it."
+      ]
+    },
+    {
+      "key": "shell-completion",
+      "title": "Nothing completes in a shell: twelve subcommands, forty flags, and run ids typed by hand",
+      "milestone": "v1.10.0",
+      "labels": ["area:cli", "documentation"],
+      "body": [
+        "There is no `completions/` directory and nothing in the repository defines a completion. Every subcommand, every flag and every profile path is typed in full, and the arguments to `report` and `compare` are 16-character UTC timestamps (`20260901T123654Z`) that exist only inside `out/`.",
+        "",
+        "This is the cheapest usability work available here: the flag list already exists in one place, and the run ids are one column of a file the tool writes itself.",
+        "",
+        "**Done when**",
+        "- `completions/crowdsim.bash` and `completions/crowdsim.zsh` complete subcommands, the flags of the subcommand actually being typed, `--profile` against `$CROWDSIM_PROFILES`, and run ids against `$CROWDSIM_OUT/history.tsv`.",
+        "- A test derives the flag list from `bin/crowdsim` and fails when a flag the driver parses is not completable — otherwise the completion is stale by the next release and quietly hides new flags.",
+        "- `--i-know-this-breaks-production` is completable like any other flag. Hiding it would not make anybody safer, it would only make the gate look like a secret rather than a decision.",
+        "- Completion never runs a subcommand to find its answers: reading `history.tsv` is free, and a completion that shells out to the tool is a completion that can generate load.",
+        "- Installation documented for bash and zsh in `docs/install.md`, and the files present in the image so a container shell gets them too."
+      ]
+    },
+    {
+      "key": "run-id-selectors",
+      "title": "`report` and `compare` want a timestamp copied from another command's output",
+      "milestone": "v1.10.0",
+      "labels": ["area:cli"],
+      "body": [
+        "`crowdsim report latest` answers `no summary for latest`. So does `last`, and so does anything but the exact id. The only way to report on the run that just finished is to read it out of `history` or `out/` and retype sixteen characters, which is also how the wrong run gets reported: `20260901T123654Z` and `20260901T123645Z` are one glance apart.",
+        "",
+        "**Done when**",
+        "- `latest` and `previous` resolve to run ids wherever a run id is accepted — `report`, `compare`, and anything added later — through one resolver, not three.",
+        "- `crowdsim compare previous latest` works and keeps every refusal `compare` already has: a resolved id is still checked for a matching pool, profile and `generator_ok`.",
+        "- Resolution is printed, always: `report latest` says which run it resolved to before it says anything about that run. A convenience that silently chooses a run is how a result gets attributed to the wrong experiment.",
+        "- `latest` skips nothing on its own. A newest run with `generator_ok: false` still resolves, and is reported as the discard it is — quietly stepping back to the previous run would hand over a valid-looking result for a run nobody asked about.",
+        "- No runs at all, or `previous` with only one run, exits 2 naming the command that lists them.",
+        "- bats over each form, including the ambiguity cases, plus a docs pass wherever a run id appears."
+      ]
+    },
+    {
+      "key": "history-query",
+      "title": "`history` prints fourteen columns for every run ever, and takes no arguments",
+      "milestone": "v1.10.0",
+      "labels": ["area:cli", "area:gui"],
+      "body": [
+        "`crowdsim history --last 5` exits 2 with `unknown option: --last`. The subcommand accepts nothing: it aligns and prints the whole of `history.tsv`, all fourteen columns of it — `run_id profile base_url shape peak aborted reqs rps failed p95 e504 gen_ok knee_clean knee_crossed` — for every run since the file was created. It is the command whose entire job is to let somebody see whether the knee moves over time, and after a few dozen runs it is a wall that wraps.",
+        "",
+        "The data is already there and already header-keyed, which is what makes this a formatting problem rather than a schema one.",
+        "",
+        "**Done when**",
+        "- `history [--last N] [--target <host>] [--profile <name>] [--cols a,b,c] [--json]`, with a default view that fits a terminal and always keeps `run_id`, `gen_ok` and the knee.",
+        "- A filtered or truncated view says so on its last line, with the total. A subset of runs that looks like all of them is the same class of mistake as a p95 for a rate that never happened.",
+        "- Rows written before a column existed keep working: the parser stays header-keyed, and a missing cell prints empty rather than `0`.",
+        "- `--json` emits the same records the GUI's own history endpoint returns, so the page and the terminal cannot disagree about what a run was.",
+        "- A run with `generator_ok: false` is visibly marked in the default view, not merely a column somebody has to know to read.",
+        "- Tests in `tests/cli/` over the filters and the truncation notice, and in `tests/gui/` for the shared record shape."
+      ]
+    },
+    {
+      "key": "whats-next",
+      "title": "The first profile is six commands and hand-editing, and nothing says which one you are on",
+      "milestone": "v1.10.0",
+      "labels": ["area:cli", "documentation"],
+      "body": [
+        "Getting from a clean checkout to a run means `doctor`, `discover --verify`, `probe`, `init`, editing the `TODO`s and the two deliberately empty safety keys by hand, `validate`, then `load`. Each of those commands is documented and each one works. What is missing is any answer to *where am I*: `doctor` reports on the machine and stops, `init` writes a draft and stops, and the only thing that knows a profile is still a draft is `validate`, which has to be run to find out.",
+        "",
+        "This is the step where the tool loses people, and it is the one step where guessing on their behalf is not allowed — the empty `allow_hosts` and the empty `safe_peak_rps` are the two gates, and they stay empty.",
+        "",
+        "**Done when**",
+        "- A command reports the state of the current setup — what `out/` already holds from `probe`, `discover` and `record`, which profiles exist, which of them still contain `TODO`s or empty safety keys — and names the single next command to run, as text to copy.",
+        "- It generates no traffic, writes nothing outside its own output, and never edits a profile.",
+        "- It fills nothing in. `allow_hosts` and `safe_peak_rps` are reported as the human decisions they are, with what they mean, and the next step it names is *you decide these*, not a suggested value.",
+        "- No prompts, no wizard, no `-y`: this repository has no interactive confirmations by design, and a guided setup is exactly where one would be added by accident.",
+        "- `docs/index.md` §Start here and the README's Use section both lead with it, and `docs/running-a-test.md` is rewritten around the state it reports rather than around a numbered list a reader has to keep their place in.",
+        "- bats over the state detection: no artefacts, artefacts but a draft profile, a valid profile ready to run."
       ]
     }
   ]
