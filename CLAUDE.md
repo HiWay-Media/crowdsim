@@ -149,6 +149,9 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
 
 ## Puntatori
 
+- **Perché il repo esiste: `INTENT.md`** — obiettivi, non-obiettivi espliciti e principi con il perché.
+  Si aggiorna quando cambia lo **scopo**, non quando cambiano i fatti: serve a distinguere "manca" da
+  "non lo facciamo apposta" (i fatti stanno in `README.md`/`docs/`)
 - Verità funzionale: `README.md` (§Safety, §The container, §The GUI, §Tests, §Reading a result) e header
   di `bin/crowdsim`
 - **Guida Docker: `docs/docker.md`** (unica verità su install/uso via container) · `docker-compose.yml`

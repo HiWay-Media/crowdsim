@@ -32,6 +32,7 @@ caching would actually buy you — instead of estimating it from logs after the 
 |---|---|
 | see it working in three commands | [Install](install.md) → Docker |
 | understand what it does that `hey`/`vegeta`/`wrk` do not | [Architecture](architecture.md) |
+| know why it exists, and what it refuses to do | [`INTENT.md`](../INTENT.md) |
 | run it from a container | [Docker](docker.md) |
 | write a profile for your own site | [Profile reference](profile.md) |
 | measure the class mix from your own access log | [`weights`](cli.md#weights) |

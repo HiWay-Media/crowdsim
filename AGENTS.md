@@ -154,6 +154,9 @@ in questo repository.
 
 ## Puntatori
 
+- **Perche il repo esiste: `INTENT.md`** - obiettivi, non-obiettivi espliciti e principi con il perche.
+  Si aggiorna quando cambia lo **scopo**, non quando cambiano i fatti: serve a distinguere "manca" da
+  "non lo facciamo apposta" (i fatti stanno in `README.md` e `docs/`)
 - Verita funzionale: `README.md` (sezioni Safety, The container, The GUI, Tests, Reading a result) e
   header di `bin/crowdsim`
 - **Guida Docker: `docs/docker.md`** (unica verita su install/uso via container); `docker-compose.yml` +

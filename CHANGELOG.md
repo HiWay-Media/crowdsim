@@ -4,6 +4,32 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.3] — 2026-09-02
+
+**Nothing in this repository said why it exists.** The README says what the tool is, `docs/` says how to
+use it, `AGENTS.md` says how work happens here — and between them a reader could still not tell a gap from
+a decision. The GUI has no scheduler, `weights` will not fetch your access log, the image ships no
+allowlist default: each of those reads as something nobody got around to, and each is a refusal with a
+reason behind it. That distinction only existed in the heads of the people who made the calls, which is
+exactly the kind of knowledge that goes missing first.
+
+### Added
+- **`INTENT.md`** — the purpose of the tool, its goals in priority order, the **non-goals stated as
+  decisions rather than gaps**, the invariants with the reason each one exists, and the boundary between
+  this repository and the private ones that hold real profiles and real run reports. It is the document a
+  proposal gets measured against before anybody writes it: a change that weakens a gate, adds a second
+  place for the gates to be wrong, or turns a refusal into an estimate is answered here rather than
+  re-argued.
+- It is deliberately the one page that **does not go stale with the facts**. Flags, fields and numbers stay
+  in `README.md`, `docs/` and this file; `INTENT.md` changes when the *purpose* changes — a goal added or
+  dropped, a non-goal that stops being one, a boundary that moves. It carries the date it was last
+  reviewed for that reason.
+
+### Changed
+- `README.md` and `docs/index.md` link it, and both `AGENTS.md` and `CLAUDE.md` point at it in their
+  pointer list — an agent working here needs the written intent to tell "missing" from "left out on
+  purpose". No behaviour, no flag and no output changed in this release.
+
 ## [1.19.2] — 2026-09-02
 
 **The GUI in the published image could not launch a single run, and had not been able to since that image first
