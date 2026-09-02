@@ -8,6 +8,9 @@
  *   CROWDSIM_GUI_TOKEN     bearer token; REQUIRED when binding off-loopback
  *   CROWDSIM_PROFILES      profile directory (default ./profiles)
  *   CROWDSIM_OUT           output directory, shared with the CLI (default ./out)
+ *   CROWDSIM_BIN           the driver to spawn. Otherwise: $CROWDSIM_ROOT/bin/crowdsim, then this
+ *                          checkout's own bin/crowdsim, then `crowdsim` on PATH — and a refusal if none
+ *                          of them is executable (see lib/bin.js for why that refusal exists)
  *   CROWDSIM_ALLOW_TARGETS inherited by every run, exactly as on the command line
  *
  * Why loopback by default: this page can start a load generator. On a shared network an open port that
@@ -19,6 +22,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { createApp } from './lib/app.js';
+import { resolveBin, unresolvedMessage } from './lib/bin.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, '../..');
@@ -49,8 +53,17 @@ if (!version) {
   } catch (e) { /* neither: /api/env reports null, and the page says the version is unknown */ }
 }
 
+// Which driver every run will be a child process of. Resolved before anything is served, because a server
+// that cannot spawn it has no job: it used to start silently and fail at the click, which is exactly how the
+// published image shipped a GUI that could not launch a single run.
+const driver = resolveBin({ env: process.env, serverRoot: root });
+if (!driver.bin) {
+  console.error(unresolvedMessage(driver));
+  process.exit(2);
+}
+
 const app = createApp({
-  crowdsimBin: process.env.CROWDSIM_BIN || path.join(root, 'bin/crowdsim'),
+  crowdsimBin: driver.bin,
   profilesDir,
   outDir,
   uiDir,
@@ -96,6 +109,9 @@ server.on('error', (e) => {
 
 server.on('listening', () => {
   console.log(`crowdsim GUI  http://${bind}:${port}`);
+  // Printed, and not only on failure: `docker logs` is where somebody asks "what is this page actually
+  // running?", and the answer used to be nowhere.
+  console.log(`  driver    ${driver.bin}  (from ${driver.source})`);
   console.log(`  profiles  ${profilesDir}`);
   console.log(`  output    ${outDir}`);
   console.log(`  allowlist ${process.env.CROWDSIM_ALLOW_TARGETS || '(unset — runs will rely on safety.allow_hosts)'}`);

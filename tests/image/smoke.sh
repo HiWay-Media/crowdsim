@@ -142,8 +142,12 @@ set -e
                 || bad "an untokened 0.0.0.0 bind exited $rc, expected 3"
 
 TOKEN="smoke-$$"
+# CROWDSIM_PROFILES points at the profile the image ships, so the API has something to launch. /profiles is
+# an empty mount point by design — the profiles are yours — and an empty directory would make the run
+# assertion below untestable rather than safe.
 docker run -d --name "$NAME" -p "127.0.0.1:$PORT:8787" \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$TOKEN" \
+  -e CROWDSIM_PROFILES=/crowdsim/profiles \
   "$IMAGE" crowdsim serve >/dev/null
 
 up=0
@@ -170,6 +174,54 @@ if [ "$up" = "1" ]; then
                       || bad "an unauthenticated request returned $code, expected 401"
   code="$(curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/")"
   [ "$code" = "200" ] && ok "the page is served" || bad "the page returned $code"
+
+  # ── and the page can do its one job: spawn the driver ─────────────────────────────────────────────
+  # THE ASSERTION WHOSE ABSENCE LET A BROKEN IMAGE SHIP. Everything above proves the GUI starts, answers,
+  # sees k6 and serves the page — and all of it passed for thirty releases while every run launched from
+  # that page died instantly: the server derived the driver's path from its own location
+  # (/crowdsim/bin/crowdsim) and the image puts it in /usr/local/bin. Nothing was watching the one thing
+  # the GUI exists for, so the failure was found by somebody running the container.
+  #
+  # --dry-run: the driver composes the whole k6 invocation, checks the profile, passes both gates and
+  # exits 0 without sending a single request. Which makes this safe in CI and still end-to-end.
+  say "  the GUI can spawn the driver (dry run — no traffic)"
+  started="$(curl -s -X POST -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+    -d '{"kind":"load","profile":"example.json","target":"edge","peak":10,"dryRun":true}' \
+    "http://127.0.0.1:$PORT/api/runs")"
+  run_id="$(printf '%s' "$started" | python3 -c 'import json,sys
+try:
+    print(json.load(sys.stdin).get("id") or "")
+except Exception:
+    print("")' 2>/dev/null)"
+  if [ -z "$run_id" ]; then
+    bad "the GUI refused to start a dry run: $started"
+  else
+    verdict=""
+    for _ in $(seq 1 30); do
+      verdict="$(curl -fsS -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:$PORT/api/runs/$run_id" \
+        | python3 -c 'import json,sys
+d = json.load(sys.stdin)
+log = " ".join(d.get("log") or [])
+print(d.get("status"), d.get("exit_code"), "|", log[-300:])' 2>/dev/null)"
+      case "$verdict" in
+        running*) sleep 0.5;;
+        *) break;;
+      esac
+    done
+    case "$verdict" in
+      *"could not be started"*)
+        bad "the GUI cannot spawn the driver in this image — CROWDSIM_BIN is the fix: $verdict";;
+      "done 0 "*)
+        ok "the GUI spawned the driver and the dry run exited 0";;
+      *)
+        bad "a dry run through the GUI ended as: $verdict";;
+    esac
+    # And the driver it resolved is named in the log, so `docker logs` can answer "what is this running?"
+    case "$(docker logs "$NAME" 2>&1)" in
+      *"driver    /usr/local/bin/crowdsim"*) ok "the server names the driver it spawns, at startup" ;;
+      *) bad "the startup log does not say which driver the GUI will spawn" ;;
+    esac
+  fi
 else
   bad "the GUI never answered on 127.0.0.1:$PORT"
   docker logs "$NAME" 2>&1 | sed 's/^/      /'

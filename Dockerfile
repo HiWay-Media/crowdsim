@@ -90,8 +90,16 @@ RUN chmod +x /usr/local/bin/crowdsim
 
 # CROWDSIM_ROOT is what lets the driver live in /usr/local/bin while the tool lives in /crowdsim: without
 # it the script would resolve its root to /usr/local and fail to find the GUI and the A/B templates.
+#
+# CROWDSIM_BIN is the other half of that split, and it was missing from the day the image shipped (1.2.0) until 1.19.2 — thirty releases. The GUI spawns the
+# driver for every run, and it derived the path from its own location — /crowdsim/gui/server/../../bin/crowdsim
+# — which is not where this image puts it. So the page started, said nothing, and every run died with
+# `spawn /crowdsim/bin/crowdsim ENOENT`. CROWDSIM_ROOT looked like it covered this (the documentation said
+# the default was $CROWDSIM_ROOT/bin/crowdsim) and did not. Do not remove this line: tests/image/smoke.sh
+# now launches a --dry-run through the API, which is the assertion whose absence let it ship.
 ENV CROWDSIM_VERSION=${CROWDSIM_VERSION} \
     CROWDSIM_ROOT=/crowdsim \
+    CROWDSIM_BIN=/usr/local/bin/crowdsim \
     CROWDSIM_K6_SCRIPT=/crowdsim/k6/live-event.js \
     CROWDSIM_PROFILES=/profiles \
     CROWDSIM_OUT=/out \

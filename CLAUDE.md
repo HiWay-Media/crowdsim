@@ -135,6 +135,14 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
   `CROWDSIM_ROOT=/crowdsim`, altrimenti `ROOT` diventa `/usr/local` e `serve`/`cache-ab` si rompono senza
   un errore utile. Dentro un container "bind loopback" = raggiungibile da nessuno: si binda `0.0.0.0` e si
   pubblica con `-p 127.0.0.1:8787:8787`; il token resta obbligatorio.
+- **`CROWDSIM_BIN`**: la GUI spawna il driver per ogni run e il default lo derivava dal proprio path
+  (`gui/server/../../bin/crowdsim`). Nell'immagine quel file non esiste (il driver sta in `/usr/local/bin`),
+  quindi la pagina partiva e **ogni** run moriva con `spawn … ENOENT` — dalla 1.2.0 alla 1.19.1, trenta
+  release, trovato da chi
+  usava il container. Ora: `ENV CROWDSIM_BIN` nel Dockerfile, ordine di risoluzione in
+  `gui/server/lib/bin.js` (`CROWDSIM_BIN` → `$CROWDSIM_ROOT/bin/crowdsim` → checkout → `PATH`), **rifiuto
+  all'avvio** (exit 2) se nessuno è eseguibile, e `tests/image/smoke.sh` lancia un `--dry-run` via API. Non
+  rimuovere né la ENV né quell'assert: era l'assenza dell'assert a far passare l'immagine rotta.
 - **`make image-smoke` prima di ogni modifica a Dockerfile/`bin`/`k6`/`gui`** (la CI lo esegue prima del
   push su GHCR). L'assert che conta: l'immagine **non** dichiara un default per `CROWDSIM_ALLOW_TARGETS`.
   Non aggiungerlo mai, nemmeno "per comodità di test".

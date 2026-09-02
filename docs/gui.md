@@ -370,10 +370,50 @@ target — not consent. The friction stays where it is useful: an explicit act t
 | `CROWDSIM_PROFILES` | `./profiles` | The directory the editor reads and writes |
 | `CROWDSIM_OUT` | `./out` | Shared with the CLI — this is the point |
 | `CROWDSIM_ALLOW_TARGETS` | unset | Inherited by every run it starts |
-| `CROWDSIM_BIN` | `$CROWDSIM_ROOT/bin/crowdsim` | Which driver to spawn |
+| `CROWDSIM_BIN` | resolved, see below | Which driver to spawn |
 
 In a container the bind must be `0.0.0.0` (loopback there means "reachable by nobody") and the reachability
 decision moves to the port publication: see [Docker §4](docker.md#4-using-the-gui).
+
+### Which driver the GUI spawns
+
+Every run is a child process of `bin/crowdsim`, so this is the one thing the server must not be wrong about.
+
+**Started with `crowdsim serve`, there is nothing to resolve**: the driver exports its own absolute path as
+`CROWDSIM_BIN`, so the page spawns *the script you invoked* — not another copy of it that happens to be
+found first. That matters when two versions are installed side by side.
+
+Started directly (`node gui/server/index.js`), it looks in order:
+
+1. **`CROWDSIM_BIN`** — an explicit answer, and what `crowdsim serve` sets. If it is set and not executable
+   the server **refuses to start** and says so; it does not fall back, because silently spawning a different
+   driver from the one it was told to is worse than refusing.
+2. **`$CROWDSIM_ROOT/bin/crowdsim`** — the variable the container sets, and the one people reach for.
+3. **the checkout the server is running from** — `gui/server/../../bin/crowdsim`.
+4. **`crowdsim` on `PATH`** — an installed driver, whatever the layout around it.
+
+If none of them is executable the server exits **2** naming `CROWDSIM_BIN` and listing where it looked. It
+does not serve a page: a GUI that cannot spawn the driver has no job, and a page that accepts every click
+and fails each one is worse than no page. The driver it resolved is printed at startup, next to the
+profiles and the output directory, so `docker logs` can answer *what is this page actually running?*
+
+```
+crowdsim GUI  http://0.0.0.0:8787
+  driver    /usr/local/bin/crowdsim  (from CROWDSIM_BIN)
+  profiles  /profiles
+  output    /out
+```
+
+**This was a real bug in the published image, from the release that first shipped it (1.2.0) until
+1.19.2** — thirty releases. The image puts the
+driver in `/usr/local/bin/crowdsim` and the rest of the tool in `/crowdsim`; the server derived its default
+from its own location — `/crowdsim/gui/server/../../bin/crowdsim` — and that file does not exist there. The
+page started, said nothing, and every run failed with `crowdsim could not be started: spawn
+/crowdsim/bin/crowdsim ENOENT` **after** the click. Rule 2 above is what this documentation had always
+claimed, which is exactly why the gap survived: `CROWDSIM_ROOT=/crowdsim` looked like it covered it. It was
+found by somebody running the container and working around it in a Nomad job — not by any test here, which
+is why `tests/image/smoke.sh` now launches a `--dry-run` through the API and fails when the run cannot
+start.
 
 ## HTTP API
 
