@@ -602,7 +602,7 @@ Only `load` uses most of them; unknown flags are an error (exit 2) rather than b
 | `CROWDSIM_ROOT` | parent of the script | Where `k6/`, `gui/` and `cache-ab/` live. Set to `/crowdsim` in the image. |
 | `CROWDSIM_K6_SCRIPT` | `$CROWDSIM_ROOT/k6/live-event.js` | The generator script. |
 | `CROWDSIM_GUI_PORT` / `_BIND` / `_TOKEN` | `8787` / `127.0.0.1` / unset | See [GUI](gui.md). |
-| `CROWDSIM_BIN` | `$CROWDSIM_ROOT/bin/crowdsim` | Which driver the GUI spawns. |
+| `CROWDSIM_BIN` | see [GUI §the driver](gui.md#which-driver-the-gui-spawns) | Which driver the GUI spawns. Set explicitly in the image. |
 | `CROWDSIM_VERIFY_DELAY` | `0.05` | Seconds between requests during `discover --verify`. Building a pool must not be a load test. |
 
 ## Exit codes

@@ -121,6 +121,13 @@ generator that ships had never been the generator the evidence came from — 0.5
 apart. The brake is a k6 threshold with `abortOnFail`, so a changed threshold syntax produces a run that no
 longer stops; the suite records which k6 produced its numbers, in the archive and in its output.
 
+**A smoke test that never exercises the product is a green tick.** `tests/image/smoke.sh` asserted that the
+GUI starts, answers, sees k6 and serves the page — and every one of those passed for eleven releases while
+the GUI in that image could not launch a single run: the server looked for the driver next to itself and the
+image puts it in `/usr/local/bin`. Nothing was watching the one thing the GUI exists for. It now launches a
+`--dry-run` through the API and fails when the run cannot start, which costs a second and is the difference
+between testing the artefact and testing that the artefact boots.
+
 **The unhappy summaries are fixtures.** `tests/cli/fixtures/summary-invalid.json` and
 `summary-unreachable.json` are asserted to be reported as *invalid* and as *unreachable* — never as capacity
 numbers. A load test's failure mode is a plausible wrong answer, so the tests aim at exactly that.

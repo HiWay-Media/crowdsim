@@ -2178,6 +2178,12 @@ cmd_serve() {
   fi
   export CROWDSIM_OUT="$OUT_DIR"
   export CROWDSIM_PROFILES="${CROWDSIM_PROFILES:-$ROOT/profiles}"
+  # THE driver the GUI must spawn is THIS one: the script that was just invoked. Everything the server can
+  # do otherwise is a search — $CROWDSIM_ROOT, its own checkout, PATH — and a search can find a different
+  # copy from the one somebody chose to run. It also closes the gap that shipped in the image for eleven
+  # releases, where the server looked next to itself (/crowdsim/bin/crowdsim) for a driver that lives in
+  # /usr/local/bin. An explicit CROWDSIM_BIN from the caller still wins.
+  export CROWDSIM_BIN="${CROWDSIM_BIN:-$SELF_DIR/$(basename "$0")}"
   if [ -n "$GUI_PORT" ]; then export CROWDSIM_GUI_PORT="$GUI_PORT"; fi
   if [ -n "$GUI_BIND" ]; then export CROWDSIM_GUI_BIND="$GUI_BIND"; fi
   exec node "$ROOT/gui/server/index.js"

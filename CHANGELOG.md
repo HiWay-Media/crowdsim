@@ -4,6 +4,47 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.19.2] — 2026-09-02
+
+**The GUI in the published image could not launch a single run, and had not been able to since the image
+existed.** Reported by somebody running the container, who worked around it in a Nomad job. Every check this
+repository had said the image was fine — because none of them ever asked the page to do the one thing it is
+for.
+
+### Fixed
+- **`CROWDSIM_BIN` is declared in the image** (`/usr/local/bin/crowdsim`). The image puts the driver there
+  and the rest of the tool in `/crowdsim`; the GUI server derived the driver's path from its own location —
+  `/crowdsim/gui/server/../../bin/crowdsim` — which does not exist. So the page started, printed nothing
+  unusual, and every run failed after the click with `crowdsim could not be started: spawn
+  /crowdsim/bin/crowdsim ENOENT`. The Kubernetes manifests had the same fault, from the same cause, and are
+  fixed by the same line.
+- **The documented default was false, which is why the gap survived.** `docs/cli.md` and `docs/gui.md` both
+  said `CROWDSIM_BIN` defaulted to `$CROWDSIM_ROOT/bin/crowdsim` — the reasonable assumption, and not what
+  the code did. `CROWDSIM_ROOT=/crowdsim` therefore looked like it covered this. It is now true: the order
+  is `CROWDSIM_BIN`, then `$CROWDSIM_ROOT/bin/crowdsim`, then the server's own checkout, then `crowdsim` on
+  `PATH` (new `gui/server/lib/bin.js`, with tests).
+- **`crowdsim serve` names itself.** It exports its own absolute path as `CROWDSIM_BIN`, so the page spawns
+  the script that was invoked rather than another copy a search happened to find first — which matters with
+  two versions installed side by side. An explicit `CROWDSIM_BIN` from the caller still wins.
+- **A server that cannot spawn the driver refuses to start** (exit 2), naming `CROWDSIM_BIN` and listing
+  where it looked, instead of serving a page that accepts every click and fails each one. A
+  `CROWDSIM_BIN` that is set and not executable is reported as itself and never silently replaced: a GUI
+  that spawns a different driver from the one it was told to is worse than one that refuses.
+- **The startup log says which driver it will spawn**, next to the profiles and the output directory, so
+  `docker logs` can answer *what is this page actually running?*
+
+### Added
+- **The assertion whose absence let this ship.** `tests/image/smoke.sh` now launches a `--dry-run` through
+  the GUI's own API and fails when the run cannot start. Everything it checked before — the GUI starts,
+  answers, sees k6, serves the page, refuses an untokened request — passed on every broken image. Verified
+  the only way that means anything: the new check was run against the image built *before* this fix, and it
+  failed, naming `CROWDSIM_BIN`. A dry run composes the whole k6 invocation and passes both gates without
+  sending a request, so it stays safe on a shared runner.
+
+### Changed
+- Nothing about the interface. If you carry `CROWDSIM_BIN=/usr/local/bin/crowdsim` in a job spec as a
+  workaround, it keeps working and is now redundant — the image sets the same value.
+
 ## [1.19.1] — 2026-09-01
 
 Documentation catching up with two releases of its own product. The GUI screenshots still showed the page as
