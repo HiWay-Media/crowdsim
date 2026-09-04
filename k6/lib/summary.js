@@ -38,6 +38,7 @@ export function cacheRate(metrics, name) {
 import { abortedBy as abortedByLocal } from './brake.js';
 import { stepPlan, perStep } from './steps.js';
 import { knee } from './knee.js';
+import { concurrency, concurrencyCaveat } from './session.js';
 
 export { abortedBy } from './brake.js';
 
@@ -128,6 +129,23 @@ export function buildSummary(metrics, ctx) {
     // `crowdsim report --html` needs the SLO to draw a line on the ramp, and parsing prose for it would
     // produce a chart whose limit line is a guess. A run archived before this key exists gets no line, and
     // the report says so instead of inventing one.
+    // Concurrent users, the unit a capacity requirement is written in — and only for the shape that has
+    // sessions. In `mix` there is no session, so there is no session duration, and rate/duration arithmetic
+    // over a class mix would be a number with nothing behind it. Both methods are reported, never merged:
+    // see k6/lib/session.js.
+    concurrency: ctx.shape === 'journey' ? concurrency({
+      // The rate the run DROVE. `iterations.rate` is completed iterations, which is a different number the
+      // moment a ramp is cut — see k6/lib/session.js.
+      sessionsPerSec: ctx.sessionRate || 0,
+      meanSessionSeconds: g('iteration_duration', 'avg', 0) / 1000,
+      observedPeak: g('vus', 'max', 0),
+      vuCeiling: ctx.vuCeiling || 0,
+      aborted: brakeTripped(metrics),
+      generatorOk: generatorHeldRate(cnt('dropped_iterations'), cnt('http_reqs')),
+      targetUnreachable: targetUnreachable(g('http_req_failed', 'rate', 0), g('http_req_duration', 'p(95)')),
+    }) : null,
+    // The pace the sessions were run at, because the number above is a conversion of a rate at THIS pace.
+    think_time: ctx.shape === 'journey' ? (ctx.thinkTime || null) : null,
     // Accounts, when the run signs in: how many it had, how many VUs shared them, and the caveat if they
     // were shared. null for an anonymous run — an empty object would read as "it signed in with nothing".
     auth: ctx.auth || null,
@@ -159,6 +177,10 @@ export function buildSummary(metrics, ctx) {
   };
 
 
+
+  if (out.concurrency && !out.concurrency.refused) {
+    out.concurrency.caveat = concurrencyCaveat(out.concurrency, out.think_time);
+  }
 
   out.generator_ok = generatorHeldRate(out.dropped_iterations, out.requests);
   out.target_unreachable = targetUnreachable(out.failed_rate, out.dur.p95);
@@ -286,5 +308,33 @@ export function renderSummaryText(out, ctx) {
   cache         ${cacheLine}
 
   ── per class ──
-${tbl}${renderStepTable(out)}${renderKnee(out)}`;
+${tbl}${renderStepTable(out)}${renderKnee(out)}${renderConcurrency(out)}`;
+}
+
+/**
+ * Concurrent users, printed as two numbers or as a refusal. Never one figure: the agreement between the two
+ * methods is what makes either of them worth quoting, and their disagreement is the finding.
+ */
+function renderConcurrency(out) {
+  const c = out.concurrency;
+  if (!c) return '';
+  if (c.refused) {
+    return '\n  ── concurrent users ──\n  ⚠️  ' + c.reason + '\n      ' + c.fix + '\n';
+  }
+  var t = '\n  ── concurrent users ──\n';
+  const rate = c.sessions_per_sec === null ? 'n/a' : c.sessions_per_sec.toFixed(1);
+  const dur = c.mean_session_seconds === null ? 'n/a' : c.mean_session_seconds.toFixed(1);
+  t += '  derived       ' + (c.derived === null ? 'n/a' : c.derived)
+    + '   ← ' + rate + ' sessions/s × ' + dur + ' s mean session (Little\'s law)\n';
+  t += '  in flight     ' + (c.observed === null ? 'n/a' : c.observed)
+    + '   ← peak sessions running at once, counted\n';
+  if (c.vu_bound) {
+    t += '  ⚠️  ' + c.note + '\n';
+  } else if (c.agree === true) {
+    t += '  ✅ the two methods agree, which is what makes the number worth quoting\n';
+  } else if (c.agree === false) {
+    t += '  ⛔ ' + c.note + '\n';
+  }
+  if (c.caveat) t += '      ' + c.caveat + '\n';
+  return t;
 }

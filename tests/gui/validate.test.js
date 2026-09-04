@@ -426,3 +426,39 @@ test('logout without an endpoint is an error: sessions would pile up silently', 
 test('the shipped example profile has no errors', () => {
   assert.deepEqual(validateProfile(example).errors, []);
 });
+
+// ── journey.think_time: half of any concurrency figure (#64) ─────────────────────────────────────────
+
+test('a broken think-time range is an error, because the fallback is silent', () => {
+  const p = clone(example);
+  p.journey = Object.assign({}, p.journey, { think_time: { min_ms: 5000, max_ms: 1000 } });
+  assert.ok(validateProfile(p).errors.some((e) => e.path === 'journey.think_time'));
+  p.journey.think_time = { min_ms: 'soon', max_ms: 'later' };
+  assert.ok(validateProfile(p).errors.some((e) => e.path === 'journey.think_time'));
+});
+
+test('a pause of zero is refused: it would remove the pause it was meant to describe', () => {
+  const p = clone(example);
+  p.journey = Object.assign({}, p.journey, { think_time: { samples: [1000, 0], measured: true } });
+  assert.ok(validateProfile(p).errors.some((e) => e.path === 'journey.think_time.samples'));
+  p.journey.think_time = { samples: [], measured: true };
+  assert.ok(validateProfile(p).errors.some((e) => e.path === 'journey.think_time.samples'));
+});
+
+test('samples that nobody marked as measured are a warning, not a lie', () => {
+  const p = clone(example);
+  p.journey = Object.assign({}, p.journey, { think_time: { samples: [800, 2000] } });
+  const r = validateProfile(p);
+  assert.deepEqual(r.errors, [], JSON.stringify(r.errors));
+  assert.ok(r.warnings.some((w) => w.path === 'journey.think_time'));
+});
+
+test('a valid think time passes, in both shapes', () => {
+  for (const tt of [{ min_ms: 0, max_ms: 0 }, { min_ms: 2000, max_ms: 9000 },
+    { samples: [400, 1200], measured: true }]) {
+    const p = clone(example);
+    p.journey = Object.assign({}, p.journey, { think_time: tt });
+    const r = validateProfile(p);
+    assert.deepEqual(r.errors, [], `${JSON.stringify(tt)} → ${JSON.stringify(r.errors)}`);
+  }
+});

@@ -329,3 +329,57 @@ test('the accounts a run signed in with travel in the summary, and null when it 
   // an anonymous run says nothing rather than reporting zero accounts, which would read as a failed login
   assert.equal(buildSummary(healthy(), CTX).auth, null);
 });
+
+// ── concurrent users: the unit a requirement is written in (#62) ─────────────────────────────────────
+
+const journeyMetrics = (extra) => Object.assign(healthy(), {
+  iterations: count(9000, 100),                       // 100 sessions/s
+  iteration_duration: trend({ avg: 30000, med: 29000 }),   // 30 s per session
+  vus: { values: { value: 2900, min: 10, max: 2900 } },
+}, extra || {});
+
+test('a journey run converts its rate into concurrent users, both ways, and never merges them', () => {
+  const out = buildSummary(journeyMetrics(), Object.assign({}, CTX, {
+    shape: 'journey', thinkTime: { source: 'default', min_ms: 1000, max_ms: 5000, mean_ms: 3000, samples: [] },
+    // The rate the run DROVE, not the completed-iteration rate: see k6/lib/session.js.
+    sessionRate: 100, vuCeiling: 6000,
+  }));
+  assert.equal(out.concurrency.derived, 3000, '100 sessions/s x 30 s');
+  assert.equal(out.concurrency.observed, 2900, 'sessions in flight');
+  assert.equal(out.concurrency.agree, true);
+  assert.match(out.concurrency.caveat, /conversion of a rate/);
+  assert.equal(out.think_time.source, 'default');
+});
+
+test('the mix shape reports no concurrency at all rather than a guess', () => {
+  // No session means no session duration: rate/duration arithmetic over a class mix would be a number
+  // with nothing behind it.
+  const out = buildSummary(journeyMetrics(), Object.assign({}, CTX, { shape: 'mix' }));
+  assert.equal(out.concurrency, null);
+  assert.equal(out.think_time, null);
+});
+
+test('sessions in flight against the ceiling we provisioned is not reported as capacity', () => {
+  const out = buildSummary(journeyMetrics({ vus: { values: { value: 1000, min: 10, max: 1000 } } }),
+    Object.assign({}, CTX, { shape: 'journey', sessionRate: 100, vuCeiling: 1000 }));
+  assert.equal(out.concurrency.vu_bound, true);
+  assert.match(out.concurrency.note, /provisioning and not a measurement/);
+});
+
+test('the panel prints both concurrency numbers and why they can be trusted', () => {
+  const ctx = Object.assign({}, CTX, { shape: 'journey', sessionRate: 100, vuCeiling: 6000,
+    thinkTime: { source: 'declared', min_ms: 2000, max_ms: 6000, mean_ms: 4000, samples: [] } });
+  const out = buildSummary(journeyMetrics(), ctx);
+  const text = renderSummaryText(out, ctx);
+  assert.match(text, /── concurrent users ──/);
+  assert.match(text, /derived\s+3000/);
+  assert.match(text, /in flight\s+2900/);
+  assert.match(text, /Little's law/);
+  assert.match(text, /the two methods agree/);
+});
+
+test('the panel says nothing about concurrency for a mix run', () => {
+  const ctx = Object.assign({}, CTX, { shape: 'mix' });
+  const text = renderSummaryText(buildSummary(healthy(), ctx), ctx);
+  assert.ok(!text.includes('concurrent users'));
+});

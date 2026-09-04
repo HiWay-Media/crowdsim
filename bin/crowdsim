@@ -1687,6 +1687,28 @@ w('- **Only the delta travels.** These absolutes describe this URL pool, which i
   'change between two runs at an identical pool, not the number.')
 w('- **The mix is the measurement.** `--peak` is total user req/s split across the profile\'s request '
   'classes by the weights measured on your own edge log, not page loads.')
+# Concurrent users: the unit a capacity requirement is written in. Two numbers or a refusal, never one.
+conc = d.get('concurrency')
+if conc:
+    w('## Concurrent users')
+    w('')
+    if conc.get('refused'):
+        w(f"**No concurrency figure from this run.** {conc['reason']} {conc.get('fix', '')}")
+    else:
+        w(f"- **{conc.get('derived')}** derived: {conc.get('sessions_per_sec') and round(conc['sessions_per_sec'], 1)} "
+          f"sessions/s x {conc.get('mean_session_seconds') and round(conc['mean_session_seconds'], 1)} s mean "
+          "session (Little's law)")
+        w(f"- **{conc.get('observed')}** counted in flight: the peak number of sessions running at once")
+        if conc.get('agree') is True:
+            w('- The two methods **agree**, which is what makes the number worth quoting: one alone cannot '
+              'tell a measurement from an artefact of the arithmetic.')
+        elif conc.get('note'):
+            w(f"- ⛔ **They do not agree.** {conc['note']}")
+        if conc.get('caveat'):
+            w('')
+            w(conc['caveat'])
+    w('')
+
 auth = d.get('auth') or {}
 if auth.get('sharing_note'):
     # A login ceiling measured with 50 accounts across 400 VUs is partly a statement about 50 accounts.
@@ -1694,6 +1716,10 @@ if auth.get('sharing_note'):
 elif auth.get('users'):
     w(f"- **{auth['users']} account(s) signed in**, one per virtual user or better, so the sign-in "
       'numbers describe the provider rather than the account count.')
+think = d.get('think_time') or {}
+if think.get('source'):
+    w(f"- **The reading pauses were {think['source']}** ({think.get('min_ms')}-{think.get('max_ms')} ms). "
+      'Session duration is the fan-out plus these pauses, so any concurrency figure rests on them.')
 if d.get('dropped_iterations'):
     w(f"- **{d['dropped_iterations']} iterations were dropped** out of {d.get('requests', 0)}. Under the 2% "
       'threshold, so the run stands — but it is the number to watch if you raise the peak.')

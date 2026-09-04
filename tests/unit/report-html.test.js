@@ -344,3 +344,41 @@ test('an anonymous run gets no accounts caveat at all', () => {
   assert.ok(!html.includes('account(s) signed in'));
   assert.ok(!html.includes('The accounts were shared'));
 });
+
+// ── concurrent users on the page (#62) ───────────────────────────────────────────────────────────────
+
+test('a journey run shows both concurrency numbers and why they can be trusted', () => {
+  const p = clone();
+  p.shape = 'journey';
+  p.concurrency = { derived: 3000, observed: 2900, sessions_per_sec: 100, mean_session_seconds: 30,
+    agree: true, note: null, caveat: 'This is the concurrency this mix implies at the reading pauses this profile declares (2000-6000 ms).' };
+  p.think_time = { source: 'declared', min_ms: 2000, max_ms: 6000, mean_ms: 4000, samples: [] };
+  const html = buildReport(p);
+  assert.match(html, /Concurrent users/);
+  assert.match(html, /3000/);
+  assert.match(html, /2900/);
+  assert.match(html, /The two methods agree/);
+  assert.match(html, /reading pauses were declared/);
+});
+
+test('a disagreement is a banner, not a footnote, and no average is shown', () => {
+  const p = clone();
+  p.concurrency = { derived: 3000, observed: 900, sessions_per_sec: 100, mean_session_seconds: 30,
+    agree: false, note: 'the two methods disagree by more than 25%', caveat: null };
+  const html = buildReport(p);
+  assert.match(html, /These two do not agree/);
+  assert.ok(!html.includes('1950'));
+});
+
+test('a refused concurrency says so instead of showing a number', () => {
+  const p = clone();
+  p.concurrency = { refused: true, reason: 'the brake stopped this run', fix: 'read the knee instead.' };
+  const html = buildReport(p);
+  assert.match(html, /No concurrency figure from this run/);
+  assert.match(html, /the brake stopped this run/);
+  assert.ok(!html.includes('in flight'));
+});
+
+test('a mix run has no concurrency section at all', () => {
+  assert.ok(!buildReport(clone()).includes('Concurrent users'));
+});

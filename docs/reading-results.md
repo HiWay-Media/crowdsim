@@ -212,6 +212,19 @@ than classes are scheduled). `mix_target` lists the same targets in one place.
 A class with `reqs: 0` did not run: it was skipped, dropped for an empty pool, or does not exist in this
 shape. The text table leaves it out rather than printing a row of zeroes.
 
+### Concurrent users, for a journey run
+
+| Field | Meaning |
+|---|---|
+| `concurrency` | `null` for `--shape mix`: without sessions there is no session duration, and rate/duration arithmetic over a class mix would be a number with nothing behind it. |
+| `concurrency.derived` | Little's law: the session arrival rate the run drove × the mean session duration it measured. |
+| `concurrency.observed` | The peak number of sessions running at once, counted. One session is one iteration. |
+| `concurrency.agree` | Whether the two are within 25% of each other. **This is the field that decides whether either number is worth quoting** — one method alone cannot tell a measurement from an artefact of the arithmetic. |
+| `concurrency.vu_bound` | Set when the sessions in flight reached the VU ceiling the run provisioned: that number is then our own configuration, not a property of the system. |
+| `concurrency.refused` | Set with a `reason` and a `fix` when the run cannot support the figure at all — a generator that did not hold the rate, an unreachable target, or a ramp the brake cut, because concurrency is a property of a steady state and an aborted ramp never had one. |
+| `concurrency.caveat` | The sentence that must travel with the number: it is a conversion of a rate at a stated reading pace, not a headcount of visitors. |
+| `think_time` | The pace those sessions ran at — `source` is `measured`, `declared` or `default` — because the concurrency above rests on it. |
+
 ### The accounts it signed in with
 
 | Field | Meaning |

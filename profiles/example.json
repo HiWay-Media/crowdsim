@@ -211,6 +211,7 @@
   },
   "journey": {
     "file": "journey.json",
+    "_think_time_comment": "The reading pauses between pages. Half of any concurrency figure: concurrency is sessions/s × session duration, and the session duration IS the fan-out plus these pauses. Two shapes — { \"min_ms\": 2000, \"max_ms\": 9000 } for a declared range, or { \"samples\": [820, 1400, 3100], \"measured\": true } for pauses somebody actually observed, which is what `crowdsim record` writes from a browser recording. Declare nothing and the generator uses 1000-5000 ms, the value it has always used — and the run says `default`, so a concurrency figure is never read as if the pace had been measured.",
     "_comment": "Only needed for --shape journey: a recorded fan-out of {path, rsc[], static[]} per page. Record it with a real browser against your own site."
   }
 }

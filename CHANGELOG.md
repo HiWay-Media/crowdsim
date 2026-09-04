@@ -4,6 +4,51 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.21.0] — 2026-09-04
+
+Milestone v1.12.0, first half: **the unit the requirement is written in.** A capacity requirement arrives
+as *"7,000 concurrent users"* and every number this tool produced was a rate, so somebody converted one
+into the other in their head with an assumption they never wrote down. The StreamWay+ campaign of
+2026-09-04 did it properly, and that is the method here: Little's law, cross-checked against a count of
+sessions in flight, the two printed side by side. They agreed — and **the agreement is what made the
+number defensible, not the number.**
+
+### Added
+- **Concurrent users, two ways, never merged** (new `k6/lib/session.js`, in `summary.concurrency`, in the
+  panel and in both reports). `derived` is the session arrival rate the run drove times the mean session
+  duration it measured; `observed` is the peak number of sessions running at once, counted. `agree` is the
+  field to read first: one method alone cannot tell a measurement from an artefact of the arithmetic, and
+  a disagreement past 25% IS the finding — it means the arrival rate and the session duration describe
+  different parts of the run, and neither figure should leave the terminal. Nothing anywhere is their
+  average.
+- **Four refusals, because a concurrency figure gets quoted in rooms this tool is not in.** A generator
+  that did not hold the rate, a target that never answered, and a run the brake stopped are all refused
+  with a reason and a fix: concurrency is a property of a steady state, and an aborted ramp never had one
+  ("read the knee instead, then measure in a `--hold` below it"). And when the sessions in flight reach
+  the VU ceiling the run provisioned, that number is reported as **our own configuration, not a
+  measurement**. `--shape mix` gets no figure at all: without sessions there is no session duration, and
+  rate/duration arithmetic over a class mix would be a number with nothing behind it.
+- **`journey.think_time`: the reading pauses, declared or measured.** Session duration is the fan-out plus
+  the pauses, so the pace is half of any concurrency figure — and it was hard-coded as
+  `sleep(1 + Math.random() * 4)`, in one place, with nothing in a profile able to change it. Two shapes:
+  `samples` (pauses somebody observed, picked from rather than fitted to a range) and `min_ms`/`max_ms`
+  for a declared one. **The default is unchanged** — 1000–5000 ms, the value this tool has always used,
+  asserted by a test — and the run reports its `source`, so a concurrency figure is never read as if the
+  pace had been measured.
+- **`crowdsim record` carries the pauses out of the recording** it already reads: the gap between the
+  last byte of one page and the request for the next document, with negative gaps and anything past five
+  minutes dropped rather than smoothed (a tab left open is not a reading pause). It writes them with
+  `measured: true` and says how many it found, so a measured pace costs one command instead of a
+  spreadsheet.
+- `validate` refuses an inverted think-time range and a `0` inside `samples`. Both fell back to the
+  default in silence, and a run whose pace nobody chose still prints a concurrency figure.
+
+### Fixed
+- **The arrival rate is not `iterations.rate`.** That counter is *completed* iterations, so the first
+  version of this feature reported `derived 3` against `in flight 50` for a ramp the brake had cut, and
+  called it a disagreement — the derived number was garbage by construction rather than evidence of
+  anything. Found by running it against a real target, which is also how the refusals above came to exist.
+
 ## [1.20.5] — 2026-09-04
 
 **The authenticated classes were run against a real target for the first time, and two of the three

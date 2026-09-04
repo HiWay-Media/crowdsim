@@ -172,6 +172,14 @@ in questo repository.
   qualsiasi kind diverso da `rsc` diventava `plain`, e una classe `login` dichiarata prima di quella dei
   documenti si mangiava **tutte** le GET del log (mix 100% login da un log con tre pagine). Aggiungere un
   kind nuovo significa aggiornare anche questo classificatore.
+- **Concorrenza e think time sono un'unica affermazione** (`k6/lib/session.js`): la concorrenza e
+  sessioni/s × durata sessione, e la durata *e* il fan-out piu le pause di lettura. Quindi: due metodi
+  (legge di Little + sessioni in volo) riportati **sempre affiancati e mai mediati** — e il loro accordo
+  che rende citabile il numero; rifiuto se la run e abortita, generator-bound o unreachable (una rampa
+  tagliata non ha stato stazionario); e `observed` e la *nostra* provisioning, non una misura, se tocca il
+  tetto dei VU. Il tasso di arrivo NON e `iterations.rate` (quello conta le iterazioni *completate*: su una
+  rampa tagliata dava 0,1 sessioni/s contro 50 in volo). Solo `--shape journey`: in `mix` non esiste
+  sessione, quindi nessun numero.
 - **`make image-smoke` prima di ogni modifica a Dockerfile, `bin`, `k6` o `gui`** (la CI lo esegue prima
   del push su GHCR). L'assert che conta: l'immagine **non** dichiara un default per
   `CROWDSIM_ALLOW_TARGETS`. Non aggiungerlo mai, nemmeno "per comodita di test".

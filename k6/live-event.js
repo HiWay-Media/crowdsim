@@ -43,6 +43,7 @@ import {
   credentialsRefusal, accountSharingNote,
 } from './lib/auth.js';
 import { compileLayers, layerHit, statusBuckets, overGuillotine } from './lib/classify.js';
+import { thinkTime, thinkSeconds } from './lib/session.js';
 import { buildSummary, renderSummaryText } from './lib/summary.js';
 
 // ─────────────────────────── config: everything comes from the driver ────────────────────────────────
@@ -153,6 +154,11 @@ const RSC_OPTS   = {
   hashes: (RSC_CFG.hashes && RSC_CFG.hashes.length) ? RSC_CFG.hashes : DEFAULT_RSC_HASHES,
 };
 
+// Reading pauses: declared in the profile, or the default this tool has always used. Resolved once here so
+// the value the run USES is the value the summary reports — two readings of the same profile would
+// eventually disagree, and the concurrency figure rests on this number.
+const THINK = thinkTime((PROFILE.journey || {}).think_time);
+
 const SLO = PROFILE.slo || {};
 const MAX_5XX    = Number(__ENV.MAX_5XX    || SLO.max_failed_rate || 0.05);
 const MAX_P95_MS = Number(__ENV.MAX_P95_MS || SLO.max_p95_ms      || 5000);
@@ -201,6 +207,8 @@ const SHARING_NOTE = accountSharingNote(USERS.length, AUTH_VUS);
 if (SHARING_NOTE) console.warn('crowdsim: ' + SHARING_NOTE);
 
 const scenarios = {};
+let JOURNEY_VU_CEILING = 0;
+let JOURNEY_SESSION_RATE = 0;
 if (SHAPE === 'mix') {
   for (const c of CLASS_DEFS) {
     const v = vus(SHARE[c.name]);
@@ -220,6 +228,10 @@ if (SHAPE === 'mix') {
   // journey: 1 iteration = 1 visitor session. Requests per session come from the journey file, so the
   // session rate is derived from --peak (which is always in user requests/s). See lib/mix.js.
   const plan = journeyPlan(Object.assign({ pages: JOURNEY }, RAMP));
+  // Kept for the summary: sessions in flight against the ceiling we provisioned. If they meet, the
+  // observed concurrency is our own configuration and not a measurement — see k6/lib/session.js.
+  JOURNEY_VU_CEILING = plan.max;
+  JOURNEY_SESSION_RATE = plan.sessRate;
   scenarios.journey = {
     executor: 'ramping-arrival-rate',
     exec: 'fan_session',
@@ -445,7 +457,7 @@ export function fan_session() {
   // 2) 2-4 "clicks": in-app navigation without reloading the document. On a real event this is the bulk.
   const clicks = 2 + Math.floor(Math.random() * 3);
   for (let i = 0; i < clicks; i++) {
-    sleep(1 + Math.random() * 4);                  // visitor think time
+    sleep(thinkSeconds(THINK));                    // visitor think time: see k6/lib/session.js
     const next = pick(pages);
     get(rscQuery(next.path, i), rscHeaders(next.path), 'rsc_page', 'nav');
     fanout(next, true);                            // prefetch the links of the new view
@@ -494,6 +506,10 @@ export function handleSummary(data) {
     ramp: RAMP,
     // The knee is judged against the same limits as the brake, per-class ones included: a knee computed
     // from the profile SLO alone would sit above the rate at which the run actually aborted.
+    // Both needed to turn a rate into concurrent users, and to say whether that number is a measurement.
+    thinkTime: THINK,
+    vuCeiling: JOURNEY_VU_CEILING,
+    sessionRate: JOURNEY_SESSION_RATE,
     slo: { max_p95_ms: MAX_P95_MS, max_failed_rate: MAX_5XX },
     // Recorded rather than only logged: how many accounts the run had, and whether they were shared. A
     // login ceiling measured with 50 accounts across 400 VUs is partly a statement about 50 accounts.

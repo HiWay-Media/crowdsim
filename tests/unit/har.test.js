@@ -142,3 +142,45 @@ test('an empty or malformed HAR is handled, not thrown', () => {
   const { report } = harToJourney(har({ request: { url: 'not a url', method: 'GET' } }));
   assert.equal(report.dropped.unparseable, 1);
 });
+
+// ── the reading pauses the recording contains (#64) ──────────────────────────────────────────────────
+// Session duration is the fan-out plus the pauses, and concurrency is sessions/s × that duration: the
+// pause is half of the number. The generator's default is a uniform 1-5 s nobody measured; the browser
+// knows better and it is in the HAR already.
+
+const at = (iso, ms, extra) => Object.assign(entry(`${SITE}/x`, extra || {}), {
+  startedDateTime: iso, time: ms,
+});
+
+test('the pause is the gap between the last byte of a page and the next document', () => {
+  const har = { log: { entries: [
+    Object.assign(entry(`${SITE}/`, { type: 'document' }), { startedDateTime: '2026-09-01T12:00:00.000Z', time: 200 }),
+    Object.assign(entry(`${SITE}/app.css`, { type: 'stylesheet', mime: 'text/css' }), { startedDateTime: '2026-09-01T12:00:00.300Z', time: 500 }),
+    // last byte of page 1 = 12:00:00.800 ; next document at 12:00:04.800 → a 4 s pause
+    Object.assign(entry(`${SITE}/news`, { type: 'document' }), { startedDateTime: '2026-09-01T12:00:04.800Z', time: 100 }),
+    Object.assign(entry(`${SITE}/live`, { type: 'document' }), { startedDateTime: '2026-09-01T12:00:07.400Z', time: 100 }),
+  ] } };
+  const { journey, report } = harToJourney(har);
+  assert.deepEqual(journey.think_time.samples, [4000, 2500]);
+  assert.equal(journey.think_time.measured, true);
+  assert.equal(report.think_pauses, 2);
+});
+
+test('an implausible pause is dropped, not smoothed', () => {
+  const har = { log: { entries: [
+    Object.assign(entry(`${SITE}/`, { type: 'document' }), { startedDateTime: '2026-09-01T12:00:00.000Z', time: 100 }),
+    // the tab was left open for an hour: not a reading pause
+    Object.assign(entry(`${SITE}/news`, { type: 'document' }), { startedDateTime: '2026-09-01T13:00:00.000Z', time: 100 }),
+    Object.assign(entry(`${SITE}/live`, { type: 'document' }), { startedDateTime: '2026-09-01T13:00:02.000Z', time: 100 }),
+  ] } };
+  const { journey } = harToJourney(har);
+  assert.deepEqual(journey.think_time.samples, [1900]);
+});
+
+test('a recording with one page carries no think time at all, rather than an empty one', () => {
+  const har = { log: { entries: [
+    Object.assign(entry(`${SITE}/`, { type: 'document' }), { startedDateTime: '2026-09-01T12:00:00.000Z', time: 100 }),
+  ] } };
+  const { journey } = harToJourney(har);
+  assert.equal(journey.think_time, undefined);
+});

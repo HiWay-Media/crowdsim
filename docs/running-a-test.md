@@ -237,6 +237,37 @@ to quote. It names your hosts, so it belongs wherever your run archives already 
 | `proxy-node` | "how much does one caching node absorb" |
 | `app-instance` | "what is the per-instance capacity" (needs `skip_classes`) |
 
+## Answering a requirement written in users
+
+A requirement arrives as *"it has to hold 7,000 concurrent users"*, and every number in this tool is a rate.
+The conversion is Little's law — sessions/s × mean session duration — and it only means anything for
+`--shape journey`, where one iteration is one visitor:
+
+```bash
+crowdsim record session.har --out journey.json     # carries the reading pauses it observed
+crowdsim load --profile p.json --shape journey --peak 60 --hold 5m
+```
+
+The run prints both answers and whether they agree:
+
+<!-- illustrative: the numbers come from one run on one machine; the wording is asserted by tests/unit/session.test.js -->
+
+```
+  ── concurrent users ──
+  derived       6   ← 2.0 sessions/s × 2.9 s mean session (Little's law)
+  in flight     7   ← peak sessions running at once, counted
+  ✅ the two methods agree, which is what makes the number worth quoting
+```
+
+Read the agreement before the number. Two methods that disagree mean the arrival rate and the session
+duration describe different parts of the run — usually a ramp still climbing when it ended — and neither
+figure should leave the terminal. A run the brake stopped is refused outright: concurrency is a property of
+a steady state, so measure it in a `--hold` at a rate below the knee, not on the ramp that found it.
+
+And the pace is half the answer: see [`journey.think_time`](profile.md#journeythink_time--half-of-any-concurrency-figure).
+The default is 1–5 s, which nobody measured — the run says so, so the number is never read as more than it
+is.
+
 ## Two shapes
 
 - **`mix`** (default) — one k6 scenario per class, each at its share of `--peak`. Reproduces a measured

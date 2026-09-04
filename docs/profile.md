@@ -478,6 +478,29 @@ would otherwise abort the run in k6's init context with a stack trace instead of
 
 ---
 
+## `journey.think_time` — half of any concurrency figure
+
+```json
+"journey": {
+  "file": "journey.json",
+  "think_time": { "samples": [820, 1400, 3100], "measured": true }
+}
+```
+
+The reading pauses between pages. It matters more than it looks: **concurrency is sessions/s × session
+duration, and the session duration IS the fan-out plus these pauses.** A capacity requirement arrives as
+"7,000 concurrent users", so the pause is half of the number that answers it.
+
+| Shape | Meaning |
+|---|---|
+| `{ "samples": [ms, …], "measured": true }` | Pauses somebody observed. Picked from, not fitted: a uniform range drawn between the smallest and largest would return values nobody ever saw. `crowdsim record` writes this from a browser recording, `measured` included. |
+| `{ "min_ms": 2000, "max_ms": 9000 }` | A declared range. |
+| absent | `1000-5000 ms`, the value this tool has always used — and the run reports the source as `default`, so a concurrency figure is never read as if the pace had been measured. |
+
+`validate` refuses an inverted range and a pause of `0` inside `samples`: both fall back to the default
+silently, and a run whose pace nobody chose still prints a concurrency figure. A deliberate "no pause" is
+`{ "min_ms": 0, "max_ms": 0 }`, where it is explicit.
+
 ## Validating a profile
 
 ```bash
