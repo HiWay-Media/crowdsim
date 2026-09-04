@@ -322,3 +322,25 @@ test('an empty summary produces a page rather than throwing', () => {
   assert.match(html, /^<!doctype html>/);
   assert.match(html, /Is this run valid/);
 });
+
+test('a run that shared its accounts says so among the caveats', () => {
+  const p = clone();
+  p.auth = { users: 50, vus: 400, sharing_note: '50 accounts for 400 virtual users: each account signs in from about 8 of them at once.' };
+  const html = buildReport(p);
+  assert.match(html, /The accounts were shared/);
+  assert.match(html, /50 accounts for 400 virtual users/);
+});
+
+test('enough accounts is also stated, because silence would read as "no login happened"', () => {
+  const p = clone();
+  p.auth = { users: 400, vus: 400, sharing_note: null };
+  const html = buildReport(p);
+  assert.match(html, /400 account\(s\) signed in/);
+  assert.ok(!html.includes('The accounts were shared'));
+});
+
+test('an anonymous run gets no accounts caveat at all', () => {
+  const html = buildReport(clone());
+  assert.ok(!html.includes('account(s) signed in'));
+  assert.ok(!html.includes('The accounts were shared'));
+});

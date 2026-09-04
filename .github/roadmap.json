@@ -59,6 +59,10 @@
       "description": "A result somebody else can read. Every number this tool produces is a curve — rate against latency, per step — and the only place that curve was ever drawn is the GUI: the moment a result left the page it went back to being a table of eight rows, and the reader was asked to draw the ramp in their head. One milestone, one feature, because the feature is small and the rules around it are not: a chart is the most persuasive thing this tool can produce, so the interesting half of the work is what it refuses to draw."
     },
     {
+      "title": "v1.12.0",
+      "description": "The four things a real campaign needed and this tool could not say. Measured against the StreamWay+ campaign of 2026-09-04 — 7.000+ concurrent users required, the web tier clean past 8.800, the ceiling found in the login at ~150 login/s — which was run with the other generator because crowdsim cannot express half of that sentence. It answers in requests per second and the requirement is in concurrent users; it splits one peak by weight and the finding is a rate for ONE class; its think time is hard-coded where the whole method rests on measured reading pauses; and it creates real accounts it keeps no record of. None of these is a new kind of tool: each one is this tool saying what it already generates in the unit somebody asked the question in."
+    },
+    {
       "title": "Backlog",
       "description": "Accepted but unscheduled. Nothing here blocks a release."
     }
@@ -1015,6 +1019,76 @@
         "- **`unknown` is not a miss and not 0%**, and a partial step is drawn as a partial step.",
         "- The geometry is pure and unit-tested — coordinates asserted as numbers, because a wrong scale throws nothing and produces a confident wrong picture. The e2e suite draws every run in its archive from real data and checks the per-run rule.",
         "- The GUI offers it next to the markdown one, by spawning the same command; the docs carry a real screenshot."
+      ]
+    },
+    {
+      "key": "report-concurrency",
+      "title": "The requirement is in concurrent users and every number this tool prints is a rate",
+      "milestone": "v1.12.0",
+      "labels": ["area:generator", "validity", "documentation"],
+      "body": [
+        "A capacity requirement arrives as *\"7.000 concurrent users\"*. Every number crowdsim produces is a rate — `--peak` is total user req/s, the knee is a rate, `history.tsv` is rates — so the answer has to be converted by whoever reads it, in their head, with an assumption they do not write down. The StreamWay+ campaign (2026-09-04) did the conversion properly: Little's law, sessions/s x measured mean session duration, then cross-checked against a count of sessions in flight, and the two agreed. That cross-check is what made the number defensible.",
+        "",
+        "crowdsim has the inputs. `requestsPerSession()` already exists for `--shape journey`, k6 knows how many iterations are in flight, and the run knows its own duration.",
+        "",
+        "**Done when**",
+        "- A journey run reports concurrency two ways: derived (sessions/s x mean session duration) and observed (sessions in flight), with both in the summary and both on the page.",
+        "- The two are printed side by side and never averaged into one figure. If they disagree by more than a stated margin, that IS the finding — it means the session duration assumption is wrong, and a single number would have hidden it.",
+        "- The caveat travels: a concurrency figure derived from a synthetic pool and simulated think time is not a headcount of real visitors. It is what THIS mix implies.",
+        "- `mix` shape reports no concurrency at all rather than a guess: without sessions there is no session duration, and rate/duration arithmetic over a class mix would be a number with nothing behind it.",
+        "- Optional: `--users <n>` as an input, resolved to a rate through the same arithmetic and printed as the resolution, so the run states what it turned the requirement into."
+      ]
+    },
+    {
+      "key": "per-class-rate",
+      "title": "A ceiling was found for one class, and a run can only be aimed with one peak and weights",
+      "milestone": "v1.12.0",
+      "labels": ["area:cli", "area:generator"],
+      "body": [
+        "The campaign's finding is `~150 login/s`, and its recommendation is about that one class. To reproduce it with crowdsim you set a global `--peak` and back the login rate out of the class weight — arithmetic done by hand, in the wrong direction, every time the question is about one class.",
+        "",
+        "`shares()` renormalises weights over the classes that run, which is right for replaying a mix. It is the wrong instrument for *\"hold the browsing where it is and take the login to 170/s\"*.",
+        "",
+        "**Done when**",
+        "- A class can be given an absolute rate instead of a share, and the two compose: the classes with a rate get it, the rest split what is left by weight.",
+        "- `--peak` keeps meaning the total. A profile whose absolute rates already exceed it is refused, naming both numbers — silently scaling them would produce a run nobody asked for.",
+        "- The safe-peak gate reads the TOTAL, absolute rates included. A per-class rate is not a way past a ceiling.",
+        "- The per-step table and the knee report the class's own rate where it has one, because that is the number the finding will be quoted as.",
+        "- Tests in `tests/unit/mix.test.js` for the arithmetic, and a bats test for the refusal."
+      ]
+    },
+    {
+      "key": "measured-think-time",
+      "title": "Think time is hard-coded, and it is what makes a session a user",
+      "milestone": "v1.12.0",
+      "labels": ["area:generator", "validity"],
+      "body": [
+        "`k6/live-event.js` sleeps `1 + Math.random() * 4` seconds between pages in the journey shape. Nothing in a profile can change it, and it exists in one place only.",
+        "",
+        "That number is not a detail: concurrency is sessions/s x session duration, and session duration IS the think time plus the fan-out. The campaign's method rests on *reading pauses measured from real data* — with a hard-coded 1-5s, a concurrency figure derived from a crowdsim run describes visitors who all read at the same tool-chosen pace.",
+        "",
+        "**Done when**",
+        "- Think time is declared in the profile, per journey or per class, and can be a range or a distribution somebody measured.",
+        "- The default stays exactly what it is today, so a profile that says nothing produces the same traffic as before — asserted by a test.",
+        "- A run states the think time it used, in the summary and in the report, next to any concurrency it reports. The two numbers are one claim and must not be quotable apart.",
+        "- `record` carries the pauses it saw in the HAR into the journey it writes, marked as measured rather than assumed."
+      ]
+    },
+    {
+      "key": "signup-manifest",
+      "title": "A registration run creates real accounts and keeps no record of what it created",
+      "milestone": "v1.12.0",
+      "labels": ["area:generator", "safety", "documentation"],
+      "body": [
+        "`signupPayload()` mints a unique identity per iteration, so a registration class at 40/s for a few minutes creates thousands of real accounts in a real identity provider. The StreamWay+ campaign created ~2.970 of them and had to open a backlog ticket to hunt them down afterwards, recognisable only by a dedicated email domain.",
+        "",
+        "crowdsim writes nothing about them. The tool that created the accounts is the one thing that knows exactly which they were.",
+        "",
+        "**Done when**",
+        "- A signup run writes a manifest next to its summary: the identities it created, the run id that created them, the target it created them on. Identifiers only — never a password, and nothing that could not already be derived from the template the profile declares.",
+        "- The count is in the summary and in the report, as a consequence of the run that outlives it: a run that created 2.970 accounts is not finished when the numbers are in.",
+        "- The report says, in the caveats, that those accounts still exist and that removing them is not something this tool will do: deleting accounts in somebody's identity provider is not a load generator's job.",
+        "- Tests: the manifest's shape, and that a run with no signup class writes no manifest at all."
       ]
     }
   ]

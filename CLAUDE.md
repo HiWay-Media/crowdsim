@@ -154,6 +154,14 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
   express 5 (`path-to-regexp` v8), `'*splat'` è il contrario. Si usa una RegExp (`/.*/`), che vale per
   entrambi; c'è un test statico in `tests/gui/startup.test.js` perché la suite gira contro l'express
   installato e su 4 la versione rotta passa tutto.
+- **Una classe senza richieste è INVISIBILE**: `steps.js` la salta (`if (!reqs) continue`) e la tabella
+  per-classe la filtra. Da qui il bug più grave dell'audit 2026-09-04: un CSV di credenziali che si
+  presenta bene ma non contiene account (solo header, separatore sbagliato) faceva sì che `pickUser`
+  tornasse `null`, `login()` non mandasse **nulla** e la run si chiudesse pulita con tutta la metà
+  autenticata mai avvenuta. Ora `credentialsRefusal()` rifiuta nell'init context. Regola generale: se una
+  classe può finire a zero richieste per configurazione, va rifiutata prima, non lasciata sparire.
+- **Una run che non è avvenuta non è un successo**: se il generatore non produce un summary il driver
+  esce **4** (prima avvisava e usciva 0 — uno scheduler non legge i warning).
 - **`make image-smoke` prima di ogni modifica a Dockerfile/`bin`/`k6`/`gui`** (la CI lo esegue prima del
   push su GHCR). L'assert che conta: l'immagine **non** dichiara un default per `CROWDSIM_ALLOW_TARGETS`.
   Non aggiungerlo mai, nemmeno "per comodità di test".

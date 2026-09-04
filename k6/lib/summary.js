@@ -128,6 +128,9 @@ export function buildSummary(metrics, ctx) {
     // `crowdsim report --html` needs the SLO to draw a line on the ramp, and parsing prose for it would
     // produce a chart whose limit line is a guess. A run archived before this key exists gets no line, and
     // the report says so instead of inventing one.
+    // Accounts, when the run signs in: how many it had, how many VUs shared them, and the caveat if they
+    // were shared. null for an anonymous run — an empty object would read as "it signed in with nothing".
+    auth: ctx.auth || null,
     slo: {
       max_p95_ms: (ctx.slo && ctx.slo.max_p95_ms) || null,
       max_failed_rate: ctx.slo && ctx.slo.max_failed_rate !== undefined ? ctx.slo.max_failed_rate : null,
@@ -141,6 +144,9 @@ export function buildSummary(metrics, ctx) {
     over_guillotine_rate: g('cs_over_guillotine', 'rate', 0),
     dropped_iterations: cnt('dropped_iterations'),
     e504: cnt('cs_504'), e502: cnt('cs_502'), e5xx: cnt('cs_5xx'), e404: cnt('cs_404'),
+    // 401/403: an authenticated class that starts being REFUSED is not a 5xx and not a 404.
+    denied: cnt('cs_denied'),
+    authFail: cnt('cs_auth_fail'),
     cache: cacheTotal,
     per_class: perClass,
     mix_target: mixTarget,
@@ -274,7 +280,7 @@ export function renderSummaryText(out, ctx) {
   volume        ${out.requests} requests · ${out.rps_avg.toFixed(1)} req/s avg
   latency       p50 ${ms(out.dur.p50)} · p95 ${ms(out.dur.p95)} · p99 ${ms(out.dur.p99)} · max ${ms(out.dur.max)}
   over ${out.guillotine_ms} ms  ${pct(out.over_guillotine_rate)}   ← the proxy read timeout, i.e. where 504s come from
-  errors        504: ${out.e504}   502: ${out.e502}   5xx total: ${out.e5xx}   404: ${out.e404}
+  errors        504: ${out.e504}   502: ${out.e502}   5xx total: ${out.e5xx}   404: ${out.e404}   401/403: ${out.denied || 0}   no token: ${out.authFail || 0}
   failed rate   ${pct(out.failed_rate)}
   generator     ${out.generator_ok ? '✅ held the rate' : '⛔ DID NOT hold: ' + out.dropped_iterations + ' iterations dropped → RESULT INVALID'}
   cache         ${cacheLine}

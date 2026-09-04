@@ -210,6 +210,15 @@ than classes are scheduled). `mix_target` lists the same targets in one place.
 A class with `reqs: 0` did not run: it was skipped, dropped for an empty pool, or does not exist in this
 shape. The text table leaves it out rather than printing a row of zeroes.
 
+### The accounts it signed in with
+
+| Field | Meaning |
+|---|---|
+| `auth` | `null` for an anonymous run — not an empty object, which would read as a login that found nothing. |
+| `auth.users` | How many accounts the credentials file yielded. Zero refuses the run: see [the profile reference](profile.md#credentials-stay-out-of-the-profile). |
+| `auth.vus` | How many virtual users were provisioned for the classes that sign in. |
+| `auth.sharing_note` | Set when there were fewer accounts than VUs, which means part of what the run measured is the account count rather than the provider. `null` when there were enough. |
+
 ### The limits it was judged against
 
 | Field | Meaning |

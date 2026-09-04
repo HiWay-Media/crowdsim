@@ -32,7 +32,15 @@ export function parseUsersCsv(text) {
     const username = parts[0].trim();
     const password = parts.slice(1).join(sep).trim();
     if (!username || !password) continue;
-    if (username.toLowerCase() === 'username' || username.toLowerCase() === 'user') continue; // header
+    // Header detection, by either column. Only `username`/`user` were checked, so an `email,password`
+    // header became an account that could never log in — one guaranteed failure in the rotation, forever,
+    // which with 50 accounts is 2% of logins and the same order of magnitude as max_failed_rate.
+    const u = username.toLowerCase();
+    const p = password.toLowerCase();
+    if (u === 'username' || u === 'user' || u === 'email' || u === 'login'
+        || (p === 'password' && (u === 'email' || u === 'username' || u === 'user' || u === 'login'))) {
+      continue;
+    }
     out.push({ username, password });
   }
   return out;
@@ -63,20 +71,41 @@ export function usersNeeded(peakRps, sessionSeconds) {
   return Math.max(1, Math.ceil(r * s));
 }
 
-/** Request for the OAuth2 password grant (`Direct Access Grants` in Keycloak). */
+/**
+ * Build the sign-in request. There are two shapes, and which one you use changes WHAT you measure:
+ *
+ *   `password_grant` — straight at the identity provider's token endpoint. Measures the provider:
+ *                      password verification is CPU-bound on purpose, so this finds ITS ceiling.
+ *   `form`           — the application's own login endpoint, which talks to the provider server-side.
+ *                      Measures the whole chain, and it is the realistic one: on a real campaign the
+ *                      provider sat at 26% CPU while the application saturated, because its threads
+ *                      were blocked waiting for authentication. Testing only the provider would have
+ *                      reported headroom that users could not feel.
+ *
+ * Default is `form` when no client_id is given, because an application endpoint needs no client.
+ */
 export function tokenRequest(auth, user) {
-  const form = {
-    grant_type: 'password',
-    client_id: auth.client_id,
-    username: user.username,
-    password: user.password,
-  };
-  if (auth.client_secret) form.client_secret = auth.client_secret;
-  if (auth.scope) form.scope = auth.scope;
+  const mode = auth.mode || (auth.client_id ? 'password_grant' : 'form');
+  const fields = auth.fields || {};
+  const userField = fields.username || 'username';
+  const passField = fields.password || 'password';
+
+  const form = {};
+  if (mode === 'password_grant') {
+    form.grant_type = 'password';
+    form.client_id = auth.client_id;
+    if (auth.client_secret) form.client_secret = auth.client_secret;
+    if (auth.scope) form.scope = auth.scope;
+  }
+  form[userField] = user.username;
+  form[passField] = user.password;
+  for (const k of Object.keys(fields.extra || {})) form[k] = fields.extra[k];
+
+  const json = String(auth.body || '').toLowerCase() === 'json';
   return {
     url: auth.token_url,
-    body: encodeForm(form),
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: json ? JSON.stringify(form) : encodeForm(form),
+    headers: { 'Content-Type': json ? 'application/json' : 'application/x-www-form-urlencoded' },
   };
 }
 
@@ -107,20 +136,39 @@ export function shouldLogout(auth) {
  * endpoint that answers 200 with an unexpected body is a configuration problem, and the run should
  * report it per class rather than abort in the middle of a ramp.
  */
-export function parseToken(bodyText) {
+export function parseToken(bodyText, tokenPath, refreshPath) {
   let j;
   try {
     j = JSON.parse(bodyText);
   } catch (e) {
     return { error: 'token response is not JSON' };
   }
+  // An absent body is not an unparseable one, and the distinction matters: the k6 runtime returns
+  // undefined for res.body when response bodies are discarded, and JSON.parse of that yields
+  // undefined rather than throwing. Reading `.error` off it aborted the whole scenario mid-ramp.
+  if (j === null || typeof j !== 'object') return { error: 'token response body is empty' };
   if (j.error) return { error: String(j.error_description || j.error) };
-  if (!j.access_token) return { error: 'token response has no access_token' };
+  // An application endpoint usually wraps its payload — `data.access_token` — while a raw token
+  // endpoint puts it at the top. Guessing wrong reads as "the login works but returns no token", so
+  // the path is part of the profile.
+  const path = tokenPath || 'access_token';
+  const token = dig(j, path);
+  if (!token) return { error: `token response has no ${path}` };
   return {
-    token: j.access_token,
-    refreshToken: j.refresh_token || null,
-    expiresIn: Number(j.expires_in) || 0,
+    token: String(token),
+    refreshToken: dig(j, refreshPath || 'refresh_token') || null,
+    expiresIn: Number(dig(j, 'expires_in') || dig(j, 'data.expires_in')) || 0,
   };
+}
+
+/** Read a dotted path out of a parsed body: `data.access_token`. */
+export function dig(obj, path) {
+  let cur = obj;
+  for (const key of String(path || '').split('.')) {
+    if (cur === null || cur === undefined) return undefined;
+    cur = cur[key];
+  }
+  return cur;
 }
 
 /** Add the bearer token without mutating the shared base headers. */
@@ -157,16 +205,66 @@ export function expiryFrom(nowMs, expiresIn) {
  */
 export function signupPayload(template, seq, runId) {
   const tag = `${runId || 'run'}-${seq}`;
-  const email = String(template.email_pattern || 'crowdsim+{tag}@example.test').replace('{tag}', tag);
+  // split/join and not String.replace: with a string pattern replace() substitutes ONE occurrence, so a
+  // template that used {tag} twice sent a body with a literal `{tag}` still in it — a 400 from the API,
+  // read as the write path rejecting load. (`replaceAll` is ES2021; k6/lib stays ES2019.)
+  const fill = (text) => String(text).split('{email}').join(email).split('{tag}').join(tag);
+  const email = String(template.email_pattern || 'crowdsim+{tag}@example.test').split('{tag}').join(tag);
   const body = {};
   for (const k of Object.keys(template.body || {})) {
-    body[k] = String(template.body[k]).replace('{email}', email).replace('{tag}', tag);
+    body[k] = fill(template.body[k]);
   }
   if (!Object.keys(body).length) {
     body.email = email;
     body.password = template.password || 'crowdsim-throwaway';
   }
   return { email, body };
+}
+
+/**
+ * Zero accounts is a refusal, not a quiet run.
+ *
+ * THE BUG THIS REPLACES: `pickUser` returns null on an empty list, `login()` returned false without
+ * sending anything, and the caller ignored the return value — so the login class emitted ZERO requests. A
+ * class with no requests is dropped from `per_step` (a row of zeros reads as a step that was fast) and
+ * filtered out of the per-class table, so the run completed, clean, with the whole authenticated half
+ * never attempted. Every way of getting here is a file that looks fine: a header-only CSV, the wrong
+ * separator, comments only.
+ *
+ * Returns the message, or null when there is nothing to refuse. The generator throws it in the init
+ * context, where a refusal costs nothing and a wrong answer costs a campaign.
+ */
+export function credentialsRefusal(users, classes, path) {
+  if (!usesAuth(classes)) return null;
+  if (users && users.length > 0) return null;
+  return `no accounts in the credentials file (${path || 'unset'}).
+
+  This run signs in, so it needs at least one \`username,password\` line. The file was read and parsed to
+  nothing, which is what a header-only file, a space-separated one, or the wrong separator look like.
+  Refusing here on purpose: without accounts the login class sends no requests at all, and a class with
+  no requests is left out of the tables — the run would look clean with its authenticated half missing.`;
+}
+
+/**
+ * Fewer accounts than virtual users, said out loud.
+ *
+ * `pickUser` assigns by `vuId % users.length`, so 50 accounts across 400 VUs means each account is
+ * signing in from eight of them at once. Successful logins do not trip brute-force detection, but some
+ * providers serialise work per subject — so part of the ceiling you measure is your account count rather
+ * than the provider's capacity. `usersNeeded()` was written for this question and nothing asked it.
+ *
+ * A note and not a refusal: one account against one provider is a legitimate thing to measure, as long as
+ * nobody reads the result as a capacity figure.
+ */
+export function accountSharingNote(userCount, vus) {
+  const n = Number(userCount) || 0;
+  const v = Number(vus) || 0;
+  if (n <= 0 || v <= 0 || n >= v) return null;
+  const per = Math.ceil(v / n);
+  const label = n === 1 ? '1 account' : `${n} accounts`;
+  return `${label} for ${v} virtual users: each account signs in from about ${per} of them at once. `
+    + 'Some identity providers serialise work per subject, so part of what this run measures is the '
+    + 'account count and not the provider. One account per VU is the shape that measures the provider.';
 }
 
 /**
@@ -194,7 +292,15 @@ export function validateAuth(profile, env) {
 
   if (kinds.includes('login') || kinds.includes('authed')) {
     if (!auth.token_url) errs.push('auth.token_url is required by the login/authed classes');
-    if (!auth.client_id) errs.push('auth.client_id is required by the login/authed classes');
+    // client_id belongs to the password grant only: an application login endpoint needs no client.
+    if ((auth.mode || (auth.client_id ? 'password_grant' : 'form')) === 'password_grant' &&
+        !auth.client_id) {
+      errs.push('auth.client_id is required with mode "password_grant" (drop it for an application ' +
+                'login endpoint, which is mode "form")');
+    }
+    if (auth.mode && auth.mode !== 'form' && auth.mode !== 'password_grant') {
+      errs.push('auth.mode must be "form" (application endpoint) or "password_grant" (token endpoint)');
+    }
     if (!usersPath) {
       errs.push('a credentials CSV is required: set CROWDSIM_AUTH_USERS=<path> (preferred: keeps ' +
                 'credentials out of the profile) or auth.users_csv');

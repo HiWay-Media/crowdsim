@@ -318,3 +318,14 @@ test('a caller that declares no SLO gets nulls, not zeroes: a limit of 0 would b
   assert.equal(out.slo.max_failed_rate, null);
   assert.deepEqual(out.slo.per_class, {});
 });
+
+test('the accounts a run signed in with travel in the summary, and null when it did not', () => {
+  const withAuth = buildSummary(healthy(), Object.assign({}, CTX, {
+    auth: { users: 50, vus: 400, sharing_note: '50 accounts for 400 virtual users' },
+  }));
+  assert.equal(withAuth.auth.users, 50);
+  assert.equal(withAuth.auth.vus, 400);
+  assert.match(withAuth.auth.sharing_note, /50 accounts/);
+  // an anonymous run says nothing rather than reporting zero accounts, which would read as a failed login
+  assert.equal(buildSummary(healthy(), CTX).auth, null);
+});

@@ -40,6 +40,7 @@ import { usableClasses, shares, stages as mkStages, vus as mkVus, journeyPlan, r
 import {
   parseUsersCsv, pickUser, tokenRequest, logoutRequest, shouldLogout, parseToken, bearer,
   needsRelogin, expiryFrom, signupPayload, validateAuth, usesAuth,
+  credentialsRefusal, accountSharingNote,
 } from './lib/auth.js';
 import { compileLayers, layerHit, statusBuckets, overGuillotine } from './lib/classify.js';
 import { buildSummary, renderSummaryText } from './lib/summary.js';
@@ -121,6 +122,13 @@ function readUsersFile(path) {
 }
 const USERS = new SharedArray('users', function () { return parseUsersCsv(USERS_CSV); });
 
+// A file that parsed to nothing is refused HERE, in the init context, where it costs a second. Left to
+// run time it costs the campaign: pickUser() returns null, login() sends nothing, and a class with no
+// requests is dropped from the per-step table and filtered out of the per-class one — so the run would
+// complete, clean, with its authenticated half missing. See lib/auth.js.
+const CREDS_REFUSAL = credentialsRefusal(USERS, CLASS_DEFS, USERS_PATH);
+if (CREDS_REFUSAL) throw new Error(CREDS_REFUSAL);
+
 
 const POOLS = new SharedArray('pools', function () { return [PROFILE.pools || {}]; });
 function pool(name) {
@@ -163,6 +171,15 @@ const c504     = new Counter('cs_504');
 const c502     = new Counter('cs_502');
 const c5xx     = new Counter('cs_5xx');
 const c404     = new Counter('cs_404');
+// 401/403 have their own counter because an authenticated class that starts being REFUSED — a token
+// that stopped working, a rate limit, an account locked out — is not a 5xx and not a 404: without this
+// the run reports zero errors while the class is measuring nothing. Found while smoke-testing the login
+// classes on a real platform.
+const cDenied  = new Counter('cs_denied');
+// A login that answers 200 with a body we cannot read a token from is not an HTTP error, so no
+// status counter catches it: without this the authenticated requests are skipped and the run reads
+// as green while nothing was ever authenticated.
+const cAuthFail = new Counter('cs_auth_fail');
 const ttfb     = new Trend('cs_ttfb', true);
 const overSlo  = new Rate('cs_over_guillotine');
 
@@ -172,6 +189,16 @@ const overSlo  = new Rate('cs_over_guillotine');
 const RAMP = { steps: STEPS, startRps: START_RPS, peakRps: PEAK_RPS, stepDur: STEP_DUR, holdDur: HOLD_DUR };
 const stages = (share) => mkStages(Object.assign({ share: share }, RAMP));
 const vus = (share) => mkVus({ peakRps: PEAK_RPS, share: share, timeout: TIMEOUT });
+
+// How many VUs will be signing in, so the account count can be compared against it. `pickUser` assigns by
+// `vuId % users.length`: fewer accounts than VUs means each account is used by several at once, and some
+// identity providers serialise work per subject. usersNeeded() has always been able to answer this; until
+// 1.20.4 nothing asked it.
+const AUTH_VUS = CLASS_DEFS
+  .filter(function (c) { return c.kind === 'login' || c.kind === 'authed'; })
+  .reduce(function (n, c) { return n + vus(SHARE[c.name]).pre; }, 0);
+const SHARING_NOTE = accountSharingNote(USERS.length, AUTH_VUS);
+if (SHARING_NOTE) console.warn('crowdsim: ' + SHARING_NOTE);
 
 const scenarios = {};
 if (SHAPE === 'mix') {
@@ -278,7 +305,7 @@ const rscQuery = (path, idx) => mkRscQuery(path, idx, RSC_OPTS);
 
 function pick(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
-const COUNTERS = { cs_504: c504, cs_502: c502, cs_404: c404, cs_5xx: c5xx };
+const COUNTERS = { cs_504: c504, cs_502: c502, cs_404: c404, cs_5xx: c5xx, cs_denied: cDenied };
 
 function record(res, cls, step) {
   // The step tag is the one the REQUEST carried, passed in rather than recomputed: at a step boundary the
@@ -328,9 +355,14 @@ function abs(url) {
   return /^https?:\/\//.test(url) ? url : BASE_URL + url;
 }
 
-function post(url, body, headers, cls, name) {
+// `wantBody` asks k6 for the response body for THIS request only. The run sets
+// discardResponseBodies globally (headers are the measurement, bodies are RAM), and with bodies
+// discarded res.body is undefined — so a token could never be read out of the login response.
+function post(url, body, headers, cls, name, wantBody) {
   const tags = tagsFor(cls, name);
-  const res = http.post(abs(url), body, { headers, tags: tags, timeout: TIMEOUT });
+  const params = { headers, tags: tags, timeout: TIMEOUT };
+  if (wantBody) params.responseType = 'text';
+  const res = http.post(abs(url), body, params);
   record(res, cls, tags.step);
   return res;
 }
@@ -351,10 +383,11 @@ function login(cls, name) {
   const user = pickUser(USERS, exec.vu.idInTest);
   if (!user) return false;
   const req = tokenRequest(AUTH, user);
-  const res = post(req.url, req.body, Object.assign(baseHeaders(), req.headers), cls, name);
-  const parsed = parseToken(res.body);
+  const res = post(req.url, req.body, Object.assign(baseHeaders(), req.headers), cls, name, true);
+  const parsed = parseToken(res.body, AUTH.token_path, AUTH.refresh_path);
   if (parsed.error) {
     TOKEN = null;
+    cAuthFail.add(1, tagsFor(cls, name));
     return false;
   }
   TOKEN = parsed.token;
@@ -462,6 +495,9 @@ export function handleSummary(data) {
     // The knee is judged against the same limits as the brake, per-class ones included: a knee computed
     // from the profile SLO alone would sit above the rate at which the run actually aborted.
     slo: { max_p95_ms: MAX_P95_MS, max_failed_rate: MAX_5XX },
+    // Recorded rather than only logged: how many accounts the run had, and whether they were shared. A
+    // login ceiling measured with 50 accounts across 400 VUs is partly a statement about 50 accounts.
+    auth: NEEDS_AUTH ? { users: USERS.length, vus: AUTH_VUS, sharing_note: SHARING_NOTE } : null,
     classSlo: CLASS_DEFS.reduce(function (acc, c) {
       if (c.max_p95_ms !== undefined && c.max_p95_ms !== null) {
         acc[c.name] = acc[c.name] || {}; acc[c.name].maxP95 = Number(c.max_p95_ms);

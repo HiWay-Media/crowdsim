@@ -222,3 +222,26 @@ setup() { crowdsim_setup; }
   [[ "$output" == *"CROWDSIM_AUTH_USERS"* ]]
   [[ "$output" == *"username,password"* ]]
 }
+
+@test "a generator that produced no summary exits 4: a run that never happened is not a success" {
+  # `0` means EXECUTED, and the brake tripping keeps 0 because that is an outcome. A generator that died
+  # in its init context — a bad journey file, no accounts in the credentials CSV, an ESM breakage in the
+  # image — produced nothing to interpret. Until 1.20.4 this printed a warning and returned 0, so a Nomad
+  # batch and a CI job recorded it as a success. A scheduler cannot read a warning.
+  cat > "$BATS_TEST_TMPDIR/stub/k6" <<'STUB'
+#!/usr/bin/env bash
+echo "ERRO[0000] could not initialize: the generator refused this profile"
+exit 107
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/stub/k6"
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 10
+  [ "$status" -eq 4 ]
+  case "$output" in
+    *"no summary produced"*) ;;
+    *) printf 'the refusal does not say the run produced nothing:\n%s\n' "$output" >&2; return 1;;
+  esac
+  case "$output" in
+    *"not a result"*) ;;
+    *) printf 'it does not say this is not a result\n' >&2; return 1;;
+  esac
+}

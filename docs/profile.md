@@ -310,6 +310,21 @@ is the one inside the container.
 With a single shared account you would measure how the provider handles one subject's sessions rather
 than how it handles load, and a failure could not be traced to a credential.
 
+**A file that parses to no accounts refuses the run** (exit 4, from the generator's init context). Every
+way of getting there looks fine from the outside: a header-only CSV, a space-separated one, the wrong
+separator, comments only. It has to be a refusal rather than a warning, because the failure it replaces
+was silent — `pickUser` had nothing to return, the login class sent **no requests at all**, and a class
+with no requests is dropped from the per-step table and filtered out of the per-class one. The run
+completed, clean, with its whole authenticated half missing. A refusal costs a second; that costs a
+campaign.
+
+**Fewer accounts than virtual users is reported, not refused.** With 50 accounts and 400 VUs each account
+signs in from about eight of them at once, and some identity providers serialise work per subject — so
+part of the ceiling you measure is your account count. The run says so at the start, the summary records
+it in `auth` (`users`, `vus`, `sharing_note`), and both reports carry it as a caveat next to the numbers.
+Measuring one account against one provider is legitimate; reading that result as a capacity figure is
+not.
+
 ### The three kinds
 
 ```json
@@ -330,6 +345,10 @@ than how it handles load, and a failure could not be traced to a credential.
 - **`signup`** registers a **new identity per iteration**. Replaying one address would create the account
   on the first request and measure the conflict on every one after. `{email}` and `{tag}` are substituted
   in the body; `{tag}` includes the run id and the VU, so two runs never collide.
+
+A note on the templates: `{email}` and `{tag}` are substituted **everywhere they appear** in a value. Until
+1.20.4 only the first occurrence was replaced, so a template that used `{tag}` twice sent a body with a
+literal `{tag}` still in it — a 400 from the API, read as the write path rejecting load.
 
 ⚠️ **The accounts a signup class creates are real.** Plan the cleanup before you run it: a campaign that
 generated ~3,000 of them left them behind, and finding them afterwards is only possible because they

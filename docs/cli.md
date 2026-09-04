@@ -614,7 +614,7 @@ They are an API: the Nomad job, CI and the GUI all branch on them.
 | `0` | Executed | Also when the brake tripped — that is an outcome, not an error |
 | `2` | Usage | Unknown flag or subcommand, missing/unparseable profile, unknown target, `--shape journey` without `journey.file` |
 | `3` | A safety gate refused it | No allowlist, host not allowlisted, peak above the ceiling without the override, GUI asked to bind off-loopback without a token |
-| `4` | Nothing usable in the input | `probe` got ≥400 or no answer; `record` found no page in the HAR; `weights` classified nothing in the log; `init` found no artefacts to assemble |
+| `4` | Nothing usable came out of it | `probe` got ≥400 or no answer; `record` found no page in the HAR; `weights` classified nothing in the log; `init` found no artefacts to assemble — and, since 1.20.4, a `load` whose generator produced **no summary**: a run that never happened is not a success, and until then it warned on a terminal and exited 0 |
 | `5` | Missing or broken prerequisite | k6 absent, docker absent for `cache-ab`, node absent for `serve`, `validate`, `record` or `weights` — and, since 1.20.2, a profile validator that crashes instead of reaching a verdict: that is the installation, not the profile, and it used to be reported as exit 2 |
 
 ### `compare`

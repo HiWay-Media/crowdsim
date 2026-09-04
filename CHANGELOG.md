@@ -4,6 +4,49 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.4] — 2026-09-04
+
+An audit of the authenticated classes, three releases after they shipped. The worst finding is the shape
+this project exists to avoid: **a run that completed, clean, with its entire authenticated half never
+attempted.** A class with no requests is invisible by design — `steps.js` drops it because a row of zeros
+reads as a step that was fast, and the per-class table filters it out — so anything that silently produces
+zero requests produces a plausible wrong answer.
+
+### Fixed
+- **A credentials file that parses to no accounts refuses the run**, in the generator's init context, with
+  the reason and the fix. `pickUser` returns null on an empty list, `login()` returned false without
+  sending anything, and the caller ignored the return value: the login class emitted **zero requests** and
+  vanished from every table. Every way of getting there looks fine from the outside — a header-only CSV,
+  the wrong separator, comments only, a space-separated file. Verified against a real generator: it now
+  fails at init and the driver exits 4.
+- **A run that never happened is no longer a success.** When the generator produces no summary — a profile
+  it refuses at init, a missing journey file, an out-of-memory — the driver warned on a terminal and
+  returned **0**, so a Nomad batch and a CI job recorded it as executed. It exits **4** now, saying there
+  is nothing to interpret and that nothing went into the history. `0` still means executed, and a run the
+  brake stopped still keeps it: that is an outcome.
+- **Fewer accounts than virtual users is now stated instead of assumed away.** `pickUser` assigns by
+  `vuId % users.length`, so 50 accounts across 400 VUs means each account signs in from about eight of
+  them at once, and some identity providers serialise work per subject — part of the ceiling measured is
+  then the account count. `usersNeeded()` had been written for exactly this question, exported and
+  unit-tested, and **nothing ever called it**. The run says so at startup, the summary records it in
+  `auth` (`users`, `vus`, `sharing_note`), and both reports carry it as a caveat beside the numbers.
+- **A CSV header of `email,password` was an account that could never log in.** Only `username` and `user`
+  were recognised as a header, so one credential in the rotation failed every single time — with 50
+  accounts that is 2% of logins, the same order of magnitude as `max_failed_rate`, quietly eating the
+  error budget or tripping the brake as if the system had failed.
+- **A signup template substitutes every placeholder, not only the first.** `String.replace` with a string
+  pattern replaces one occurrence, so a body that used `{tag}` twice was sent with a literal `{tag}` still
+  in it — a 400 from the API, read as the write path rejecting load. (`split`/`join`, because `replaceAll`
+  is ES2021 and `k6/lib` stays ES2019.)
+
+### Added
+- `.github/roadmap.json`: milestone **v1.12.0**, the four things the StreamWay+ campaign of 2026-09-04
+  needed and this tool could not say — concurrency instead of only rates, an absolute rate for one class,
+  think time that can be measured rather than hard-coded, and a record of the accounts a signup run
+  created. Each one is this tool answering in the unit the question was asked in; none is a new kind of
+  tool. The campaign ran on the other generator for exactly these reasons.
+
+
 ## [1.20.3] — 2026-09-04
 
 **The driver's part of the authenticated classes had no test.** It does one thing — hand the path of the

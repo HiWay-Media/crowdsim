@@ -159,6 +159,14 @@ in questo repository.
   express 5 (`path-to-regexp` v8), `'*splat'` e il contrario. Si usa una RegExp (`/.*/`), che vale per
   entrambi; c'e un test statico in `tests/gui/startup.test.js` perché la suite gira contro l'express
   installato e su 4 la versione rotta passa tutto.
+- **Una classe senza richieste e INVISIBILE**: `steps.js` la salta (`if (!reqs) continue`) e la tabella
+  per-classe la filtra. Da qui il bug piu grave dell'audit 2026-09-04: un CSV di credenziali che si
+  presenta bene ma non contiene account (solo header, separatore sbagliato) faceva si che `pickUser`
+  tornasse `null`, `login()` non mandasse **nulla** e la run si chiudesse pulita con tutta la meta
+  autenticata mai avvenuta. Ora `credentialsRefusal()` rifiuta nell'init context. Regola generale: se una
+  classe può finire a zero richieste per configurazione, va rifiutata prima, non lasciata sparire.
+- **Una run che non e avvenuta non e un successo**: se il generatore non produce un summary il driver
+  esce **4** (prima avvisava e usciva 0 — uno scheduler non legge i warning).
 - **`make image-smoke` prima di ogni modifica a Dockerfile, `bin`, `k6` o `gui`** (la CI lo esegue prima
   del push su GHCR). L'assert che conta: l'immagine **non** dichiara un default per
   `CROWDSIM_ALLOW_TARGETS`. Non aggiungerlo mai, nemmeno "per comodita di test".
