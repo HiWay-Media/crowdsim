@@ -39,7 +39,7 @@ import { usableClasses, shares, stages as mkStages, vus as mkVus, journeyPlan, r
          classPath, DEFAULT_RSC_HASHES } from './lib/mix.js';
 import {
   parseUsersCsv, pickUser, tokenRequest, logoutRequest, shouldLogout, parseToken, bearer,
-  needsRelogin, expiryFrom, signupPayload, validateAuth,
+  needsRelogin, expiryFrom, signupPayload, validateAuth, usesAuth,
 } from './lib/auth.js';
 import { compileLayers, layerHit, statusBuckets, overGuillotine } from './lib/classify.js';
 import { buildSummary, renderSummaryText } from './lib/summary.js';
@@ -83,22 +83,44 @@ const PROFILE = JSON.parse(open(PROFILE_F));
 // Authenticated classes need a token endpoint and credentials. Checked HERE, in the init context: a
 // profile that is missing them would otherwise produce a class at 100% failures and a run that reads
 // like a capacity result.
+const CLASS_DEFS = usableClasses(PROFILE.classes, SKIP);
+// shares are recomputed over the REMAINING classes, so --peak stays the total you asked for
+const SHARE = shares(CLASS_DEFS);
+
+// ── authenticated classes ────────────────────────────────────────────────────────────────────────────
+// Everything here reads CLASS_DEFS, not PROFILE.classes: --skip-classes has already been applied, so a
+// run that skips the login class needs no credentials and must not fail looking for them.
 const AUTH = PROFILE.auth || {};
-const AUTH_ERRORS = validateAuth(PROFILE, __ENV);
+const AUTH_ERRORS = validateAuth({ auth: PROFILE.auth, classes: CLASS_DEFS }, __ENV);
 if (AUTH_ERRORS.length) {
   throw new Error('profile: ' + AUTH_ERRORS.join('; '));
 }
 // Credentials come from a path, and the environment variable wins: a profile gets copied around and
 // shared, a secret should not travel with it.
 const USERS_PATH = __ENV.CROWDSIM_AUTH_USERS || AUTH.users_csv || '';
-// open() at the top of the init context, like the profile above: reading the file inside the
-// SharedArray callback would tie a file read to the lifetime of a lazily-built shared object.
-const USERS_CSV = USERS_PATH ? open(USERS_PATH) : '';
+// Read the file ONLY when a class in THIS run signs in. CROWDSIM_AUTH_USERS is normally set once for a
+// whole environment (a Nomad job, a CI runner) and open() on a missing path throws in the init context:
+// without this guard, setting it there would break every anonymous run on that scheduler.
+const NEEDS_AUTH = usesAuth(CLASS_DEFS);
+// open() at the top of the init context, like the profile above: reading the file inside the SharedArray
+// callback would tie a file read to the lifetime of a lazily-built shared object.
+const USERS_CSV = NEEDS_AUTH && USERS_PATH ? readUsersFile(USERS_PATH) : '';
+
+// k6's own message for a missing file is `stat <path>: no such file or directory`, which is accurate and
+// says nothing about what to do. A run refused at init should name the fix in one sentence.
+function readUsersFile(path) {
+  try {
+    return open(path);
+  } catch (e) {
+    throw new Error(
+      `credentials file not found: ${path}. The login/authed classes need a \`username,password\` CSV: ` +
+      'point CROWDSIM_AUTH_USERS at one, or drop the authenticated classes with ' +
+      '--skip-classes. In a container or a Nomad allocation the file has to be mounted or rendered ' +
+      'there, and the path is the one inside it.');
+  }
+}
 const USERS = new SharedArray('users', function () { return parseUsersCsv(USERS_CSV); });
 
-const CLASS_DEFS = usableClasses(PROFILE.classes, SKIP);
-// shares are recomputed over the REMAINING classes, so --peak stays the total you asked for
-const SHARE = shares(CLASS_DEFS);
 
 const POOLS = new SharedArray('pools', function () { return [PROFILE.pools || {}]; });
 function pool(name) {

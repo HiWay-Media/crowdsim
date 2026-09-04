@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   parseUsersCsv, pickUser, usersNeeded, tokenRequest, logoutRequest, shouldLogout,
-  parseToken, bearer, needsRelogin, expiryFrom, signupPayload, validateAuth,
+  parseToken, bearer, needsRelogin, expiryFrom, signupPayload, validateAuth, usesAuth,
 } from '../../k6/lib/auth.js';
 
 test('parseUsersCsv skips comments, blanks and a header, and accepts semicolons', () => {
@@ -129,4 +129,14 @@ test('logout is refused without an endpoint, so sessions cannot pile up silently
   assert.equal(shouldLogout({ logout: true, logout_url: 'https://auth.example.test/logout' }), true);
   assert.equal(shouldLogout({ logout: true }), false);
   assert.equal(logoutRequest({ client_id: 'web' }, null), null);
+});
+
+test('usesAuth is the single answer to "does this profile sign in"', () => {
+  assert.equal(usesAuth([{ kind: 'html' }, { kind: 'rsc' }]), false);
+  assert.equal(usesAuth([{ kind: 'html' }, { kind: 'login' }]), true);
+  assert.equal(usesAuth([{ kind: 'authed' }]), true);
+  assert.equal(usesAuth([{ kind: 'signup' }]), true);
+  assert.equal(usesAuth([]), false);
+  assert.equal(usesAuth(undefined), false, 'a profile with no classes must not crash the guard');
+  assert.equal(usesAuth([null]), false);
 });

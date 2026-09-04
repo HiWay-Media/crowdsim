@@ -4,6 +4,33 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.1] — 2026-09-04
+
+**A credentials path set for a whole environment broke every anonymous run on it.** `CROWDSIM_AUTH_USERS`
+is meant to be set once — on a Nomad job, on a CI runner — but the generator opened the file
+unconditionally, and `open()` on a missing path throws in the init context. Setting it centrally, which is
+the point of an environment variable, made every profile without a login class refuse to start.
+
+### Fixed
+
+- **The credentials file is read only when a class in *that run* signs in**, and the check happens after
+  `--skip-classes` has been applied: skipping the authenticated classes now runs without credentials, as
+  it should. The predicate lives in `k6/lib/auth.js` as `usesAuth()` and is used by the generator, the
+  profile linter and the auth validation itself — three copies of the same question is how one of them
+  ends up disagreeing.
+- **A missing credentials file is refused with the fix, not with a stat error.** k6's own message is
+  `stat <path>: no such file or directory`, which is accurate and says nothing about what to do; the run
+  now names the path, the CSV format, and the two ways out (point the variable somewhere real, or drop
+  the classes with `--skip-classes`).
+
+### Added
+
+- **The parameterized Nomad job supports authenticated runs**: `CROWDSIM_AUTH_USERS` points at the
+  allocation's secrets directory, and a commented template renders the CSV from a Nomad variable
+  (`nomad var put nomad/jobs/crowdsim auth_users=@users.csv`) so the credentials exist for the life of
+  the run and nowhere else. The GUI needs nothing: every run is a child process of the driver and
+  inherits the environment. Documented in `docs/profile.md`, together with the refusal message.
+
 ## [1.20.0] — 2026-09-04
 
 **Every class crowdsim shipped until now was an anonymous GET, and that hides the component that breaks

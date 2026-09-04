@@ -335,6 +335,30 @@ than how it handles load, and a failure could not be traced to a credential.
 generated ~3,000 of them left them behind, and finding them afterwards is only possible because they
 share a dedicated mail domain. Use one.
 
+### Running it on a scheduler
+
+`CROWDSIM_AUTH_USERS` is set once for the environment, and the generator reads the file **only when a
+class in that run signs in** — so an anonymous profile on the same job does not care whether it exists,
+and `--skip-classes login,authed,signup` makes an authenticated profile run without credentials.
+
+In the parameterized Nomad job (`ci/nomad/crowdsim.nomad.hcl`) the variable already points at the
+allocation's secrets directory. The CSV is rendered from a Nomad variable, so it exists for the life of
+the run and nowhere else:
+
+```bash
+nomad var put nomad/jobs/crowdsim auth_users=@users.csv
+```
+
+then uncomment the `secrets/users.csv` template in the job file. The GUI needs nothing extra: every run
+is a child process of `bin/crowdsim` and inherits the environment.
+
+If the file is missing when a class needs it, the run is refused at init with the path and the fix:
+
+```
+credentials file not found: /secrets/users.csv. The login/authed classes need a `username,password`
+CSV: point CROWDSIM_AUTH_USERS at one, or drop the authenticated classes with --skip-classes.
+```
+
 ### Sessions are a resource
 
 150 logins/s for one minute is **9,000 sessions** on the identity provider, and the memory they hold is a

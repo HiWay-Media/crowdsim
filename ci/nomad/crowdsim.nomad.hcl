@@ -68,7 +68,7 @@ job "crowdsim" {
       config {
         # Pin a released tag, never `latest`: a load test you cannot reproduce is an anecdote. The same
         # image also serves the GUI (`crowdsim serve`), which is not what this job is for.
-        image      = "ghcr.io/hiway-media/crowdsim:1.20.0"
+        image      = "ghcr.io/hiway-media/crowdsim:1.20.1"
         entrypoint = ["/bin/bash"]
         # absolute path: the image's workdir is /crowdsim, so a relative "local/run.sh" would not resolve
         command    = "/local/run.sh"
@@ -115,7 +115,28 @@ job "crowdsim" {
         # Hard gate. Set it to the hosts this cluster is allowed to load-test; the dispatch can narrow
         # it but the job refuses to run without it.
         CROWDSIM_ALLOW_TARGETS = "${NOMAD_META_allow_targets}"
+        # Where the login/authed classes look for `username,password` credentials. Pointing at the
+        # secrets dir is safe for every other run: the generator reads this file only when a class in
+        # the profile actually signs in, so an anonymous profile does not care whether it exists.
+        # The file itself is rendered by the template below — it never lives in this repository.
+        CROWDSIM_AUTH_USERS = "${NOMAD_SECRETS_DIR}/users.csv"
       }
+
+      # Credentials for the authenticated classes. Same rule as the webhook: a secret belongs in a Nomad
+      # variable or in Vault, never in this file. `secrets/` is a tmpfs inside the allocation, so the CSV
+      # exists for the life of the run and nowhere else.
+      #
+      #   nomad var put nomad/jobs/crowdsim auth_users=@users.csv
+      #
+      # Uncomment when you run authenticated profiles. Give the accounts a dedicated mail domain: it is
+      # the only thing that lets you find and delete them afterwards, and a signup class creates real
+      # ones — a campaign that generated ~3,000 of them had no other way to identify them.
+      # template {
+      #   destination = "secrets/users.csv"
+      #   change_mode = "noop"
+      #   perms       = "0400"
+      #   data        = "{{ with nomadVar \"nomad/jobs/crowdsim\" }}{{ .auth_users }}{{ end }}"
+      # }
 
       # The Slack webhook is a secret: keep it in Vault or in a Nomad variable, never in this file.
       # template {

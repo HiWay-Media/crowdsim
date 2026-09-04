@@ -170,6 +170,16 @@ export function signupPayload(template, seq, runId) {
 }
 
 /**
+ * Does this profile sign in at all? Asked in three places — the generator (to decide whether to read the
+ * credentials file), the profile linter, and validateAuth itself — so it lives here once. Three copies of
+ * the same predicate is how one of them ends up disagreeing.
+ */
+export function usesAuth(classes) {
+  return (classes || []).some(
+    (c) => c && (c.kind === 'login' || c.kind === 'authed' || c.kind === 'signup'));
+}
+
+/**
  * Fail fast, with a message that says what to fix. A profile that is missing the token endpoint would
  * otherwise produce a class at 100% failures and a run that looks like a capacity result.
  */
@@ -177,8 +187,7 @@ export function validateAuth(profile, env) {
   const errs = [];
   const classes = (profile && profile.classes) || [];
   const kinds = classes.map((c) => c.kind);
-  const needsAuth = kinds.some((k) => k === 'login' || k === 'authed' || k === 'signup');
-  if (!needsAuth) return errs;
+  if (!usesAuth(classes)) return errs;
 
   const auth = (profile && profile.auth) || {};
   const usersPath = (env && env.CROWDSIM_AUTH_USERS) || auth.users_csv;
