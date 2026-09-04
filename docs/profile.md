@@ -285,8 +285,37 @@ Three class kinds use this block: `login`, `authed` and `signup`.
 | `client_secret` | only for confidential clients. A secret in a profile is a secret in a file that gets copied around |
 | `scope` | optional, passed through to the token request |
 | `logout` / `logout_url` | end each session instead of leaving it to expire — see [sessions are a resource](#sessions-are-a-resource) |
+| `mode` | `form` (default) posts the credentials to an **application** login endpoint; `password_grant` sends the OAuth2 password grant, and then `client_id` is required |
+| `token_path` | dotted path to the token in the response. Default `access_token`; an application endpoint usually wraps it (`data.access_token`) |
+| `refresh_path` | same, for the refresh token. Default `refresh_token` |
+| `fields` | the field names the endpoint expects: `{"username": "email", "password": "pass", "extra": {"remember": "1"}}` |
+| `body` | `form` (default) or `json` for an endpoint that wants a JSON body |
 
-**The grant is the password grant** (`Direct Access Grants` in Keycloak). If your client only allows
+**Which mode is yours is a question about the load, not about style.** The campaign that motivated all of
+this saturated at ~150 logins/s while the identity provider sat at 26%, because the site signs in through
+its own API and the provider is never on the path of the request being measured. Pointing a profile at the
+provider's token endpoint measures a component that was not the bottleneck.
+
+```json
+"auth": {
+  "token_url": "https://www.example.test/api/auth/login",
+  "token_path": "data.access_token"
+}
+```
+
+Guessing that the token sits at the top level of the body reads as *the login works but returns no token*,
+which is why the path is declared rather than inferred. A login that answers without a usable token is
+counted as `no token:` in the summary (`cs_auth_fail`) — it is not an HTTP error, and nothing else
+would show it.
+
+**An `authed` class needs an endpoint that actually refuses an anonymous request.** This is worth checking
+with `curl` before the run: an endpoint that answers 200 with the same body and no token proves nothing,
+and the class then measures an anonymous GET wearing an `Authorization` header. `401/403` in the summary
+(`cs_denied`) is the counter that tells you the opposite case — an authenticated class being *refused*
+under load, which is neither a 5xx nor a 404.
+
+**With `mode: "password_grant"` the grant is the OAuth2 password grant** (`Direct Access Grants` in
+Keycloak). If your client only allows
 Authorization Code + PKCE, do not script the login form: create a **client dedicated to load tests** with
 the password grant enabled. Parsing a login page is three requests of HTML scraping that break on the
 next redesign, and the numbers you get are about the form, not about authentication.
@@ -324,6 +353,14 @@ part of the ceiling you measure is your account count. The run says so at the st
 it in `auth` (`users`, `vus`, `sharing_note`), and both reports carry it as a caveat next to the numbers.
 Measuring one account against one provider is legitimate; reading that result as a capacity figure is
 not.
+
+### Their weights do not come from an access log
+
+`crowdsim weights` counts GETs, so a `login` or `signup` class — both POSTs — is reported as **not
+countable** rather than as zero, and `init --access-log` says the same in the draft it writes. Their weight
+comes from a rate you measured yourself: logins per second in the window you care about, from the identity
+provider or the application logs. An `authed` class is a GET and is counted normally, if your log lets you
+tell it apart (that is what `log_match` is for).
 
 ### The three kinds
 

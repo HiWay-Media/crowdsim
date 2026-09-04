@@ -381,6 +381,17 @@ test('login and signup do not need a pool, every other kind does', () => {
 test('a missing token endpoint is an error, not a surprise at run time', () => {
   const r = validateProfile({ ...authBase, classes: [{ name: 'login', kind: 'login', weight: 1 }] });
   assert.ok(r.errors.some((e) => /token_url/.test(e.message)));
+  // client_id belongs to the OAuth password grant. The default mode posts the form to an application
+  // login endpoint, which has no client: demanding it there rejected a valid profile.
+  assert.ok(!r.errors.some((e) => /client_id/.test(e.message)));
+});
+
+test('the password grant still requires a client_id', () => {
+  const r = validateProfile({
+    ...authBase,
+    auth: { mode: 'password_grant', token_url: 'https://id.example.test/token', users_csv: 'u.csv' },
+    classes: [{ name: 'login', kind: 'login', weight: 1 }],
+  });
   assert.ok(r.errors.some((e) => /client_id/.test(e.message)));
 });
 

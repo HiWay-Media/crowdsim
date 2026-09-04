@@ -270,3 +270,62 @@ PY
   # the header is extracted by structure now, so it must not stop at the sixtieth line either
   [[ "$output" == *"Requires: k6, curl, python3"* ]]
 }
+
+@test "a class that POSTs is reported as not countable, and never as a weight of zero" {
+  # kind login/signup are writes; this command counts GETs. Reporting them as 0 sent people looking for a
+  # login in a GET log — and before 1.20.4 a login class declared first even matched every document GET
+  # and took them from the class that served them, producing a mix of 100% login.
+  cat > "$BATS_TEST_TMPDIR/auth.json" <<'JSON'
+{
+  "name": "auth-mix",
+  "targets": { "default": "edge", "list": { "edge": { "base_url": "https://www.example.test" } } },
+  "classes": [
+    { "name": "login", "kind": "login", "weight": 5, "pool": "pages" },
+    { "name": "html", "kind": "plain", "weight": 95, "pool": "pages" }
+  ],
+  "pools": { "pages": ["/", "/news"] },
+  "rsc": { "param": "_rsc" },
+  "auth": { "token_url": "https://www.example.test/token", "mode": "form" },
+  "slo": { "max_p95_ms": 2500, "max_failed_rate": 0.05, "guillotine_ms": 7000, "brake_class": "html" },
+  "safety": { "allow_hosts": ["www.example.test"], "safe_peak_rps": 100 }
+}
+JSON
+  run "$CROWDSIM" weights "$LOG" --profile "$BATS_TEST_TMPDIR/auth.json" --json
+  [ "$status" -eq 0 ]
+  python3 - <<PY
+import json
+d = json.loads('''$output''')
+by = {c['name']: c for c in d['classes']}
+assert by['login']['countable'] is False, by['login']
+assert by['html']['countable'] is True, by['html']
+assert d['uncountable'] == ['login'], d['uncountable']
+# the document GETs belong to html, all of them
+assert by['html']['count'] == 4, by['html']
+assert by['login']['count'] == 0, by['login']
+assert by['html']['weight'] == 100.0, by['html']
+PY
+}
+
+@test "the human output says which classes it cannot count, and what to use instead" {
+  cp "$BATS_TEST_TMPDIR/auth.json" "$BATS_TEST_TMPDIR/a2.json" 2>/dev/null || cat > "$BATS_TEST_TMPDIR/a2.json" <<'JSON'
+{
+  "name": "auth-mix",
+  "targets": { "default": "edge", "list": { "edge": { "base_url": "https://www.example.test" } } },
+  "classes": [
+    { "name": "login", "kind": "login", "weight": 5, "pool": "pages" },
+    { "name": "html", "kind": "plain", "weight": 95, "pool": "pages" }
+  ],
+  "pools": { "pages": ["/", "/news"] },
+  "rsc": { "param": "_rsc" },
+  "auth": { "token_url": "https://www.example.test/token", "mode": "form" },
+  "slo": { "max_p95_ms": 2500, "max_failed_rate": 0.05, "guillotine_ms": 7000, "brake_class": "html" },
+  "safety": { "allow_hosts": ["www.example.test"], "safe_peak_rps": 100 }
+}
+JSON
+  run "$CROWDSIM" weights "$LOG" --profile "$BATS_TEST_TMPDIR/a2.json"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"not countable"* ]]
+  [[ "$output" == *"Not countable from an access log: login"* ]]
+  [[ "$output" == *"rate you measured yourself"* ]]
+  [[ "$output" == *"<your measured login rate>"* ]]
+}

@@ -189,6 +189,8 @@ Averages hide the queue, and the queue is what produces the errors.
 |---|---|
 | `guillotine_ms` | The read timeout from the profile, echoed for context. |
 | `over_guillotine_rate` | Share of all requests slower than it. |
+| `denied` | Counter of **401/403**. An authenticated class that starts being refused under load is neither a 5xx nor a 404: without this a run whose whole authenticated half was rejected printed zero errors. Read it together with whether the endpoint refuses anonymous requests at all. |
+| `authFail` | Counter of logins that answered **without a usable token** (`no token:` in the summary). Not an HTTP error, so no status counter sees it — and every authenticated request after it is skipped, which is how a run goes quiet. |
 | `e504` / `e502` / `e5xx` / `e404` | Counters. `e5xx` is cumulative: a 504 is also a 5xx. A 404 count that is not ~0 usually means a pool of URLs that do not exist, or a class hitting a tier that does not serve it. |
 
 ### Cache

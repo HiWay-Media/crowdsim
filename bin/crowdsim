@@ -1410,6 +1410,15 @@ for c in profile['classes']:
         c['_comment'] = (f"weight measured: {m['count']} requests, {m['share']*100:.1f}% of what was "
                          f"classified. " + str(c.get('_comment', '')).replace(DRAFT_TODO, ''))
         measured.append(c['name'])
+    elif m and m.get('countable') is False:
+        # A login or a signup POSTs, and `weights` counts GETs only: no access log can ever produce a
+        # number for it. Saying "NOT ONCE in the log" about a class that signs in on every session would
+        # send somebody looking for it in the wrong file.
+        c['_comment'] = (f"TODO: a {m.get('declared_kind', 'write')} class cannot be measured from an "
+                         'access log — it POSTs, and `crowdsim weights` counts GETs. Set this weight from '
+                         'the rate you measured yourself (logins per second in the window you care '
+                         'about). ' + str(c.get('_comment', '')))
+        absent.append(c['name'])
     else:
         # A class the log never showed keeps its placeholder weight and gains a TODO rather than being
         # deleted: it may be traffic this window did not contain, and dropping a class silently is how a

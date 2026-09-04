@@ -260,6 +260,13 @@ every page here says the weights come from your edge log, and `init` writes them
 that reason — and until now nothing in the tool would read one, so the most important number in a profile
 was left to somebody counting lines by hand.
 
+**A `login` or `signup` class is not counted here, and says so.** They POST, this command counts GETs, so
+no access log can ever produce a weight for them: they are reported as `not countable here` instead of as
+`0%`, which are different findings with different fixes. Until 1.20.5 they were treated as plain classes,
+and a `login` declared on a page pool matched *every document GET in the log* — a window with three page
+views and one sign-in produced a mix of 100% login. An `authed` class **is** counted: it is a GET, and
+whether your log can tell it apart from an anonymous one is yours to declare with `log_match`.
+
 It does **not** go and fetch the log. That would mean privileged access to a production edge, which this
 project deliberately does not want: the log arrives as a file you hand over, or on stdin.
 
@@ -307,6 +314,16 @@ shape of a URL:
 4. **the class's own pool** — the paths crowdsim would actually request for it.
 
 First match in profile order wins, so a specific class declared before a broad one keeps its traffic.
+
+**A class that POSTs cannot be counted from a GET log, and says so.** `login` and `signup` are writes, and
+this command counts GETs only — the same reason a write is excluded from the mix. Those classes are listed
+apart, with a dash rather than a zero, and the paste block asks for the rate you measured yourself (logins
+per second, from your identity provider or your application logs). Reporting them as `0` would send
+somebody looking for a login in a file that cannot contain one; and until 1.20.4 it was worse — a `login`
+class declared before the document class, on the same pool, matched **every document GET in the log** and
+took them from the class that had served them, so a log with three page views and one login produced a mix
+of 100% login. An `authed` class is a GET and stays countable: whether your log can tell an authenticated
+read from an anonymous one is what `log_match` is for.
 
 **What it will not do:**
 

@@ -67,8 +67,9 @@ load_run() {
 }
 
 @test "no summary at all is reported rather than silently succeeding" {
+  # Exit 4, not 0: a scheduler that reads 0 files a run that never happened as executed.
   run bash -c "FAKE_K6_RC=1 '$CROWDSIM' load --profile '$FIXTURES/minimal.json' --peak 40"
-  [ "$status" -eq 0 ]
+  [ "$status" -eq 4 ]
   [[ "$output" == *"no summary produced"* ]]
 }
 

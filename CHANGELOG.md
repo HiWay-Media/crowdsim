@@ -4,6 +4,57 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.5] — 2026-09-04
+
+**The authenticated classes were run against a real target for the first time, and two of the three
+findings are about a run that looks green while measuring nothing.** The definition came from the
+generator the StreamWay+ campaign of 2026-09-04 actually used: the sign-in it saturated is not an
+identity-provider token endpoint but an application login — `POST /api/auth/login`, an
+`application/x-www-form-urlencoded` body, the token at `data.access_token`. That is why the backend
+saturated while the identity provider sat at 26%: the load never reached it directly.
+
+### Fixed
+
+- **A login could not read its token at all, and it aborted the scenario mid-ramp.** The run sets
+  `discardResponseBodies: true` — headers are the measurement, bodies are RAM — so `res.body` is
+  undefined, and in the generator's runtime `JSON.parse(undefined)` returns undefined instead of
+  throwing: reading `.error` off it threw a `TypeError` on every iteration of both authenticated
+  classes. The login request now asks for its own body (`responseType: 'text'`), for that request only,
+  and an absent body is reported as `token response body is empty` rather than parsed.
+- **A weights class this command cannot count no longer steals the requests of the class that served
+  them.** `compileRules` mapped every kind that was not `rsc` to `plain` — true when those were the only
+  two kinds. A `login` class declared on a page pool then matched **every document GET in the log**: a
+  window with three page views and one sign-in produced a mix of 100% login. `login` and `signup` are
+  POSTs and this command counts GETs, so they are now carried through to be *reported* and never
+  matched, and `weights` says `cannot be counted from a GET log` instead of `0%` — a different finding
+  with a different fix.
+- **A profile that posts its credentials to an application endpoint is no longer refused for a missing
+  `client_id`.** That field belongs to the OAuth password grant, which is now one mode (`mode:
+  "password_grant"`) beside the default form post; the validator asks for it only there.
+- **The `no summary produced` test still expected exit 0**, the behaviour 1.20.4 deliberately changed to
+  exit 4. A test that asserts the bug is worse than no test.
+
+### Added
+
+- **`mode`, `fields` and `token_path` in the `auth` block**: the form field names, extra fields, a JSON
+  body, and a dotted path to the token and refresh token in a wrapped response. Guessing that the token
+  sits at the top level reads as *the login works but returns no token*, so the path is part of the
+  profile.
+- **Two counters for the failures that used to be invisible.** `cs_denied` counts **401/403** — an
+  authenticated class that starts being *refused* under load is neither a 5xx nor a 404, and until now
+  nothing counted it, so a run whose whole authenticated half was rejected printed zero errors.
+  `cs_auth_fail` counts a login that answered without a usable token, which is not an HTTP error either.
+  Both appear in the summary line as `401/403:` and `no token:`.
+
+### Notes
+
+- **`/api/auth/whoami` on the smoked target is public**: it answers 200 with the same body and no
+  token, so it cannot validate an `authed` class — an authenticated read needs an endpoint that actually
+  refuses an anonymous request, and neither the campaign's own test nor this one had one. The login is
+  proven end-to-end (a real account, a 1.482-character token from `data.access_token`, 29 iterations,
+  `no token: 0`); the authenticated read is not proven by that smoke, and this is the caveat to carry
+  into the first real authenticated campaign.
+
 ## [1.20.4] — 2026-09-04
 
 An audit of the authenticated classes, three releases after they shipped. The worst finding is the shape

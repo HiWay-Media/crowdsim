@@ -167,6 +167,11 @@ in questo repository.
   classe può finire a zero richieste per configurazione, va rifiutata prima, non lasciata sparire.
 - **Una run che non e avvenuta non e un successo**: se il generatore non produce un summary il driver
   esce **4** (prima avvisava e usciva 0 — uno scheduler non legge i warning).
+- **`weights` conta solo GET**: le classi `login`/`signup` (POST) non sono misurabili da un access log e
+  vanno riportate come **non contabili**, mai come 0. `UNCOUNTABLE_KINDS` in `lib/weights.mjs`: prima
+  qualsiasi kind diverso da `rsc` diventava `plain`, e una classe `login` dichiarata prima di quella dei
+  documenti si mangiava **tutte** le GET del log (mix 100% login da un log con tre pagine). Aggiungere un
+  kind nuovo significa aggiornare anche questo classificatore.
 - **`make image-smoke` prima di ogni modifica a Dockerfile, `bin`, `k6` o `gui`** (la CI lo esegue prima
   del push su GHCR). L'assert che conta: l'immagine **non** dichiara un default per
   `CROWDSIM_ALLOW_TARGETS`. Non aggiungerlo mai, nemmeno "per comodita di test".

@@ -227,3 +227,53 @@ test('an empty log produces zeroes, not a division by zero', () => {
   assert.equal(r.unclassified.share, 0);
   assert.equal(r.classes.every((c) => c.weight === 0), true);
 });
+
+// ── the authenticated kinds, added in 1.20.0, and this classifier ────────────────────────────────────
+// `compileRules` mapped every kind that was not `rsc` to `plain`, which was true when the only kinds were
+// `plain` and `rsc`. A `login` class is a POST, and this command counts GETs only — so it can never be
+// measured from an access log. Treating it as a plain class did not make it match nothing: it made it
+// match EVERY document GET in the log and take them from the class that actually served them.
+
+const authProfile = {
+  rsc: { param: '_rsc' },
+  pools: { pages: ['/', '/news'], api: ['/api/me'] },
+  classes: [
+    // declared first on purpose: first match in profile order wins
+    { name: 'login', kind: 'login', weight: 5, pool: 'pages' },
+    { name: 'signup', kind: 'signup', weight: 1, pool: 'pages' },
+    { name: 'html', kind: 'plain', weight: 90, pool: 'pages' },
+    { name: 'authed_api', kind: 'authed', weight: 4, pool: 'api' },
+  ],
+};
+
+test('a login class does not steal the document GETs of the class that served them', () => {
+  const r = weightsFromLog([line('/news'), line('/news'), line('/')], authProfile);
+  const by = Object.fromEntries(r.classes.map((c) => [c.name, c]));
+  assert.equal(by.html.count, 3, 'the three document views belong to html');
+  assert.equal(by.html.weight, 100);
+  assert.equal(by.login.count, 0);
+  assert.equal(by.signup.count, 0);
+});
+
+test('a class this command cannot count is reported as uncountable, never as zero', () => {
+  // Zero and "not countable" are different findings with different fixes: one means the window did not
+  // contain it, the other means no GET log can ever contain it. `init --access-log` would otherwise write
+  // "NOT ONCE in the log that was measured" about a class that signs in on every session.
+  const r = weightsFromLog([line('/news'), line('/api/login', { method: 'POST' })], authProfile);
+  const by = Object.fromEntries(r.classes.map((c) => [c.name, c]));
+  assert.equal(by.login.countable, false);
+  assert.equal(by.signup.countable, false);
+  assert.equal(by.html.countable, true);
+  assert.equal(by.authed_api.countable, true, 'an authenticated read is still a GET');
+  assert.deepEqual(r.uncountable, ['login', 'signup']);
+  // and they are left out of the weights, which are a share of what WAS counted
+  assert.equal(by.html.weight, 100);
+});
+
+test('the weights of the countable classes do not silently absorb the uncountable ones', () => {
+  const r = weightsFromLog([line('/news'), line('/api/me')], authProfile);
+  const by = Object.fromEntries(r.classes.map((c) => [c.name, c]));
+  assert.equal(by.html.weight, 50);
+  assert.equal(by.authed_api.weight, 50);
+  assert.equal(by.login.weight, 0, 'no weight is invented for a class that could not be counted');
+});

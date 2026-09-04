@@ -63,3 +63,14 @@ test('the guillotine is a strict threshold: it is the proxy read timeout, not a 
   assert.equal(overGuillotine(7000, 7000), 0);
   assert.equal(overGuillotine(12, 7000), 0);
 });
+
+test('401 and 403 get their own counter: a refused class is not a 5xx and not a 404', () => {
+  // An authenticated class that starts being refused — an expired token, a rate limit, a locked
+  // account — used to land in no bucket at all, so the run reported zero errors while the class was
+  // measuring nothing.
+  assert.deepEqual(statusBuckets(401), ['cs_denied']);
+  assert.deepEqual(statusBuckets(403), ['cs_denied']);
+  assert.deepEqual(statusBuckets(404), ['cs_404']);
+  assert.deepEqual(statusBuckets(200), []);
+  assert.deepEqual(statusBuckets(503), ['cs_5xx']);
+});

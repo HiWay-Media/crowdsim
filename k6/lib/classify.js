@@ -45,6 +45,7 @@ export function statusBuckets(status) {
   if (status === 504) out.push('cs_504');
   else if (status === 502) out.push('cs_502');
   else if (status === 404) out.push('cs_404');
+  else if (status === 401 || status === 403) out.push('cs_denied');
   if (status >= 500) out.push('cs_5xx');
   return out;
 }
