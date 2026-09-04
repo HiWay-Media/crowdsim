@@ -35,7 +35,7 @@ import { Counter, Rate, Trend } from 'k6/metrics';
 import { SharedArray } from 'k6/data';
 import { brakeThresholds } from './lib/brake.js';
 import { stepPlan, stepAt } from './lib/steps.js';
-import { usableClasses, shares, stages as mkStages, vus as mkVus, journeyPlan, rscQuery as mkRscQuery,
+import { usableClasses, allocate, stages as mkStages, vus as mkVus, journeyPlan, rscQuery as mkRscQuery,
          classPath, DEFAULT_RSC_HASHES } from './lib/mix.js';
 import {
   parseUsersCsv, pickUser, tokenRequest, logoutRequest, shouldLogout, parseToken, bearer,
@@ -87,7 +87,12 @@ const PROFILE = JSON.parse(open(PROFILE_F));
 // like a capacity result.
 const CLASS_DEFS = usableClasses(PROFILE.classes, SKIP);
 // shares are recomputed over the REMAINING classes, so --peak stays the total you asked for
-const SHARE = shares(CLASS_DEFS);
+// Where each class's peak rate comes from: its own `rate_rps`, or its share of what the pinned classes
+// leave. The shares come out of the same arithmetic so the ramp cannot disagree with the rates — and
+// `--peak` stays the total, which is what the safe-peak gate reads. See k6/lib/mix.js.
+const ALLOC = allocate(CLASS_DEFS, PEAK_RPS);
+const SHARE = ALLOC.shares;
+if (ALLOC.note) console.warn('crowdsim: ' + ALLOC.note);
 
 // ── authenticated classes ────────────────────────────────────────────────────────────────────────────
 // Everything here reads CLASS_DEFS, not PROFILE.classes: --skip-classes has already been applied, so a
@@ -506,6 +511,10 @@ export function handleSummary(data) {
     ramp: RAMP,
     // The knee is judged against the same limits as the brake, per-class ones included: a knee computed
     // from the profile SLO alone would sit above the rate at which the run actually aborted.
+    // The rates this run aimed at, per class, and where each came from: a finding about one class gets
+    // quoted as that class's rate, so it has to be in the file rather than recomputed from a weight.
+    allocation: { rates: ALLOC.rates, pinned: ALLOC.pinned, fixed_total: ALLOC.fixed_total,
+                  note: ALLOC.note },
     // Both needed to turn a rate into concurrent users, and to say whether that number is a measurement.
     thinkTime: THINK,
     vuCeiling: JOURNEY_VU_CEILING,

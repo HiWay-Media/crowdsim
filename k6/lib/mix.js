@@ -30,6 +30,84 @@ export function shares(classes) {
   return out;
 }
 
+/**
+ * Where each class's peak rate comes from: an absolute rate it declares, or its share of what is left.
+ *
+ * WHY — a finding is usually about ONE class. The StreamWay+ campaign's answer is "the login saturates at
+ * ~150 login/s", and to reproduce that with weights you set a global `--peak` and solve for the weight by
+ * hand, in the wrong direction, every time the question changes. `rate_rps` says it directly.
+ *
+ * The two compose, and the composition is the whole design: the pinned classes get exactly what they ask
+ * for, and the rest split WHAT IS LEFT by weight. So `--peak` keeps meaning the total — which is what the
+ * safe-peak gate reads, and therefore what a per-class rate cannot be used to slip past.
+ *
+ * Returns absolute peak rates AND the equivalent shares, because everything downstream (the ramp, the VU
+ * provisioning, `mix_target`) is expressed as a share of the peak: computing the share twice, once here and
+ * once there, is how the two would eventually disagree.
+ *
+ * A pinned rate is the rate AT PEAK. The class still ramps with everybody else — pinning it flat from the
+ * first step would put the total above the step's own total, and `--start`/`--steps` would stop meaning
+ * anything.
+ */
+export function allocate(classes, peakRps) {
+  const peak = Number(peakRps);
+  if (!(peak > 0)) throw new Error('--peak must be a positive number of requests per second');
+
+  const pinned = [];
+  const weighted = [];
+  var fixedTotal = 0;
+  for (const c of classes) {
+    const rate = Number(c.rate_rps);
+    if (isFinite(rate) && rate > 0) {
+      pinned.push(c);
+      fixedTotal += rate;
+    } else {
+      weighted.push(c);
+    }
+  }
+
+  // Refused, not scaled. Scaling the pinned rates down to fit would generate a run nobody asked for and
+  // report it under the rate they did ask for — the class of wrong answer this tool exists to avoid.
+  if (fixedTotal > peak) {
+    throw new Error('the classes with a fixed rate_rps already ask for ' + Math.round(fixedTotal * 10) / 10
+      + ' req/s, which is more than --peak ' + peak + '. --peak is the TOTAL: raise it, or lower the fixed '
+      + 'rates. They are not scaled down to fit, because the run would then measure a rate nobody asked '
+      + 'for and report it under the one they did.');
+  }
+
+  const rates = {};
+  for (const c of pinned) rates[c.name] = Number(c.rate_rps);
+
+  const remaining = peak - fixedTotal;
+  const weightTotal = weighted.reduce(function (a, c) { return a + Number(c.weight || 0); }, 0);
+  if (weighted.length && !(weightTotal > 0)) {
+    throw new Error('the classes without a rate_rps have no positive weight, so there is nothing to split '
+      + 'the remaining ' + Math.round(remaining * 10) / 10 + ' req/s by');
+  }
+  for (const c of weighted) rates[c.name] = remaining * (Number(c.weight) / weightTotal);
+
+  const shareOf = {};
+  for (const name of Object.keys(rates)) shareOf[name] = rates[name] / peak;
+
+  var note = null;
+  if (!weighted.length && fixedTotal < peak) {
+    // Every class is pinned: --peak cannot be reached by construction, and saying nothing would leave
+    // somebody reading "peak 500" next to a run that generated 200.
+    note = 'every class declares a fixed rate_rps, so this run generates '
+      + Math.round(fixedTotal * 10) / 10 + ' req/s and not the --peak of ' + peak
+      + '. --peak is the ceiling here, not the target.';
+  }
+
+  return {
+    rates: rates,
+    shares: shareOf,
+    fixed_total: Math.round(fixedTotal * 10) / 10,
+    pinned: pinned.map(function (c) { return c.name; }),
+    weighted: weighted.map(function (c) { return c.name; }),
+    note: note,
+  };
+}
+
 /** "0s" / "0" means: climb and leave, do not hold the peak (that is what --touch-and-go sets). */
 export function isZeroDuration(d) {
   return /^0s?$/.test(String(d || '').trim());

@@ -96,6 +96,7 @@ gets `weight / total × peak`.
 | `max_p95_ms` | no | This class's own p95 limit, sharper than the profile's, which aborts the run for this class alone — see [A class may set its own limit](#a-class-may-set-its-own-limit). |
 | `max_failed_rate` | no | This class's own failed-rate limit, same rule. |
 | `log_match` | no | Path globs identifying this class in an access log, for [`crowdsim weights`](cli.md#weights). No effect on a run — see [`log_match`](#log_match). |
+| `rate_rps` | no | An absolute rate for this class **instead of** a weight — see [Aiming one class](#aiming-one-class). A class declares one or the other, never both. |
 
 Rules the tool enforces, and why:
 
@@ -108,6 +109,36 @@ Rules the tool enforces, and why:
   rendered 404 counted as a static asset.
 - **Keep search separate.** It is frequently the most expensive class per request; averaged into the
   others it hides the thing that actually falls over.
+
+### Aiming one class
+
+A finding is usually about one class. *"The login saturates at ~150 login/s"* is the answer a campaign
+comes back with, and to reproduce it through a weight you set a global `--peak` and solve for the weight by
+hand — arithmetic in the wrong direction, redone every time the question changes.
+
+```json
+{ "name": "login",  "kind": "login",  "rate_rps": 150 }
+{ "name": "html",   "kind": "plain",  "weight": 70, "pool": "pages" }
+{ "name": "static", "kind": "plain",  "weight": 30, "pool": "static" }
+```
+
+With `--peak 250`: `login` gets **exactly 150**, and `html`/`static` split the remaining 100 by weight —
+70 and 30. The two compose, and that composition is the point:
+
+- **`--peak` keeps meaning the total.** It is also what the safe-peak gate reads, so a per-class rate is
+  not a way past a ceiling: pin one class at 40 and leave a weighted one, ask for `--peak 200` against a
+  ceiling of 50, and the run is refused with exit 3 like any other.
+- **Fixed rates above `--peak` are refused**, naming both numbers, before k6 is started. They are never
+  scaled down to fit: the run would then measure a rate nobody asked for and report it under the one they
+  did.
+- **A pinned rate is the rate at peak.** The class still ramps with everybody else — holding it flat from
+  the first step would put the total above that step's own total and `--start`/`--steps` would stop meaning
+  anything.
+- **If every class is pinned**, `--peak` becomes a ceiling rather than a target: the run generates the sum
+  of the fixed rates and says so, in the panel and in `validate`.
+
+The rate each class was aimed at, and whether it came from a pin or a weight, is in the summary
+(`allocation`) and in the per-class table as `target req/s`.
 
 ### `log_match`
 

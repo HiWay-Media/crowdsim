@@ -971,6 +971,39 @@ cmd_load() {
     PEAK="$PEAK_SAVED"
   fi
 
+  # A profile whose fixed per-class rates already exceed --peak is refused HERE, with an exit code, rather
+  # than in the generator's init context: `--peak` is the total, and the arithmetic that decides it is the
+  # same one k6/lib/mix.js runs (the generator refuses too, as a backstop that cannot drift).
+  local pin_rc=0
+  python3 - "$RESOLVED" "$PEAK" <<'PY' || pin_rc=$?
+import json, sys
+profile, peak = sys.argv[1], float(sys.argv[2])
+classes = json.load(open(profile, encoding='utf-8')).get('classes') or []
+fixed = 0.0
+pinned = []
+for c in classes:
+    r = c.get('rate_rps')
+    try:
+        r = float(r)
+    except (TypeError, ValueError):
+        continue
+    if r > 0:
+        fixed += r
+        pinned.append(f"{c.get('name')} {r:g}")
+if fixed > peak:
+    print(f"  the classes with a fixed rate ask for {fixed:g} req/s ({', '.join(pinned)}), which is more "
+          f"than --peak {peak:g}.")
+    print("  --peak is the TOTAL: raise it, or lower the fixed rates. They are not scaled down to fit —")
+    print("  the run would then measure a rate nobody asked for and report it under the one they did.")
+    raise SystemExit(2)
+if pinned and len(pinned) == len(classes) and fixed < peak:
+    print(f"  ⚠️  every class declares a fixed rate: this run generates {fixed:g} req/s, not --peak "
+          f"{peak:g}. --peak is the ceiling here, not the target.")
+PY
+  if [ "$pin_rc" != "0" ]; then
+    die "the profile asks for more than --peak: see above" 2
+  fi
+
   bandwidth_note "$PEAK"
   virtualised_generator_note
   k6_bin

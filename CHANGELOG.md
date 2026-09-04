@@ -4,6 +4,41 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.22.0] — 2026-09-04
+
+Milestone v1.12.0, second half: **a class can be aimed at a rate.** A finding is almost always about one
+class — *"the login saturates at ~150 login/s"* is the sentence a campaign comes back with — and until now
+a run could only be aimed with one global `--peak` split by weights. Reproducing that finding meant solving
+for a weight by hand, in the wrong direction, every time the question changed.
+
+### Added
+- **`rate_rps` on a class, instead of a weight.** The pinned classes get exactly what they ask for and the
+  rest split **what is left** by weight (`allocate()` in `k6/lib/mix.js`). That composition is the design,
+  not a convenience: `--peak` keeps meaning the total, and the total is what the safe-peak gate reads, so a
+  per-class rate is not a way past a ceiling — pin a class under the ceiling, ask for a `--peak` above it,
+  and the run is refused with exit 3 like any other. Asserted in `tests/cli/profile.bats`.
+- **The shares come out of the same arithmetic as the rates.** Everything downstream — the ramp, the VU
+  provisioning, `mix_target` — is expressed as a share of the peak, so computing it twice is how the ramp
+  and the rates would eventually disagree about what the run was doing.
+- **The summary records what each class was aimed at and where the number came from** (`allocation`:
+  `rates`, `pinned`, `fixed_total`, `note`). A finding about one class gets quoted as that class's rate, so
+  it belongs in the file rather than being recomputed from a weight by whoever reads it later.
+- **A pinned rate is the rate at peak**, and the class still ramps with everybody else. Holding it flat
+  from the first step would put the total above that step's own total, and `--start`/`--steps` would stop
+  meaning anything.
+
+### Changed
+- **Fixed rates above `--peak` are refused before k6 starts** (exit 2), naming what was asked for and the
+  peak it exceeds. They are **never scaled down to fit**: the run would then measure a rate nobody asked
+  for and report it under the one they did. The driver refuses first, with a proper exit code, and
+  `allocate()` refuses again in the generator's init context as a backstop that cannot drift from it.
+- **When every class is pinned, `--peak` is a ceiling and not a target**, and both the run and `validate`
+  say so: a run that generated 200 req/s next to a `--peak` of 500 needs to have said why in advance.
+- `validate` refuses a class that declares both a `weight` and a `rate_rps` — with both, one is silently
+  ignored and the run aims somewhere nobody chose — and a `rate_rps` that is not a positive number.
+- A profile with no `rate_rps` anywhere produces byte-identical shares to 1.21.0, asserted against
+  `shares()` in `tests/unit/mix.test.js`.
+
 ## [1.21.0] — 2026-09-04
 
 Milestone v1.12.0, first half: **the unit the requirement is written in.** A capacity requirement arrives

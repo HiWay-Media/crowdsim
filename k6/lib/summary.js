@@ -129,6 +129,10 @@ export function buildSummary(metrics, ctx) {
     // `crowdsim report --html` needs the SLO to draw a line on the ramp, and parsing prose for it would
     // produce a chart whose limit line is a guess. A run archived before this key exists gets no line, and
     // the report says so instead of inventing one.
+    // What each class was aimed at, and which classes said it themselves. `mix_target` below is the same
+    // arithmetic; this says where the number came from, which is what a finding about one class is quoted
+    // against.
+    allocation: ctx.allocation || null,
     // Concurrent users, the unit a capacity requirement is written in — and only for the shape that has
     // sessions. In `mix` there is no session, so there is no session duration, and rate/duration arithmetic
     // over a class mix would be a number with nothing behind it. Both methods are reported, never merged:

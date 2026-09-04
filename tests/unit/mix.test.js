@@ -6,8 +6,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   usableClasses, shares, stages, vus, isZeroDuration, requestsPerSession, journeyPlan,
-  rscQuery, classPath, DEFAULT_RSC_HASHES,
-} from '../../k6/lib/mix.js';
+  rscQuery, classPath, DEFAULT_RSC_HASHES, allocate,} from '../../k6/lib/mix.js';
 
 const CLASSES = [
   { name: 'rsc_page', weight: 43.2 },
@@ -118,4 +117,73 @@ test('classPath applies suffix pool and prefix without producing a double slash'
   assert.equal(classPath({ path_suffix_pool: 'p' }, '/news', '/page/2'), '/news/page/2');
   assert.equal(classPath({ path_prefix: '/page' }, '/news'), '/page/news');
   assert.equal(classPath({ path_prefix: '/page' }, '/'), '/page/');
+});
+
+// ── a class can be aimed directly (#63) ──────────────────────────────────────────────────────────────
+// A finding is usually about one class — "the login saturates at ~150 login/s" — and with weights alone
+// that rate has to be solved for by hand, in the wrong direction, every time the question changes.
+
+test('a pinned class gets exactly its rate, and the rest split what is left', () => {
+  const a = allocate([
+    { name: 'login', rate_rps: 150 },
+    { name: 'html', weight: 70 },
+    { name: 'static', weight: 30 },
+  ], 250);
+  assert.equal(a.rates.login, 150);
+  assert.equal(a.rates.html, 70);
+  assert.equal(a.rates.static, 30);
+  assert.deepEqual(a.pinned, ['login']);
+  assert.equal(a.fixed_total, 150);
+  // and --peak still means the total
+  const total = Object.values(a.rates).reduce((x, y) => x + y, 0);
+  assert.equal(Math.round(total), 250);
+});
+
+test('the shares are derived from the same arithmetic, so the ramp cannot disagree with the rates', () => {
+  const a = allocate([{ name: 'login', rate_rps: 50 }, { name: 'html', weight: 1 }], 200);
+  assert.equal(a.shares.login, 0.25);
+  assert.equal(a.shares.html, 0.75);
+  // the share is what stages() and vus() take: 0.25 of a 200 peak IS the 50 that was asked for
+  assert.equal(a.shares.login * 200, a.rates.login);
+});
+
+test('fixed rates over the peak are refused, naming both numbers, and never scaled to fit', () => {
+  // Scaling them down would generate a run nobody asked for and report it under the rate they did.
+  assert.throws(() => allocate([{ name: 'login', rate_rps: 150 }, { name: 'html', rate_rps: 100 }], 200),
+    (e) => /already ask for 250 req\/s/.test(e.message) && /--peak 200/.test(e.message)
+      && /not scaled down/.test(e.message));
+});
+
+test('every class pinned: the run says it generates the pins and not the peak', () => {
+  const a = allocate([{ name: 'login', rate_rps: 120 }, { name: 'authed', rate_rps: 80 }], 500);
+  assert.equal(a.fixed_total, 200);
+  assert.deepEqual(a.weighted, []);
+  assert.match(a.note, /generates 200 req\/s and not the --peak of 500/);
+  assert.match(a.note, /ceiling here, not the target/);
+});
+
+test('a weighted class with no weight left to split by is an error, not a silent zero', () => {
+  assert.throws(() => allocate([{ name: 'login', rate_rps: 50 }, { name: 'html', weight: 0 }], 200),
+    /no positive weight/);
+});
+
+test('a profile with no pinned rates behaves exactly as it did before', () => {
+  const classes = [{ name: 'a', weight: 3 }, { name: 'b', weight: 1 }];
+  const a = allocate(classes, 100);
+  const s = shares(classes);
+  assert.equal(a.shares.a, s.a);
+  assert.equal(a.shares.b, s.b);
+  assert.equal(a.rates.a, 75);
+  assert.equal(a.note, null);
+  assert.deepEqual(a.pinned, []);
+});
+
+test('a fixed rate equal to the peak leaves nothing to split, and that is fine', () => {
+  const a = allocate([{ name: 'login', rate_rps: 100 }], 100);
+  assert.equal(a.rates.login, 100);
+  assert.equal(a.note, null);
+});
+
+test('a peak of zero is refused rather than dividing by it', () => {
+  assert.throws(() => allocate([{ name: 'a', weight: 1 }], 0), /--peak must be a positive number/);
 });

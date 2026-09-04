@@ -180,6 +180,13 @@ in questo repository.
   tetto dei VU. Il tasso di arrivo NON e `iterations.rate` (quello conta le iterazioni *completate*: su una
   rampa tagliata dava 0,1 sessioni/s contro 50 in volo). Solo `--shape journey`: in `mix` non esiste
   sessione, quindi nessun numero.
+- **`rate_rps`: una classe si punta a un rate assoluto** invece che con un peso (`allocate()` in
+  `k6/lib/mix.js`). Le classi puntate prendono esattamente il loro rate, le altre si spartiscono **ciò che
+  resta** per peso — quindi `--peak` resta il TOTALE, ed e quello che legge il gate del safe peak: un rate
+  per classe non e un modo per aggirare il tetto. Rate fissi che superano `--peak` → rifiuto (exit 2) che
+  nomina entrambi i numeri, **mai riscalati** per farli stare. Le share escono dalla stessa aritmetica
+  delle rate, altrimenti rampa e rate finirebbero per non concordare. Peso e `rate_rps` insieme = errore
+  di validate.
 - **`make image-smoke` prima di ogni modifica a Dockerfile, `bin`, `k6` o `gui`** (la CI lo esegue prima
   del push su GHCR). L'assert che conta: l'immagine **non** dichiara un default per
   `CROWDSIM_ALLOW_TARGETS`. Non aggiungerlo mai, nemmeno "per comodita di test".

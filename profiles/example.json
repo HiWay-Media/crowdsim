@@ -80,6 +80,7 @@
       "_comment": "assets that are served BY THE APP rather than by the CDN. Regenerate this pool after every deploy: it contains build hashes. The pool below is empty, so this class is dropped from a run — but log_match still lets `crowdsim weights` count these requests instead of reporting them as unclassified."
     },
     {
+      "_rate_comment": "A class may declare `\"rate_rps\": 150` INSTEAD of a weight, when the question is about that class alone — \"the login saturates at ~150 login/s\" is a finding about one class, and solving for it through a weight is arithmetic in the wrong direction. The pinned classes get exactly what they ask for and the rest split WHAT IS LEFT by weight, so `--peak` keeps meaning the total — which is what the safe-peak gate reads, so a per-class rate is not a way past a ceiling. A profile whose fixed rates already exceed `--peak` is refused, naming both numbers: they are never scaled down to fit.",
       "name": "proxy_only",
       "label": "proxy-only route",
       "weight": 0.9,

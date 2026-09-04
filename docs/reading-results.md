@@ -212,6 +212,15 @@ than classes are scheduled). `mix_target` lists the same targets in one place.
 A class with `reqs: 0` did not run: it was skipped, dropped for an empty pool, or does not exist in this
 shape. The text table leaves it out rather than printing a row of zeroes.
 
+### What each class was aimed at
+
+| Field | Meaning |
+|---|---|
+| `allocation.rates` | The peak rate per class, in req/s. Whether it came from a `rate_rps` or from a share of what the pinned classes left, this is the number a finding about that class is quoted as. |
+| `allocation.pinned` | The classes that declared their own rate. |
+| `allocation.fixed_total` | What those pins add up to — always ≤ `--peak`, because a profile that asks for more is refused before the run starts. |
+| `allocation.note` | Set when every class is pinned, i.e. when `--peak` was a ceiling and not the target. |
+
 ### Concurrent users, for a journey run
 
 | Field | Meaning |

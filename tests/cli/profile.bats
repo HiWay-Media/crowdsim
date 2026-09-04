@@ -153,3 +153,69 @@ resolved() { cat "$CROWDSIM_OUT"/profile-*.json; }
   [ "$status" -eq 0 ]
   [[ "$output" == *"INSECURE=0"* ]]
 }
+
+# ── a class aimed at an absolute rate (#63) ─────────────────────────────────────────────────────────
+# A finding is usually about one class — "the login saturates at ~150 login/s" — so a class can declare
+# `rate_rps` instead of a weight. `--peak` stays the TOTAL, which is what the safe-peak gate reads.
+
+@test "fixed per-class rates above --peak are refused before k6, and never scaled to fit" {
+  python3 - "$BATS_TEST_TMPDIR/over.json" <<'PY'
+import json, sys
+json.dump({
+  "name": "over", "targets": {"default": "edge", "list": {"edge": {"base_url": "http://127.0.0.1:8099"}}},
+  "classes": [{"name": "login", "kind": "plain", "rate_rps": 150, "pool": "pages"},
+              {"name": "html", "kind": "plain", "rate_rps": 100, "pool": "pages"}],
+  "pools": {"pages": ["/", "/news"]}, "rsc": {"param": "_rsc"},
+  "slo": {"max_p95_ms": 4000, "max_failed_rate": 0.5, "guillotine_ms": 8000, "brake_class": "html"},
+  "safety": {"allow_hosts": ["127.0.0.1"], "safe_peak_rps": 500},
+}, open(sys.argv[1], "w"))
+PY
+  run "$CROWDSIM" load --profile "$BATS_TEST_TMPDIR/over.json" --peak 200 --dry-run
+  [ "$status" -eq 2 ]
+  case "$output" in
+    *"ask for 250 req/s"*) ;;
+    *) printf 'the refusal does not name what was asked for:\n%s\n' "$output" >&2; return 1;;
+  esac
+  case "$output" in
+    *"not scaled down to fit"*) ;;
+    *) printf 'it does not say the rates are not scaled\n' >&2; return 1;;
+  esac
+}
+
+@test "a pinned class gets its rate and the rest split what is left" {
+  python3 - "$BATS_TEST_TMPDIR/pinned.json" <<'PY'
+import json, sys
+json.dump({
+  "name": "pinned", "targets": {"default": "edge", "list": {"edge": {"base_url": "http://127.0.0.1:8099"}}},
+  "classes": [{"name": "login", "kind": "plain", "rate_rps": 4, "pool": "pages"},
+              {"name": "html", "kind": "plain", "weight": 70, "pool": "pages"},
+              {"name": "static", "kind": "plain", "weight": 30, "pool": "pages"}],
+  "pools": {"pages": ["/", "/news"]}, "rsc": {"param": "_rsc"},
+  "slo": {"max_p95_ms": 4000, "max_failed_rate": 0.5, "guillotine_ms": 8000, "brake_class": "html"},
+  "safety": {"allow_hosts": ["127.0.0.1"], "safe_peak_rps": 500},
+}, open(sys.argv[1], "w"))
+PY
+  run "$CROWDSIM" load --profile "$BATS_TEST_TMPDIR/pinned.json" --peak 20 --dry-run
+  [ "$status" -eq 0 ]
+}
+
+@test "the safe-peak gate reads the total: a per-class rate is not a way past it" {
+  python3 - "$BATS_TEST_TMPDIR/sneaky.json" <<'PY'
+import json, sys
+json.dump({
+  "name": "sneaky", "targets": {"default": "edge", "list": {"edge": {"base_url": "http://127.0.0.1:8099"}}},
+  # the pin is under the ceiling, the TOTAL is not: the gate must still refuse
+  "classes": [{"name": "login", "kind": "plain", "rate_rps": 40, "pool": "pages"},
+              {"name": "html", "kind": "plain", "weight": 100, "pool": "pages"}],
+  "pools": {"pages": ["/", "/news"]}, "rsc": {"param": "_rsc"},
+  "slo": {"max_p95_ms": 4000, "max_failed_rate": 0.5, "guillotine_ms": 8000, "brake_class": "html"},
+  "safety": {"allow_hosts": ["127.0.0.1"], "safe_peak_rps": 50},
+}, open(sys.argv[1], "w"))
+PY
+  run "$CROWDSIM" load --profile "$BATS_TEST_TMPDIR/sneaky.json" --peak 200 --dry-run
+  [ "$status" -eq 3 ]
+  case "$output" in
+    *"above the safe ceiling"*) ;;
+    *) printf 'the safe-peak gate did not refuse the total:\n%s\n' "$output" >&2; return 1;;
+  esac
+}
