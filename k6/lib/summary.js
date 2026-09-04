@@ -129,6 +129,13 @@ export function buildSummary(metrics, ctx) {
     // `crowdsim report --html` needs the SLO to draw a line on the ramp, and parsing prose for it would
     // produce a chart whose limit line is a guess. A run archived before this key exists gets no line, and
     // the report says so instead of inventing one.
+    // Accounts this run created, and the fact that they outlive it. A run that created 2,970 accounts is
+    // not finished when the numbers are in.
+    signup: ctx.signup ? Object.assign({}, ctx.signup, {
+      created: cnt('cs_signup_created'),
+      // Requests that were made minus accounts that came out of them: duplicates, validation, rate limits.
+      failed: Math.max(0, cnt('http_reqs{class:' + ctx.signup.class + '}') - cnt('cs_signup_created')),
+    }) : null,
     // What each class was aimed at, and which classes said it themselves. `mix_target` below is the same
     // arithmetic; this says where the number came from, which is what a finding about one class is quoted
     // against.

@@ -329,3 +329,14 @@ JSON
   [[ "$output" == *"rate you measured yourself"* ]]
   [[ "$output" == *"<your measured login rate>"* ]]
 }
+
+# ── the accounts a signup run leaves behind (#65) ───────────────────────────────────────────────────
+
+@test "a run with no signup class writes no manifest at all, not an empty one" {
+  # An empty manifest would be a file somebody finds and reads as "nothing was created", which is a
+  # different claim from "this run does not create accounts".
+  run "$CROWDSIM" load --profile "$PROFILE" --peak 10 --dry-run
+  [ "$status" -eq 0 ]
+  run bash -c "ls -1 '$CROWDSIM_OUT'/signups-*.json 2>/dev/null | wc -l"
+  [ "$(printf '%s' "$output" | tr -d '[:space:]')" = "0" ]
+}

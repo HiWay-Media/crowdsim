@@ -212,6 +212,20 @@ than classes are scheduled). `mix_target` lists the same targets in one place.
 A class with `reqs: 0` did not run: it was skipped, dropped for an empty pool, or does not exist in this
 shape. The text table leaves it out rather than printing a row of zeroes.
 
+### The accounts it created
+
+| Field | Meaning |
+|---|---|
+| `signup` | `null` unless the profile has a `signup` class. |
+| `signup.created` | Accounts that now exist because of this run, counted from a metric — a 409 on a duplicate is a request that happened and an account that did not. |
+| `signup.failed` | Signup requests that produced no account. |
+| `signup.email_glob` | The pattern that matches this run's accounts and no others: the cleanup key. |
+
+Alongside the summary, `out/signups-<run-id>.json` lists them by address, with the target and the counts.
+It contains **no password**, by design, and crowdsim will not delete the accounts — see
+[the profile reference](profile.md#the-three-kinds). That file names real accounts on a real system: `out/`
+is gitignored and it must stay out of any public repository.
+
 ### What each class was aimed at
 
 | Field | Meaning |

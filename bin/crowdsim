@@ -1089,6 +1089,7 @@ PY
 
   if [ -f "$summary" ]; then
     record_history "$summary"
+    write_signup_manifest "$summary" "$log"
     if [ "$SLACK" = "1" ]; then notify_slack "$summary"; fi
     ok "summary: $summary"
     ok "log:     $log"
@@ -1116,6 +1117,69 @@ print(d.get("generator_ok"), d.get("target_unreachable"))' "$summary")"
   a credentials CSV that parsed to no accounts." 4
   fi
   return 0
+}
+
+# The accounts a signup run created, collected where they can be found again.
+#
+# A signup class at 40/s for five minutes creates twelve thousand real accounts in a real identity
+# provider. The StreamWay+ campaign left ~2,970 behind and had to open a ticket to hunt them down. crowdsim
+# is the one thing that knows what they were, and it recorded nothing.
+#
+# The identities come out of the run log, because a k6 VU has no other channel: VUs are isolated, so there
+# is no shared array to append to and read in handleSummary. The log is a file the driver already keeps.
+#
+# Written to $OUT_DIR and nowhere else, and never with a password in it. This file names real accounts on a
+# real system: out/ is gitignored, and it must stay out of any repository.
+write_signup_manifest() {
+  local summary="$1" log="$2"
+  local dest="$OUT_DIR/signups-$RUN_ID.json"
+  python3 - "$summary" "$log" "$dest" "$BASE_URL" <<'PY' || return 0
+import json, re, sys
+
+summary_path, log_path, dest, target = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+d = json.load(open(summary_path, encoding='utf-8'))
+sign = d.get('signup')
+if not sign:
+    raise SystemExit(0)          # no signup class in this run: no manifest, not an empty one
+
+emails, seen = [], set()
+try:
+    with open(log_path, encoding='utf-8', errors='replace') as fh:
+        for line in fh:
+            for m in re.finditer(r'crowdsim-signup ([^\s"\\]+)', line):
+                e = m.group(1)
+                if e not in seen:
+                    seen.add(e)
+                    emails.append(e)
+except OSError:
+    pass
+
+manifest = {
+    'run_id': d.get('run_id'),
+    'class': sign.get('class'),
+    'target': target or d.get('base_url'),
+    'signup_url': sign.get('url'),
+    'email_pattern': sign.get('email_pattern'),
+    'tag_prefix': sign.get('tag_prefix'),
+    'email_glob': sign.get('email_glob'),
+    'created': sign.get('created'),
+    'failed': sign.get('failed'),
+    'emails': emails,
+    '_comment': ("These accounts EXIST on the target above. crowdsim created them and will not delete "
+                 "them: removing accounts from somebody's identity provider is not a load generator's "
+                 "job, and a tool that could do it would be a tool that could do it by accident. Use "
+                 "email_glob to find them. No password is recorded here, by design — and this file names "
+                 "real accounts on a real system, so it belongs where the run output belongs: out/ is "
+                 "gitignored, keep it that way and out of any public repository."),
+}
+json.dump(manifest, open(dest, 'w', encoding='utf-8'), indent=1, ensure_ascii=False)
+listed = len(emails)
+print(f"  ⚠️  this run CREATED {manifest['created']} accounts on {manifest['target']} — they still exist")
+print(f"     manifest: {dest}  ({listed} listed by address)")
+print(f"     find them all: {manifest['email_glob']}")
+print("     crowdsim will not delete them: that is not a load generator's job. And do not commit that")
+print("     file — it names real accounts on a real system.")
+PY
 }
 
 record_history() {
@@ -1749,6 +1813,12 @@ if auth.get('sharing_note'):
 elif auth.get('users'):
     w(f"- **{auth['users']} account(s) signed in**, one per virtual user or better, so the sign-in "
       'numbers describe the provider rather than the account count.')
+sign = d.get('signup') or {}
+if sign.get('created'):
+    w(f"- **This run created {sign['created']} accounts on the target, and they still exist.** crowdsim "
+      "will not delete them: removing accounts from an identity provider is not a load generator's job. "
+      f"Find them with `{sign.get('email_glob')}`, listed in `signups-{d.get('run_id')}.json` next to "
+      "this summary. That file names real accounts on a real system — do not commit it.")
 think = d.get('think_time') or {}
 if think.get('source'):
     w(f"- **The reading pauses were {think['source']}** ({think.get('min_ms')}-{think.get('max_ms')} ms). "

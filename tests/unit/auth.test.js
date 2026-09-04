@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import {
   parseUsersCsv, pickUser, usersNeeded, tokenRequest, logoutRequest, shouldLogout,
   parseToken, bearer, needsRelogin, expiryFrom, signupPayload, validateAuth, usesAuth,
-  credentialsRefusal, accountSharingNote, dig,
+  credentialsRefusal, accountSharingNote,
+  signupIdentity, signupManifest, dig,
 } from '../../k6/lib/auth.js';
 
 test('parseUsersCsv skips comments, blanks and a header, and accepts semicolons', () => {
@@ -291,4 +292,74 @@ test('a signup template substitutes every placeholder, not just the first', () =
   assert.equal(out.body.confirm, 'u+RUN-7@example.test u+RUN-7@example.test');
   assert.ok(!JSON.stringify(out.body).includes('{tag}'));
   assert.ok(!JSON.stringify(out.body).includes('{email}'));
+});
+
+// ── the accounts a signup run leaves behind (#65) ────────────────────────────────────────────────────
+
+test('one run’s accounts are exactly the ones carrying its run id, and that is the cleanup key', () => {
+  const id = signupIdentity({ email_pattern: 'load+{tag}@example.test' }, '20260904T120000Z');
+  assert.equal(id.tag_prefix, '20260904T120000Z-');
+  assert.equal(id.email_glob, 'load+20260904T120000Z-*@example.test');
+  // the default pattern still produces a usable glob
+  assert.equal(signupIdentity({}, 'RUN').email_glob, 'crowdsim+RUN-*@example.test');
+  // and the glob matches what signupPayload actually sends
+  const sent = signupPayload({ email_pattern: 'load+{tag}@example.test' }, '7-3', '20260904T120000Z');
+  assert.equal(sent.email, 'load+20260904T120000Z-7-3@example.test');
+  assert.ok(sent.email.startsWith('load+' + id.tag_prefix));
+});
+
+test('the manifest records what exists, and never a password', () => {
+  const m = signupManifest({
+    runId: '20260904T120000Z', className: 'signup', target: 'https://www.example.test',
+    template: { url: '/api/auth/register', email_pattern: 'load+{tag}@example.test',
+                password: 'throwaway-do-not-record', body: { password: 'also-not-recorded' } },
+    emails: ['load+20260904T120000Z-1-0@example.test', 'load+20260904T120000Z-2-0@example.test'],
+    failed: 3,
+  });
+  assert.equal(m.run_id, '20260904T120000Z');
+  assert.equal(m.target, 'https://www.example.test');
+  assert.equal(m.signup_url, '/api/auth/register');
+  assert.equal(m.created, 2);
+  assert.equal(m.failed, 3);
+  assert.equal(m.emails.length, 2);
+  assert.equal(m.email_glob, 'load+20260904T120000Z-*@example.test');
+  // THE ASSERTION THAT MATTERS: no credential reaches this file, from any of the places one could hide
+  const blob = JSON.stringify(m);
+  assert.ok(!blob.includes('throwaway-do-not-record'), 'the template password must not be recorded');
+  assert.ok(!blob.includes('also-not-recorded'), 'nor a password inside the body template');
+  assert.ok(!/"password"/.test(blob), 'no password field at all');
+});
+
+test('the manifest says the accounts exist, that the tool will not delete them, and where it belongs', () => {
+  const m = signupManifest({ runId: 'RUN', template: {} });
+  assert.match(m._comment, /EXIST on the target/);
+  assert.match(m._comment, /will not delete them/);
+  assert.match(m._comment, /No password is recorded/i);
+  assert.match(m._comment, /gitignored/);
+});
+
+test('a truncated list does not make the manifest useless: the glob still sweeps', () => {
+  const m = signupManifest({ runId: 'RUN', template: {}, emails: [], created: 2970 });
+  assert.equal(m.created, 2970, 'the count is what the run reported, not what the list happens to hold');
+  assert.deepEqual(m.emails, []);
+  assert.equal(m.email_glob, 'crowdsim+RUN-*@example.test');
+});
+
+test('junk in the list is dropped rather than written out as an identity', () => {
+  const m = signupManifest({ runId: 'RUN', template: {}, emails: ['a@example.test', '', null, 42] });
+  assert.deepEqual(m.emails, ['a@example.test']);
+});
+
+test('a signup-only profile needs no credentials: it creates accounts, it does not sign in', () => {
+  // Introduced in 1.20.4 and found by running a signup class against a real endpoint: the refusal used
+  // usesAuth(), which is true for `signup` too, so a registration run was refused for a credentials file
+  // it has no use for. validateAuth() had always drawn the line correctly.
+  const signupOnly = [{ name: 'signup', kind: 'signup' }, { name: 'html', kind: 'plain' }];
+  assert.equal(credentialsRefusal([], signupOnly, ''), null);
+  // and the line stays where it belongs: anything that SIGNS IN still needs accounts
+  assert.ok(credentialsRefusal([], [{ name: 'login', kind: 'login' }], 'x.csv'));
+  assert.ok(credentialsRefusal([], [{ name: 'a', kind: 'authed' }, { name: 'l', kind: 'login' }], 'x.csv'));
+  // a profile that does both: the login half still decides
+  assert.ok(credentialsRefusal([], [{ name: 'signup', kind: 'signup' },
+    { name: 'login', kind: 'login' }], 'x.csv'));
 });

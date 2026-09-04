@@ -4,6 +4,43 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.23.0] — 2026-09-04
+
+Milestone v1.12.0, closed. **A signup class creates real accounts in a real identity provider, and the tool
+that created them recorded nothing about them.** A class at 40/s for five minutes makes twelve thousand;
+the StreamWay+ campaign left ~2,970 behind and had to open a ticket to hunt them down, findable only
+because somebody had thought to use a dedicated mail domain. A run that created 2,970 accounts is not
+finished when the numbers are in.
+
+### Added
+- **`out/signups-<run-id>.json`, after any run with a `signup` class**: the run id, the target, the signup
+  URL, the email pattern, the counts, and every address the run created. Every identity is the pattern with
+  `{tag}` replaced by `<run id>-<vu>-<iteration>`, so one run's accounts are exactly those carrying its run
+  id — the file carries that as `email_glob`, which is the cleanup key and works in a provider's own search
+  box.
+- **Two things the manifest will never contain, both asserted by a test.** No **password** — not even the
+  throwaway one the template declares, and not one hidden inside the body template: a file that lists
+  credentials for a real system is a different category of object from a run artefact. And no **deletion**:
+  crowdsim will not remove accounts from an identity provider, because a tool that could do that is a tool
+  that could do it by accident. The glob is there so your own script can.
+- **The run says it out loud, and the reports carry it as a caveat**: how many accounts now exist, on which
+  target, where the manifest is, the glob that finds them, that crowdsim will not delete them — and that
+  the file names real accounts on a real system and must not be committed. `summary.signup` carries
+  `created` (from a metric: a 409 on a duplicate is a request that happened and an account that did not),
+  `failed` and the glob.
+- The address list comes out of the run log, because a k6 virtual user has no other channel: VUs are
+  isolated, so there is no shared array to collect into and read in `handleSummary`. That is also why the
+  glob is in the file — a truncated log makes the list short, and the count, which comes from a metric,
+  stays exact.
+
+### Fixed
+- **A signup-only profile was refused for a credentials file it has no use for.** `credentialsRefusal`
+  (1.20.4) asked `usesAuth()`, which is true for `signup` as well, so a registration run demanded a
+  `username,password` CSV — while a signup class *creates* accounts rather than signing in with them.
+  `validateAuth` had drawn that line correctly from the start. Found by running a signup class against a
+  real registration endpoint, which is also how the manifest above was verified: 40 accounts created, 40
+  listed, no credential in the file.
+
 ## [1.22.0] — 2026-09-04
 
 Milestone v1.12.0, second half: **a class can be aimed at a rate.** A finding is almost always about one

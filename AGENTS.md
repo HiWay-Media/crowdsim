@@ -187,6 +187,12 @@ in questo repository.
   nomina entrambi i numeri, **mai riscalati** per farli stare. Le share escono dalla stessa aritmetica
   delle rate, altrimenti rampa e rate finirebbero per non concordare. Peso e `rate_rps` insieme = errore
   di validate.
+- **Un run di `signup` crea account VERI e lascia un manifest**: `out/signups-<run>.json` con run id,
+  target, pattern, glob e indirizzi — **mai una password** (asserito da un test) e mai una cancellazione:
+  togliere account da un identity provider non e compito di un generatore di carico. La lista arriva dal
+  log della run perché un VU k6 non ha altro canale (i VU sono isolati), quindi può essere più corta del
+  conteggio: per questo nel file c'e anche il glob. ⚠️ Quel file nomina account reali su un sistema reale:
+  `out/` e gitignored e ci deve restare, fuori da qualsiasi repo pubblico.
 - **`make image-smoke` prima di ogni modifica a Dockerfile, `bin`, `k6` o `gui`** (la CI lo esegue prima
   del push su GHCR). L'assert che conta: l'immagine **non** dichiara un default per
   `CROWDSIM_ALLOW_TARGETS`. Non aggiungerlo mai, nemmeno "per comodita di test".

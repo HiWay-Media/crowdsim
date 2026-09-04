@@ -382,3 +382,21 @@ test('a refused concurrency says so instead of showing a number', () => {
 test('a mix run has no concurrency section at all', () => {
   assert.ok(!buildReport(clone()).includes('Concurrent users'));
 });
+
+test('a run that created accounts says so, and that removing them is not this tool’s job (#65)', () => {
+  const p = clone();
+  p.signup = { class: 'signup', created: 2970, failed: 12, email_glob: 'load+RUN-*@example.test' };
+  const html = buildReport(p);
+  assert.match(html, /accounts created/);
+  assert.match(html, /2970/);
+  assert.match(html, /they still exist/);
+  assert.match(html, /will not delete them/);
+  assert.match(html, /load\+RUN-\*@example\.test/);
+  assert.match(html, /signups-20260901T120000Z\.json/);
+});
+
+test('a run that created nothing gets no accounts caveat', () => {
+  const html = buildReport(clone());
+  assert.ok(!html.includes('accounts created'));
+  assert.ok(!html.includes('will not delete them'));
+});

@@ -235,7 +235,13 @@ export function signupPayload(template, seq, runId) {
  * context, where a refusal costs nothing and a wrong answer costs a campaign.
  */
 export function credentialsRefusal(users, classes, path) {
-  if (!usesAuth(classes)) return null;
+  // Only the classes that SIGN IN need accounts. A `signup` class creates them, so demanding a credentials
+  // file for it refuses a registration run over a file it has no use for — which is what 1.20.4 did,
+  // because it asked usesAuth() (true for signup as well) instead of asking who signs in. validateAuth()
+  // drew this line correctly from the start; found by running a signup class against a real endpoint.
+  const signsIn = (classes || []).some(
+    (c) => c && (c.kind === 'login' || c.kind === 'authed'));
+  if (!signsIn) return null;
   if (users && users.length > 0) return null;
   return `no accounts in the credentials file (${path || 'unset'}).
 
@@ -265,6 +271,68 @@ export function accountSharingNote(userCount, vus) {
   return `${label} for ${v} virtual users: each account signs in from about ${per} of them at once. `
     + 'Some identity providers serialise work per subject, so part of what this run measures is the '
     + 'account count and not the provider. One account per VU is the shape that measures the provider.';
+}
+
+/**
+ * How to find, afterwards, the accounts a signup run created.
+ *
+ * WHY THIS EXISTS — a signup class at 40/s for five minutes creates twelve thousand real accounts in a
+ * real identity provider. The StreamWay+ campaign left ~2,970 of them behind and had to open a ticket to
+ * hunt them down; they were findable only because somebody had thought to use a dedicated mail domain. The
+ * tool that created them is the one thing that knows exactly what they were, and it recorded nothing.
+ *
+ * Every identity is `email_pattern` with `{tag}` replaced by `<runId>-<vu>-<iteration>`, so ONE run's
+ * accounts are exactly the ones whose tag starts with that run id. That prefix is the cleanup key, and it
+ * is worth more than a list: it stays correct when the list is truncated, and it works in a provider's own
+ * search box.
+ *
+ * What this deliberately does not carry: **no password, ever**, not even the throwaway one from the
+ * template. A file that lists credentials for a real system is a different category of object from a run
+ * artefact, and this one is written next to the summary — in `out/`, which is gitignored, and which is
+ * still not a place for secrets.
+ */
+export function signupIdentity(template, runId) {
+  const pattern = String((template || {}).email_pattern || 'crowdsim+{tag}@example.test');
+  const prefix = String(runId || 'run') + '-';
+  return {
+    email_pattern: pattern,
+    tag_prefix: prefix,
+    // What to paste into the provider's search: every identity this run created and nothing else.
+    email_glob: pattern.split('{tag}').join(prefix + '*'),
+  };
+}
+
+/**
+ * The manifest itself. Pure so its shape is asserted rather than eyeballed once: this file is the input to
+ * somebody's deletion script, and a field that quietly changes name breaks a cleanup nobody re-reads.
+ *
+ * `emails` is what the run actually logged as created — exact, and possibly incomplete if a log was
+ * truncated or rotated, which is why the glob is there as well. The two are not alternatives: the list is
+ * for reading, the glob is for sweeping.
+ */
+export function signupManifest(o) {
+  const opts = o || {};
+  const id = signupIdentity(opts.template, opts.runId);
+  const emails = (opts.emails || []).filter(function (e) { return typeof e === 'string' && e; });
+  return {
+    run_id: opts.runId || null,
+    class: opts.className || null,
+    target: opts.target || null,
+    signup_url: (opts.template || {}).url || null,
+    email_pattern: id.email_pattern,
+    tag_prefix: id.tag_prefix,
+    email_glob: id.email_glob,
+    created: opts.created === undefined ? emails.length : Number(opts.created),
+    failed: opts.failed === undefined ? 0 : Number(opts.failed),
+    emails: emails,
+    // Said in the file, because the file is what somebody finds three weeks later.
+    _comment: 'These accounts EXIST on the target above. crowdsim created them and will not delete them: '
+      + 'removing accounts from somebody\'s identity provider is not a load generator\'s job, and a tool '
+      + 'that could do it would be a tool that could do it by accident. Use email_glob to find them. No '
+      + 'password is recorded here, by design — and this file names real accounts on a real system, so it '
+      + 'belongs where the run output belongs: out/ is gitignored, keep it that way and out of any public '
+      + 'repository.',
+  };
 }
 
 /**

@@ -60,8 +60,8 @@ queue needs time to build.
 ### Pull a released tag
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.22.0     # exact version — use this
-docker pull ghcr.io/hiway-media/crowdsim:1.22       # latest patch of 1.2
+docker pull ghcr.io/hiway-media/crowdsim:1.23.0     # exact version — use this
+docker pull ghcr.io/hiway-media/crowdsim:1.23       # latest patch of 1.2
 docker pull ghcr.io/hiway-media/crowdsim:latest    # last release
 ```
 
@@ -134,7 +134,7 @@ docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" \
   -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.22.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.23.0 crowdsim serve
 ```
 
 Or `make image-run`, which does exactly this against `crowdsim:dev` and prints a freshly generated token.
@@ -181,7 +181,7 @@ docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" \
   -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.22.0 \
+  ghcr.io/hiway-media/crowdsim:1.23.0 \
   crowdsim load --profile /profile.json --target edge --peak 60
 ```
 
@@ -209,7 +209,7 @@ by that same container, so the same caveat applies to the runs, not to the page.
 ```bash
 docker run --rm --network host -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.22.0 crowdsim probe --profile /profile.json
+  ghcr.io/hiway-media/crowdsim:1.23.0 crowdsim probe --profile /profile.json
 
 # same shape for: discover --limit 400 · load --dry-run · history · report <run-id> [--html] · init
 ```
@@ -226,12 +226,12 @@ command reads nothing — `❌ the log is empty: no lines to classify.`, exit 2 
 ```bash
 # a log on this host
 docker run --rm -v "$PWD/my-profile.json:/profile.json:ro" -v /var/log/nginx:/logs:ro \
-  ghcr.io/hiway-media/crowdsim:1.22.0 crowdsim weights /logs/access.log --profile /profile.json
+  ghcr.io/hiway-media/crowdsim:1.23.0 crowdsim weights /logs/access.log --profile /profile.json
 
 # a log that never lands on disk here
 ssh edge 'zcat /var/log/nginx/access.log.*.gz' \
   | docker run --rm -i -v "$PWD/my-profile.json:/profile.json:ro" \
-      ghcr.io/hiway-media/crowdsim:1.22.0 crowdsim weights - --profile /profile.json
+      ghcr.io/hiway-media/crowdsim:1.23.0 crowdsim weights - --profile /profile.json
 ```
 
 No `/out` mount is needed and none is used: this subcommand writes nothing, which is deliberate — an access
@@ -242,7 +242,9 @@ either, because it generates no traffic.
 
 ## 6. Reading the results
 
-Everything lands in the directory mounted at `/out`:
+Everything lands in the directory mounted at `/out` — including, after a run with a `signup` class,
+`signups-<run-id>.json`, which names the accounts that run created on your target. It holds no password
+and crowdsim will not delete them, but it is not a file to leave in a shared volume or commit anywhere:
 
 ```
 out/

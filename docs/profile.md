@@ -418,9 +418,35 @@ A note on the templates: `{email}` and `{tag}` are substituted **everywhere they
 1.20.4 only the first occurrence was replaced, so a template that used `{tag}` twice sent a body with a
 literal `{tag}` still in it — a 400 from the API, read as the write path rejecting load.
 
-⚠️ **The accounts a signup class creates are real.** Plan the cleanup before you run it: a campaign that
-generated ~3,000 of them left them behind, and finding them afterwards is only possible because they
-share a dedicated mail domain. Use one.
+⚠️ **The accounts a signup class creates are real**, and from 1.23.0 the run tells you exactly which ones.
+
+Every identity is `email_pattern` with `{tag}` replaced by `<run id>-<vu>-<iteration>`, so one run's
+accounts are precisely those carrying its run id. After the run:
+
+```
+  ⚠️  this run CREATED 40 accounts on https://www.example.test — they still exist
+     manifest: out/signups-20260904T153647Z.json  (40 listed by address)
+     find them all: load+20260904T153647Z-*@example.test
+     crowdsim will not delete them: that is not a load generator's job. And do not commit that
+     file — it names real accounts on a real system.
+```
+
+`out/signups-<run-id>.json` carries the run id, the target, the pattern, the glob, the counts and the
+addresses. Two things it will never carry, and both are asserted by a test:
+
+- **No password**, not even the throwaway one the template declares. A file that lists credentials for a
+  real system is a different category of object from a run artefact.
+- **No deletion.** crowdsim will not remove accounts from an identity provider — a tool that could do that
+  is a tool that could do it by accident. The glob is there so your own script, or the provider's own
+  search, can.
+
+The list comes out of the run log, because a k6 virtual user has no other channel: VUs are isolated, so
+there is no shared array to collect into. That also means the list can be short of the count if a log was
+truncated — which is why the glob is in the file as well. The count comes from a metric and is exact.
+
+⚠️ **`out/` is gitignored, and this file is the reason to keep it that way.** It names real accounts on a
+real system: it belongs with the run output and in your private ops repository, never in a public one. Use
+a dedicated mail domain, as the campaign did — it is what made ~3,000 leftover accounts findable at all.
 
 ### Running it on a scheduler
 

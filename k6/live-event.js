@@ -40,7 +40,7 @@ import { usableClasses, allocate, stages as mkStages, vus as mkVus, journeyPlan,
 import {
   parseUsersCsv, pickUser, tokenRequest, logoutRequest, shouldLogout, parseToken, bearer,
   needsRelogin, expiryFrom, signupPayload, validateAuth, usesAuth,
-  credentialsRefusal, accountSharingNote,
+  credentialsRefusal, accountSharingNote, signupIdentity,
 } from './lib/auth.js';
 import { compileLayers, layerHit, statusBuckets, overGuillotine } from './lib/classify.js';
 import { thinkTime, thinkSeconds } from './lib/session.js';
@@ -191,6 +191,9 @@ const cDenied  = new Counter('cs_denied');
 // status counter catches it: without this the authenticated requests are skipped and the run reads
 // as green while nothing was ever authenticated.
 const cAuthFail = new Counter('cs_auth_fail');
+// Accounts that now exist because of this run. Counted separately from requests: a 409 on a duplicate is a
+// request that happened and an account that did not.
+const cSignup  = new Counter('cs_signup_created');
 const ttfb     = new Trend('cs_ttfb', true);
 const overSlo  = new Rate('cs_over_guillotine');
 
@@ -444,7 +447,15 @@ export function run_class() {
     const payload = signupPayload(s, `${exec.vu.idInTest}-${i}`, RUN_ID);
     const headers = Object.assign(baseHeaders(), { 'Content-Type': 'application/json' },
                                   s.headers || {});
-    post(s.url, JSON.stringify(payload.body), headers, c.name, label);
+    const res = post(s.url, JSON.stringify(payload.body), headers, c.name, label);
+    // An account that now EXISTS gets recorded, once, on the line the driver collects into the manifest.
+    // VUs are isolated in k6 — there is no shared array to append to and read in handleSummary — so the
+    // run log is the only channel out of a VU, and it is a file the driver already keeps.
+    // Only on success: a 409 is a request that happened and an account that did not.
+    if (res.status >= 200 && res.status < 300) {
+      cSignup.add(1, tagsFor(c.name, label));
+      console.log('crowdsim-signup ' + payload.email);
+    }
   } else {
     get(path, baseHeaders(), c.name, label);
   }
@@ -511,6 +522,15 @@ export function handleSummary(data) {
     ramp: RAMP,
     // The knee is judged against the same limits as the brake, per-class ones included: a knee computed
     // from the profile SLO alone would sit above the rate at which the run actually aborted.
+    // What a signup class created, described precisely enough to find it again. No password, ever: see
+    // signupManifest() in k6/lib/auth.js.
+    signup: (function () {
+      const c = CLASS_DEFS.filter(function (x) { return x.kind === 'signup'; })[0];
+      if (!c) return null;
+      const id = signupIdentity(c.signup || {}, RUN_ID);
+      return { class: c.name, url: (c.signup || {}).url || null, email_pattern: id.email_pattern,
+               tag_prefix: id.tag_prefix, email_glob: id.email_glob };
+    }()),
     // The rates this run aimed at, per class, and where each came from: a finding about one class gets
     // quoted as that class's rate, so it has to be in the file rather than recomputed from a weight.
     allocation: { rates: ALLOC.rates, pinned: ALLOC.pinned, fixed_total: ALLOC.fixed_total,
