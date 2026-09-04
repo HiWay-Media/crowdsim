@@ -83,6 +83,15 @@ COPY profiles/example.json /crowdsim/profiles/example.json
 # driver would silently degrade to the structural checks inside the image only — the worst kind of drift,
 # because the same command would validate differently depending on where it ran.
 COPY lib/ /crowdsim/lib/
+# The package.json is not here for npm — nothing is installed in this stage. It is here for ONE field:
+# `"type": "module"`. Without a package.json above them, node reads every `.js` under /crowdsim/k6 and
+# /crowdsim/lib as CommonJS, while the same files are ES modules in a checkout. So the image ran JS whose
+# meaning depended on a file the image did not contain, and 1.20.0 walked into it: `lib/validate.mjs`
+# imported `k6/lib/auth.js`, node classified that as CJS, the named import failed, and `validate` — which
+# `load` and `doctor` call — died. The gates then reported exit 2 instead of 3 and the GUI would not start.
+# lib/validate-cli.mjs already carried the warning ("`.mjs`, not `.js`: inside the image there is no
+# package.json above lib/"); the rule it states only holds if this file is here.
+COPY package.json /crowdsim/package.json
 COPY gui/server/ /crowdsim/gui/server/
 COPY --from=ui /build/gui/ui/dist /crowdsim/gui/ui/dist
 COPY --from=deps /build/node_modules /crowdsim/node_modules

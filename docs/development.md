@@ -12,6 +12,18 @@ make image-smoke     # builds, then asserts the image is still the tool with its
 ```
 
 ## The test layout
+### The CLI suite needs bash >= 4, and fails on purpose on a full laptop
+
+`make test-cli` **refuses to run** under bash 3.2, which is what macOS ships: there, a failing `[[ ]]`
+assertion does not fail the test, so the suite would report every test as passing whatever the driver
+printed. `brew install bash bats-core` and the suite runs.
+
+Once it runs, expect failures on a developer machine — **eleven at the time of writing**. Every one is a
+`without <tool>` test: they simulate an environment where k6, node, docker or `column(1)` is missing, and
+on a laptop that has them installed the absence cannot be reproduced. They pass in CI, where the image is
+minimal. Before reading a failure as a regression, check whether its name starts with «without».
+
+
 
 | Suite | Runner | Covers | Generates load? |
 |---|---|---|---|
@@ -120,6 +132,22 @@ never to have existed in that wording, and it was caught by running the command 
 generator that ships had never been the generator the evidence came from — 0.52.0 against 2.x, two majors
 apart. The brake is a k6 threshold with `abortOnFail`, so a changed threshold syntax produces a run that no
 longer stops; the suite records which k6 produced its numbers, in the archive and in its output.
+
+**The image must ship every file its own code's meaning depends on.** `"type": "module"` in the root
+`package.json` is what makes a `.js` file under `k6/` or `lib/` an ES module. That file was not copied into
+the image, so the same source was ESM in a checkout and CommonJS in the container — and 1.20.0 walked into
+it the first time a `.mjs` imported a `.js` (`lib/validate.mjs` → `k6/lib/auth.js`). The validator then
+crashed on every profile, which made `load` refuse with exit 2 instead of reaching the allowlist gate, and
+the GUI would not start at all. `lib/validate-cli.mjs` had carried the warning for releases — "`.mjs`, not
+`.js`: inside the image there is no package.json above `lib/`" — and the rule it states only holds if the
+file is there. The image now ships it, and the smoke test asserts the invariant by name.
+
+**An assertion that cannot fail is worse than a missing one, twice over.** The same incident found the smoke
+test asserting `crowdsim validate` by looking for the line `▶ validating …` — which the driver prints
+*before* it execs node. A validator that crashed on every profile got a ✅. It now has to reach its verdict
+line. And the driver distinguishes a validator that crashed (exit 5, the installation) from a profile with
+errors (exit 2, your file): those two were one message, and the wrong one was in front of somebody trying to
+fix a profile that was fine.
 
 **A smoke test that never exercises the product is a green tick.** `tests/image/smoke.sh` asserted that the
 GUI starts, answers, sees k6 and serves the page — and every one of those passed for thirty releases while

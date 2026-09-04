@@ -192,3 +192,33 @@ setup() { crowdsim_setup; }
   [[ "$output" == *"unknown"* ]]
   [[ "$output" == *"not packaged"* ]]
 }
+
+# ── credentials for the authenticated classes ───────────────────────────────────────────────────────
+# The driver's only job here is to hand the PATH to k6. The value is a file name, never a credential:
+# whatever is inside it must not reach the command line, the logs or a summary.
+
+@test "CROWDSIM_AUTH_USERS is handed to the generator as an env, not baked into a flag" {
+  CROWDSIM_AUTH_USERS=/run/secrets/users.csv \
+    run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 10 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"-e CROWDSIM_AUTH_USERS=/run/secrets/users.csv"* ]]
+}
+
+@test "with no credentials path the generator is not told about one" {
+  run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 10 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"CROWDSIM_AUTH_USERS"* ]]
+}
+
+@test "an empty credentials path is the same as none: no empty env for the generator" {
+  CROWDSIM_AUTH_USERS= run "$CROWDSIM" load --profile "$FIXTURES/minimal.json" --peak 10 --dry-run
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"CROWDSIM_AUTH_USERS"* ]]
+}
+
+@test "the credentials path is documented in the usage, where people look for env" {
+  run "$CROWDSIM" --help
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"CROWDSIM_AUTH_USERS"* ]]
+  [[ "$output" == *"username,password"* ]]
+}

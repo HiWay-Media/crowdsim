@@ -148,6 +148,17 @@ in questo repository.
   `gui/server/lib/bin.js` (`CROWDSIM_BIN` → `$CROWDSIM_ROOT/bin/crowdsim` → checkout → `PATH`), **rifiuto
   all'avvio** (exit 2) se nessuno è eseguibile, e `tests/image/smoke.sh` lancia un `--dry-run` via API. Non
   rimuovere né la ENV né quell'assert: era l'assenza dell'assert a far passare l'immagine rotta.
+- **L'immagine deve spedire ogni file da cui dipende il *significato* del suo codice.** `"type": "module"`
+  nel `package.json` di root e ciò che rende un `.js` sotto `k6/` o `lib/` un ES module. Non era copiato
+  nell'immagine: stesso sorgente, ESM in checkout e CommonJS nel container. La 1.20.0 ci e cascata al primo
+  `.mjs` che importa un `.js` (`lib/validate.mjs` → `k6/lib/auth.js`): validatore in crash su ogni profilo,
+  `load` che rifiuta con exit 2 senza arrivare al gate dell'allowlist, GUI che non parte. `Dockerfile` ora
+  fa `COPY package.json /crowdsim/package.json` e `tests/image/smoke.sh` asserisce l'invariante per nome.
+  Corollario: un validatore che **crasha** non e un profilo con errori — exit 5, non 2.
+- **Rotte express: mai `'*'` come stringa.** `app.get('*')` e valido su express 4 e **lancia all'avvio** su
+  express 5 (`path-to-regexp` v8), `'*splat'` e il contrario. Si usa una RegExp (`/.*/`), che vale per
+  entrambi; c'e un test statico in `tests/gui/startup.test.js` perché la suite gira contro l'express
+  installato e su 4 la versione rotta passa tutto.
 - **`make image-smoke` prima di ogni modifica a Dockerfile, `bin`, `k6` o `gui`** (la CI lo esegue prima
   del push su GHCR). L'assert che conta: l'immagine **non** dichiara un default per
   `CROWDSIM_ALLOW_TARGETS`. Non aggiungerlo mai, nemmeno "per comodita di test".

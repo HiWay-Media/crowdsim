@@ -270,6 +270,20 @@ validate_profile() {
   fi
   out="$(node "$VALIDATOR" "$PROFILE_F" --brief 2>&1)" || rc=$?
   if [ -n "$out" ]; then printf '%s\n' "$out"; fi
+  # 2 is the validator's own verdict: this profile has errors. ANY other non-zero code means the validator
+  # did not get as far as an opinion — it crashed. Those two were reported identically until 1.20.1, and the
+  # difference matters: one is your profile, the other is the installation. In the published image the
+  # validator crashed on every profile (a missing package.json made an ES module read as CommonJS) and the
+  # driver said "the profile has errors" about a profile that was fine, at exit 2 — so `load` never reached
+  # the allowlist gate and refused for the wrong reason, with the wrong code.
+  if [ "$rc" != "0" ] && [ "$rc" != "2" ]; then
+    die "the profile validator itself failed (node exited $rc), so nothing about this profile has been
+  checked. That is a broken installation, not a bad profile — the output above is node's, not ours.
+
+  Try it directly:  node $VALIDATOR $PROFILE_F
+  In a container, this is what a missing /crowdsim/package.json looks like: every .js under k6/ and lib/
+  is then read as CommonJS and an ES import fails. Upgrade the image, or report it." 5
+  fi
   if [ "$rc" != "0" ] && [ "$mode" = "gate" ]; then
     die "the profile has errors: fix them, or run 'crowdsim validate $PROFILE_F' for the full report" 2
   fi

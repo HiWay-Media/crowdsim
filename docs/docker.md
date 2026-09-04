@@ -60,7 +60,7 @@ queue needs time to build.
 ### Pull a released tag
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.20.1     # exact version — use this
+docker pull ghcr.io/hiway-media/crowdsim:1.20.3     # exact version — use this
 docker pull ghcr.io/hiway-media/crowdsim:1.20       # latest patch of 1.2
 docker pull ghcr.io/hiway-media/crowdsim:latest    # last release
 ```
@@ -134,7 +134,7 @@ docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" \
   -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.20.1 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.20.3 crowdsim serve
 ```
 
 Or `make image-run`, which does exactly this against `crowdsim:dev` and prints a freshly generated token.
@@ -181,7 +181,7 @@ docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" \
   -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.20.1 \
+  ghcr.io/hiway-media/crowdsim:1.20.3 \
   crowdsim load --profile /profile.json --target edge --peak 60
 ```
 
@@ -209,7 +209,7 @@ by that same container, so the same caveat applies to the runs, not to the page.
 ```bash
 docker run --rm --network host -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.20.1 crowdsim probe --profile /profile.json
+  ghcr.io/hiway-media/crowdsim:1.20.3 crowdsim probe --profile /profile.json
 
 # same shape for: discover --limit 400 · load --dry-run · history · report <run-id> [--html] · init
 ```
@@ -226,12 +226,12 @@ command reads nothing — `❌ the log is empty: no lines to classify.`, exit 2 
 ```bash
 # a log on this host
 docker run --rm -v "$PWD/my-profile.json:/profile.json:ro" -v /var/log/nginx:/logs:ro \
-  ghcr.io/hiway-media/crowdsim:1.20.1 crowdsim weights /logs/access.log --profile /profile.json
+  ghcr.io/hiway-media/crowdsim:1.20.3 crowdsim weights /logs/access.log --profile /profile.json
 
 # a log that never lands on disk here
 ssh edge 'zcat /var/log/nginx/access.log.*.gz' \
   | docker run --rm -i -v "$PWD/my-profile.json:/profile.json:ro" \
-      ghcr.io/hiway-media/crowdsim:1.20.1 crowdsim weights - --profile /profile.json
+      ghcr.io/hiway-media/crowdsim:1.20.3 crowdsim weights - --profile /profile.json
 ```
 
 No `/out` mount is needed and none is used: this subcommand writes nothing, which is deliberate — an access
@@ -372,6 +372,7 @@ crowdsim will report as `generator_ok: false`.
 | exit 5, `cache-ab needs docker` | `cache-ab` from inside the container | Run it on the host (§8). |
 | exit 2, `profile not found` | The mount path and the `--profile` path disagree | The path is the one *inside* the container: `-v "$PWD/p.json:/profile.json:ro"` → `--profile /profile.json`. |
 | every GUI run fails instantly with `crowdsim could not be started: spawn /crowdsim/bin/crowdsim ENOENT` | An image older than 1.19.2: it did not set `CROWDSIM_BIN`, and the GUI looked for the driver next to itself instead of in `/usr/local/bin` | Upgrade the image, or pass `-e CROWDSIM_BIN=/usr/local/bin/crowdsim`. From 1.19.2 the server refuses to start at all when it cannot find the driver, rather than failing at the click. |
+| `SyntaxError: Named export … not found … is a CommonJS module`, then gates returning exit 2 and no GUI | Image 1.20.0 or 1.20.1: `/crowdsim/package.json` was not shipped, so every `.js` under `k6/` and `lib/` was read as CommonJS while the same files are ES modules in a checkout | Upgrade to 1.20.2 or later. There is no workaround worth carrying: the profile validator cannot run, so `load` and `doctor` refuse before reaching the safety gates. |
 | `generator_ok: false` | The generator could not hold the rate | Not a tunable. Move the generator near the target, onto a bigger host, and off Docker Desktop. |
 | `TARGET NEVER ANSWERED` | Wrong address/port, TLS, or the container's network namespace cannot reach the target | `crowdsim probe` first; on Linux add `--network host`. |
 | `Permission denied` writing `/out` | Host directory not writable by uid 12345 | `sudo chown 12345 out`, or `--user "$(id -u):$(id -g)"`. |

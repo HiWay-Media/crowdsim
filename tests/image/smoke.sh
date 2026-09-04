@@ -63,9 +63,13 @@ esac
 # The shared profile rules must be in the image too: without lib/ the driver falls back to the structural
 # checks and says so, which means the same command validates differently depending on where it runs.
 val="$(run "$IMAGE" crowdsim validate /crowdsim/profiles/example.json 2>&1 || true)"
+# NOT just "did it print the banner": the driver prints `▶ validating …` BEFORE it execs node, so this
+# assertion passed for a validator that crashed on every profile — which is exactly what the image shipped
+# in 1.20.0. What proves the validator RAN is its verdict line, the one it prints at the end.
 case "$val" in
-  *"validating"*) ok "crowdsim validate works in the image" ;;
-  *) bad "crowdsim validate is broken in the image"; printf '%s\n' "$val" | sed 's/^/      /' ;;
+  *"errors ·"*"warnings"*) ok "crowdsim validate reaches a verdict in the image" ;;
+  *) bad "crowdsim validate did not reach a verdict in the image (a crash looks like this)"
+     printf '%s\n' "$val" | sed 's/^/      /' ;;
 esac
 case "$dry" in
   *"needs node"*) bad "load fell back to structural validation: lib/ is missing from the image" ;;
@@ -131,6 +135,29 @@ rc=$?
 set -e
 [ "$rc" = "3" ] && ok "a peak above the safe ceiling is refused (exit 3)" \
                 || bad "a peak of 5000 exited $rc, expected 3"
+
+# ── the image reads its own JavaScript the way a checkout does ───────────────────────────────────────
+# One field, `"type": "module"`, decides whether every .js under k6/ and lib/ is an ES module or CommonJS.
+# Without a package.json above them it is CommonJS in the image and ESM everywhere else, so the image runs
+# code whose meaning depends on a file it does not contain. That shipped in 1.20.0 and broke `validate`,
+# both gates' exit codes and the GUI. Asserted as the invariant it is, so the next failure names the cause
+# instead of the symptom.
+mod="$(run "$IMAGE" sh -c 'cat "${CROWDSIM_ROOT:-/crowdsim}/package.json" 2>/dev/null' || true)"
+case "$mod" in
+  *'"type": "module"'*|*'"type":"module"'*) ok "the image declares its JS as ES modules (type: module)" ;;
+  *) bad "no \"type\": \"module\" at CROWDSIM_ROOT: every .js under k6/ and lib/ will be read as CommonJS" ;;
+esac
+# And the cross-boundary import that actually broke: a .mjs importing a .js from k6/lib.
+if run "$IMAGE" node -e 'import("/crowdsim/lib/validate.mjs").then(m => {
+  if (typeof m.validateProfile !== "function") { console.error("no validateProfile export"); process.exit(1); }
+  process.exit(0);
+}).catch((e) => { console.error(String(e && e.message)); process.exit(1); })' >/dev/null 2>&1; then
+  ok "lib/validate.mjs loads inside the image, k6/lib import included"
+else
+  bad "lib/validate.mjs does not load in the image — the ESM/CommonJS split is back"
+  run "$IMAGE" node -e 'import("/crowdsim/lib/validate.mjs").catch(e => console.error(e.message))' 2>&1 \
+    | sed 's/^/      /' | head -4
+fi
 
 # ── the GUI runs in there ────────────────────────────────────────────────────────────────────────────
 # Off-loopback bind without a token must be refused, in the image as everywhere else.

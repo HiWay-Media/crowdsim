@@ -184,3 +184,45 @@ test('a host that has never been measured reports no benchmark, rather than a ze
     await new Promise((r) => server.close(r));
   }
 });
+
+// ── a dependency bump must not be able to take the page down ─────────────────────────────────────────
+// The SPA fallback used to be `app.get('*', …)`. That string is valid on express 4 and THROWS AT STARTUP on
+// express 5 — `path-to-regexp` v8 reads `*` as a parameter with no name — so the GUI in the image refused to
+// start on the express bump, and the page was simply gone. `'*splat'` is the express 5 spelling and matches
+// a literal path on 4, so it is not a fix either. A RegExp means the same thing to both.
+//
+// Asserted statically because the suite runs against whichever express is installed: on 4 the broken
+// spelling passes every test.
+
+test('no route is registered with a bare string wildcard', async () => {
+  const src = fs.readFileSync(path.join(root, 'gui/server/lib/app.js'), 'utf8');
+  const offenders = src.match(/app\.(get|post|put|delete|all|use)\(\s*['"`]\*/g) || [];
+  assert.deepEqual(offenders, [], 'a bare "*" route throws at startup on express 5');
+  const splat = src.match(/app\.(get|post|put|delete|all|use)\(\s*['"`][^'"`]*\*splat/g) || [];
+  assert.deepEqual(splat, [], '"*splat" matches a literal path on express 4');
+});
+
+test('the SPA fallback serves the page and leaves /api alone', async () => {
+  const { profilesDir, outDir } = tmpdirs();
+  const uiDir = fs.mkdtempSync(path.join(os.tmpdir(), 'crowdsim-ui-'));
+  fs.writeFileSync(path.join(uiDir, 'index.html'), '<title>crowdsim</title>');
+  const app = createApp({ crowdsimBin: FAKE, profilesDir, outDir, uiDir });
+  const server = await new Promise((resolve) => {
+    const s = app.listen(0, '127.0.0.1', () => resolve(s));
+  });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    // any depth of client-side route gets the page…
+    for (const p of ['/', '/history', '/a/b/c']) {
+      const r = await fetch(base + p);
+      assert.equal(r.status, 200, `GET ${p}`);
+      assert.match(await r.text(), /crowdsim/);
+    }
+    // …and the API's own 404 is still the API's, not the page
+    const api = await fetch(`${base}/api/nope`);
+    assert.equal(api.status, 404);
+    assert.match((await api.json()).error, /no such endpoint/);
+  } finally {
+    await new Promise((r) => server.close(r));
+  }
+});

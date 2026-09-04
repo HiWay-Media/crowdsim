@@ -4,6 +4,27 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.3] — 2026-09-04
+
+**The driver's part of the authenticated classes had no test.** It does one thing — hand the path of the
+credentials file to the generator, never the credentials themselves — and that is exactly the kind of
+plumbing that breaks quietly: an env that stops being forwarded produces a run that signs in as nobody
+and reports the API rejecting it under load.
+
+### Added
+
+- **`tests/cli` covers the credentials passthrough**: the path reaches the generator as `-e
+  CROWDSIM_AUTH_USERS=…`, an unset variable tells the generator nothing at all, an empty one is treated
+  as unset rather than forwarded as an empty env, and the variable is documented in `--help`, where
+  people look for it.
+
+### Fixed
+
+- **`docs/development.md` now says why the CLI suite refuses to run under bash 3.2** and what a passing
+  run looks like on a developer machine: the `without <tool>` tests simulate a minimal environment, so on
+  a laptop that has k6, node, docker and `column(1)` installed they fail by design. Eleven of them, with
+  or without this change — a number worth knowing before reading it as a regression.
+
 ## [1.20.1] — 2026-09-04
 
 **A credentials path set for a whole environment broke every anonymous run on it.** `CROWDSIM_AUTH_USERS`

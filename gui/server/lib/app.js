@@ -320,7 +320,12 @@ export function createApp(opts) {
   // ── UI ────────────────────────────────────────────────────────────────────────────────────────────
   if (uiDir && fs.existsSync(uiDir)) {
     app.use(express.static(uiDir));
-    app.get('*', (req, res, next) => {
+    // A RegExp and not a string pattern, because the string spellings are mutually exclusive across
+    // versions: `'*'` is valid on express 4 and throws at STARTUP on express 5 (`path-to-regexp` v8:
+    // "Missing parameter name at index 1: *"), while `'*splat'` is valid on 5 and matches a literal path on
+    // 4. A RegExp means the same thing to both. This is not hypothetical tidying: the express 5 bump made
+    // the GUI in the image refuse to start, and the smoke test caught it on the dependency PR.
+    app.get(/.*/, (req, res, next) => {
       if (req.path.startsWith('/api/')) return next();
       res.sendFile(path.join(uiDir, 'index.html'));
     });
