@@ -35,6 +35,7 @@ caching would actually buy you — instead of estimating it from logs after the 
 | know why it exists, and what it refuses to do | [`INTENT.md`](../INTENT.md) |
 | run it from a container | [Docker](docker.md) |
 | write a profile for your own site | [Profile reference](profile.md) |
+| load-test **sign-in**, not just anonymous browsing | [`auth` — signing in](profile.md#auth--signing-in) |
 | measure the class mix from your own access log | [`weights`](cli.md#weights) |
 | plan and execute a real test | [Running a test](running-a-test.md) |
 | know whether a result means anything | [Reading results](reading-results.md) |

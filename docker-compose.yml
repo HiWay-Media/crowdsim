@@ -13,7 +13,7 @@
 services:
   gui:
     # Pin a released tag. Override with CROWDSIM_IMAGE=crowdsim:dev to use a locally built image.
-    image: ${CROWDSIM_IMAGE:-ghcr.io/hiway-media/crowdsim:1.19.3}
+    image: ${CROWDSIM_IMAGE:-ghcr.io/hiway-media/crowdsim:1.20.0}
     command: ["crowdsim", "serve"]
 
     # 127.0.0.1 on purpose: this page can start a load generator. Publishing it on every interface would

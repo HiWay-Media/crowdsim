@@ -1,7 +1,6 @@
 {
   "name": "example-nextjs",
   "description": "Example profile for a Next.js App Router site behind a CDN, an HAProxy edge and a caching reverse proxy. Copy it, put YOUR measured numbers in, and keep it in your own private repo — a profile contains hostnames and URL pools, i.e. information about your infrastructure.",
-
   "targets": {
     "default": "edge",
     "list": {
@@ -27,7 +26,17 @@
       }
     }
   },
-
+  "auth": {
+    "_comment": "Authenticated classes. Sign-in is the component that anonymous profiles cannot reach, and on a real campaign it was the only one that saturated: the web tier held over 7,000 concurrent users while login topped out at ~150/s. Password grant ('Direct Access Grants' in Keycloak) is what a load test can drive; if your client only allows Authorization Code + PKCE, use a dedicated test client instead of scripting the form.",
+    "token_url": "https://auth.example.test/realms/example/protocol/openid-connect/token",
+    "client_id": "example-web",
+    "_client_secret_comment": "Only for confidential clients. Prefer a public client for load tests: a secret in a profile is a secret in a file that gets copied around.",
+    "_users_comment": "Credentials come from a CSV (`username,password` per line). Pass the path as CROWDSIM_AUTH_USERS at run time and leave it OUT of the profile: profiles get shared, secrets should not travel with them. One account per virtual user, so the run stays reproducible and you do not measure one user's sessions.",
+    "users_csv": "",
+    "logout": false,
+    "_logout_comment": "Sessions are a resource: 150 logins/s for one minute is 9,000 sessions on the identity provider, and the memory they hold changes the result of the NEXT run. Turn this on (with logout_url) when you need two runs to be comparable; it costs one extra request per iteration.",
+    "logout_url": "https://auth.example.test/realms/example/protocol/openid-connect/logout"
+  },
   "_classes_comment": "The MIX. Weights are the share of user requests/s you measured on your own edge access log during the spike you want to replay — not a guess, and not a uniform split. Only count requests the client makes: server-side sub-requests the app issues by itself are a CONSEQUENCE, and generating them yourself would double-count. `--peak` is the total; each class gets weight/total × peak.",
   "_log_match_comment": "`log_match` is how `crowdsim weights` recognises a class in that access log: a list of path globs, anchored at the start of the path, where `*` spans slashes. It has NO effect on a run — a profile without it generates identical traffic, it just cannot have its mix measured. Without a rule a class is matched by its `path_prefix` and by membership of its own pool, plus the hard filter that an `rsc` class only ever matches a request carrying the navigation parameter. Nothing is inferred from a URL's shape: whatever no class claims is reported as an unclassified share, which is the number that tells you the mix is incomplete.",
   "classes": [
@@ -64,7 +73,10 @@
       "weight": 9.8,
       "kind": "plain",
       "pool": "static",
-      "log_match": ["/_next/static/*", "/assets/*"],
+      "log_match": [
+        "/_next/static/*",
+        "/assets/*"
+      ],
       "_comment": "assets that are served BY THE APP rather than by the CDN. Regenerate this pool after every deploy: it contains build hashes. The pool below is empty, so this class is dropped from a run — but log_match still lets `crowdsim weights` count these requests instead of reporting them as unclassified."
     },
     {
@@ -75,9 +87,42 @@
       "pool": "pages",
       "path_prefix": "/page",
       "_comment": "a route the reverse proxy serves and the app instance does not. Listed to show path_prefix; skipped on the app-instance target."
+    },
+    {
+      "name": "login",
+      "label": "sign-in",
+      "_comment": "Not cacheable by definition: every login reaches the identity provider, which burns CPU verifying the password on purpose. This is usually the first class to knee.",
+      "weight": 2.0,
+      "kind": "login",
+      "max_p95_ms": 1500
+    },
+    {
+      "name": "authed_api",
+      "label": "API, signed in",
+      "_comment": "Reads with a bearer token. Needs a `login` class in the same profile: the token comes from there, and it is refreshed automatically when it expires mid-ramp or the API answers 401 — otherwise this class would collapse to 100% failures and trip the brake for a reason that is not the system's.",
+      "weight": 3.0,
+      "kind": "authed",
+      "pool": "api",
+      "max_p95_ms": 800
+    },
+    {
+      "name": "signup",
+      "label": "registration",
+      "_comment": "Every iteration registers a NEW identity: replaying one address would create the account on the first request and measure the conflict on every one after. The accounts it creates are real — plan the cleanup before you run it.",
+      "weight": 0.5,
+      "kind": "signup",
+      "signup": {
+        "url": "/api/auth/register",
+        "email_pattern": "crowdsim+{tag}@example.test",
+        "body": {
+          "email": "{email}",
+          "password": "throwaway-not-a-real-secret",
+          "name": "load test {tag}"
+        }
+      },
+      "max_p95_ms": 2000
     }
   ],
-
   "pools": {
     "pages": [
       "/",
@@ -94,27 +139,53 @@
       "/search?q=delta"
     ],
     "static": [],
-    "_comment": "Pools can be inlined like above, or pulled from a sibling file with \"@pool-pages.json\" — which is what `crowdsim discover` writes. Keep pools OUT of a public repo: they are a map of your site."
+    "_comment": "Pools can be inlined like above, or pulled from a sibling file with \"@pool-pages.json\" — which is what `crowdsim discover` writes. Keep pools OUT of a public repo: they are a map of your site.",
+    "api": [
+      "/api/me",
+      "/api/entitlements",
+      "/api/favourites"
+    ]
   },
-
   "rsc": {
     "param": "_rsc",
     "mode_comment": "In a real Next.js build the _rsc value depends on route+build, not on the request: one measured event had tens of thousands of RSC requests collapsing onto ~13 distinct values. That repetitiveness is the entire premise of 'a shared micro-cache would absorb most of this'. RSC_MODE=repeat replays it; RSC_MODE=random tests the opposite hypothesis.",
-    "hashes": ["1dxlt", "9y2af", "b7k0q", "c3m8w", "d1p5r", "e6t2v", "f4h9n",
-               "g8j3s", "h2l7x", "j5n1z", "k9q4b", "m3s6d", "p7v0g"]
+    "hashes": [
+      "1dxlt",
+      "9y2af",
+      "b7k0q",
+      "c3m8w",
+      "d1p5r",
+      "e6t2v",
+      "f4h9n",
+      "g8j3s",
+      "h2l7x",
+      "j5n1z",
+      "k9q4b",
+      "m3s6d",
+      "p7v0g"
+    ]
   },
-
   "_cache_headers_comment": "Which response header tells you the cache state of each layer, and what counts as a hit. crowdsim reports a hit ratio per layer per class from these, and `probe` states a verdict per layer for one request. Three answers, not two: hit, miss, and NEVER APPEARED — the last one means this profile names a header the layer does not send, which looks exactly like a cold cache and is not. It is reported as unknown, never as a miss.",
   "cache_headers": [
-    { "label": "proxy",  "header": "X-Proxy-Cache", "hit": "HIT|STALE|UPDATING|REVALIDATED" },
-    { "label": "cdn",    "header": "X-Cache",       "hit": "Hit" },
-    { "label": "souin",  "header": "Cache-Status",  "hit": "hit" }
+    {
+      "label": "proxy",
+      "header": "X-Proxy-Cache",
+      "hit": "HIT|STALE|UPDATING|REVALIDATED"
+    },
+    {
+      "label": "cdn",
+      "header": "X-Cache",
+      "hit": "Hit"
+    },
+    {
+      "label": "souin",
+      "header": "Cache-Status",
+      "hit": "hit"
+    }
   ],
-
   "headers": {
     "Accept-Language": "en-GB,en;q=0.9"
   },
-
   "slo": {
     "max_failed_rate": 0.05,
     "max_p95_ms": 5000,
@@ -122,21 +193,22 @@
     "brake_class": "rsc_page",
     "_comment": "guillotine_ms is your reverse proxy read timeout: requests slower than this become 504s for real users, so crowdsim reports the share that crossed it. brake_class is the class whose p95 aborts the run — for the classes that declare no limit of their own. Whatever is crossed first stops the run, and the summary's aborted_by names which class and which threshold it was."
   },
-
   "safety": {
     "safe_peak_rps": 150,
-    "allow_hosts": ["www.example.test", "10.0.0.*", "127.0.0.1"],
+    "allow_hosts": [
+      "www.example.test",
+      "10.0.0.*",
+      "127.0.0.1"
+    ],
     "generator_mbps": 1000,
     "_comment": "allow_hosts is a hard gate: crowdsim refuses any target whose host does not match. safe_peak_rps is the ceiling above which --i-know-this-breaks-production is mandatory. Set safe_peak_rps to a level you have already proven harmless, not to what you hope is harmless. Neither field has a default anywhere, and allow_hosts declared as [] is an error rather than an empty allowlist — `crowdsim init` leaves both blank on purpose, and validate refuses the file until a human fills them in.",
     "_generator_mbps_comment": "Optional: what the GENERATOR's link can actually sustain, in Mbit/s. `probe` measures the weight of one page, so `load` and `doctor` can tell you what the requested peak implies (45 KB at 380 req/s is ~17.6 MB/s = ~141 Mbit/s) and warn before a run comes back with generator_ok: false. It is a warning, never a gate: the estimate assumes every request weighs what that page weighed, which is wrong in both directions."
   },
-
   "discover": {
     "sitemap": "https://www.example.test/sitemap.xml",
     "strip_prefix_regex": "^/(en|es|it)(?=/)",
     "_comment": "strip_prefix_regex removes locale prefixes that the site redirects: testing a 307 measures the redirect, not the render."
   },
-
   "journey": {
     "file": "journey.json",
     "_comment": "Only needed for --shape journey: a recorded fan-out of {path, rsc[], static[]} per page. Record it with a real browser against your own site."

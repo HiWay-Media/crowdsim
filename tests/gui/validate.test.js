@@ -336,3 +336,82 @@ test('rsc.query is the wrong key and the run would silently use _rsc: warn, nami
   q.rsc.param = 'x_nav';
   assert.ok(!validateProfile(q).warnings.some((x) => x.path === 'rsc.query'));
 });
+
+// ── authenticated classes ───────────────────────────────────────────────────────────────────────────
+// The rules come from k6/lib/auth.js, so a profile cannot pass the lint and then fail at run time.
+
+const authBase = {
+  name: 'auth-example',
+  targets: { default: 'edge', list: { edge: { base_url: 'https://www.example.test' } } },
+  pools: { api: ['/api/me'] },
+};
+
+test('the new kinds are accepted', () => {
+  const r = validateProfile({
+    ...authBase,
+    auth: { token_url: 'https://auth.example.test/token', client_id: 'web', users_csv: 'u.csv' },
+    classes: [
+      { name: 'login', kind: 'login', weight: 1 },
+      { name: 'api', kind: 'authed', weight: 1, pool: 'api' },
+    ],
+  });
+  assert.deepEqual(r.errors, []);
+});
+
+test('an unknown kind names the ones that exist', () => {
+  const r = validateProfile({ ...authBase, classes: [{ name: 'x', kind: 'websocket', weight: 1, pool: 'api' }] });
+  assert.ok(r.errors.some((e) => /login, authed, signup/.test(e.message)));
+});
+
+test('login and signup do not need a pool, every other kind does', () => {
+  const r = validateProfile({
+    ...authBase,
+    auth: { token_url: 'x', client_id: 'web', users_csv: 'u.csv' },
+    classes: [
+      { name: 'login', kind: 'login', weight: 1 },
+      { name: 'reg', kind: 'signup', weight: 1, signup: { url: '/api/register' } },
+    ],
+  });
+  assert.deepEqual(r.errors, [], 'their URL comes from the auth block, not from a pool');
+
+  const missing = validateProfile({ ...authBase, classes: [{ name: 'html', weight: 1 }] });
+  assert.ok(missing.errors.some((e) => /needs a pool/.test(e.message)));
+});
+
+test('a missing token endpoint is an error, not a surprise at run time', () => {
+  const r = validateProfile({ ...authBase, classes: [{ name: 'login', kind: 'login', weight: 1 }] });
+  assert.ok(r.errors.some((e) => /token_url/.test(e.message)));
+  assert.ok(r.errors.some((e) => /client_id/.test(e.message)));
+});
+
+test('an authed class without a login class is refused: the token has no source', () => {
+  const r = validateProfile({
+    ...authBase,
+    auth: { token_url: 'x', client_id: 'web', users_csv: 'u.csv' },
+    classes: [{ name: 'api', kind: 'authed', weight: 1, pool: 'api' }],
+  });
+  assert.ok(r.errors.some((e) => /needs a `login` class/.test(e.message)));
+});
+
+test('credentials missing from the profile are a WARNING: the path normally arrives at run time', () => {
+  const r = validateProfile({
+    ...authBase,
+    auth: { token_url: 'x', client_id: 'web' },
+    classes: [{ name: 'login', kind: 'login', weight: 1 }],
+  });
+  assert.deepEqual(r.errors, [], 'CROWDSIM_AUTH_USERS is passed when the run starts');
+  assert.ok(r.warnings.some((w) => /CROWDSIM_AUTH_USERS/.test(w.message)));
+});
+
+test('logout without an endpoint is an error: sessions would pile up silently', () => {
+  const r = validateProfile({
+    ...authBase,
+    auth: { token_url: 'x', client_id: 'web', users_csv: 'u.csv', logout: true },
+    classes: [{ name: 'login', kind: 'login', weight: 1 }],
+  });
+  assert.ok(r.errors.some((e) => /logout_url/.test(e.message)));
+});
+
+test('the shipped example profile has no errors', () => {
+  assert.deepEqual(validateProfile(example).errors, []);
+});

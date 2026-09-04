@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.19.3        # or :1.19, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.20.0        # or :1.20, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.19.3 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.20.0 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.19.3 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.20.0 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -328,7 +328,7 @@ and is the same markdown you can read here in **[docs/](docs/index.md)**:
 | [Docker](docs/docker.md) | the container in detail: GUI, runs, mounts, environment, permissions, troubleshooting |
 | [Running a test](docs/running-a-test.md) | the sequence from `doctor` to a defensible number, and the choreography around it |
 | [Reading results](docs/reading-results.md) | the summary field by field, in the order that keeps you honest |
-| [Profile reference](docs/profile.md) | every profile key, and what it costs to get wrong |
+| [Profile reference](docs/profile.md) | every profile key, and what it costs to get wrong — including the `auth` block and the `login` / `authed` / `signup` classes |
 | [CLI reference](docs/cli.md) | subcommands, flags, environment, exit codes, output files |
 | [GUI](docs/gui.md) | the browser interface, its safety properties and its deliberate limits |
 | [Architecture](docs/architecture.md) | why bash + k6, where the gates live, why `k6/lib` exists |

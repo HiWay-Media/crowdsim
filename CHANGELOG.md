@@ -4,6 +4,60 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.20.0] — 2026-09-04
+
+**Every class crowdsim shipped until now was an anonymous GET, and that hides the component that breaks
+first.** On a real campaign the web tier held over 7,000 concurrent users without effort while sign-in
+saturated at ~150 logins/s: the ceiling was in authentication, and no anonymous profile can reach it. A
+load test that cannot log in confirms what you already knew and stays silent about the only thing that
+was wrong. This release adds sign-in, authenticated reads and registration as first-class kinds.
+
+### Added
+
+- **`login`, `authed` and `signup` class kinds**, driven by a new `auth` block in the profile. `login`
+  posts the OAuth2 password grant and keeps the token for that virtual user; `authed` sends
+  `Authorization: Bearer` and draws its paths from a pool; `signup` registers a new identity per
+  iteration. The logic lives in `k6/lib/auth.js` with unit tests — `live-event.js` stays wiring.
+- **One account per virtual user**, assigned deterministically from a `username,password` CSV. With a
+  single shared account you measure how the identity provider handles one subject's sessions instead of
+  how it handles load, and a failure cannot be traced to a credential. VU 7 always signs in as the same
+  account, so a run is reproducible.
+- **`CROWDSIM_AUTH_USERS=<path>`**, which wins over `auth.users_csv`. Credentials are passed as a path at
+  run time and stay out of the profile: profiles get shared, secrets should not travel with them.
+- **`auth.logout`** for runs that have to be comparable. 150 logins/s for one minute is 9,000 sessions on
+  the identity provider, and the memory they hold is a variable of the result: a second run that starts
+  from a loaded provider is not comparable with the first. Off by default — it costs one request per
+  iteration.
+- **`docs/profile.md` gained an `auth` section** with the tested command, the CSV format, what each kind
+  does, and the three things to know before pointing this at production: brute-force detection turns a
+  single wrong credential into a run that measures lockouts; the login class is normally the first to
+  knee, so it wants its own `max_p95_ms`; and sign-in is not cacheable, so a CDN in front changes nothing.
+
+### Changed
+
+- **Automatic re-login.** A token issued at the start of a ramp expires while the ramp is still climbing.
+  Without this an `authed` class degrades to 100% failures and trips the emergency brake, reporting a
+  collapse that is an artefact of the test. The token is refreshed when it is about to expire and when a
+  request comes back 401.
+- **Unique identity per `signup` iteration.** Replaying one address creates the account on the first
+  request and measures the conflict on every one after — the class would look consistent and mean
+  nothing. `{email}` and `{tag}` are substituted in the body, and `{tag}` carries the run id, so two runs
+  never collide. ⚠️ The accounts are real: plan the cleanup, and give them a dedicated mail domain so
+  they can be found afterwards.
+- **The profile validator knows the new kinds**, and refuses the profiles that would run and mean
+  something else: an `authed` class with no `login` class (the token would have no source), a login class
+  with no token endpoint, `logout` without `logout_url` (sessions would pile up silently). It imports the
+  rules from `k6/lib/auth.js` rather than restating them — a lint that drifts from the runtime is worse
+  than no lint. `login` and `signup` are exempt from the "a class needs a pool" rule, because their URL
+  comes from the auth block.
+
+### Fixed
+
+- **A credentials CSV using semicolons dropped every line.** The separator was chosen by comparing
+  `indexOf(';')` with `indexOf(',')`, and when one of the two is absent `indexOf` returns `-1`, which
+  compares as "earliest": a file exported by a spreadsheet in a semicolon locale parsed to zero users and
+  the run started with nothing to sign in with. Found by the unit test that covers that export.
+
 ## [1.19.3] — 2026-09-02
 
 **Nothing in this repository said why it exists.** The README says what the tool is, `docs/` says how to

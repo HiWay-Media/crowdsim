@@ -56,6 +56,10 @@
 # Environment:
 #   CROWDSIM_ALLOW_TARGETS   comma-separated host globs the tool is allowed to hit. REQUIRED unless the
 #                            profile declares safety.allow_hosts. No default, by design.
+#   CROWDSIM_AUTH_USERS      path to a `username,password` CSV used by the login/authed classes. Keep it
+#                            OUT of the profile: profiles get shared, credentials should not travel with
+#                            them. In the container the file must be mounted and the path is the one
+#                            inside the container.
 #   CROWDSIM_OUT             output directory for logs and summaries (default: ./out)
 #   CROWDSIM_SLACK_WEBHOOK   if set, --slack posts the run recap there. Never hardcode a webhook here.
 #   CROWDSIM_PROFILES        profile dir the GUI reads/writes (default: ./profiles) · CROWDSIM_GUI_TOKEN:
@@ -970,6 +974,9 @@ cmd_load() {
   if [ -n "$BYPASS" ]; then env+=("BYPASS=$BYPASS"); fi
   if [ -n "$MAX_5XX" ]; then env+=("MAX_5XX=$MAX_5XX"); fi
   if [ -n "$MAX_P95" ]; then env+=("MAX_P95_MS=$MAX_P95"); fi
+  # Credentials for the authenticated classes: a PATH, never the credentials themselves. Passed through
+  # so the profile can stay shareable — see the auth block in profiles/example.json.
+  if [ -n "${CROWDSIM_AUTH_USERS:-}" ]; then env+=("CROWDSIM_AUTH_USERS=$CROWDSIM_AUTH_USERS"); fi
   # Only for --shape journey. Passing it in `mix` mode would make k6 open a file it never uses, and a
   # profile that merely mentions a journey file it does not ship would abort the run in the init context
   # with a stack trace instead of a load test.

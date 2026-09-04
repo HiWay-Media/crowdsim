@@ -37,6 +37,10 @@ import { brakeThresholds } from './lib/brake.js';
 import { stepPlan, stepAt } from './lib/steps.js';
 import { usableClasses, shares, stages as mkStages, vus as mkVus, journeyPlan, rscQuery as mkRscQuery,
          classPath, DEFAULT_RSC_HASHES } from './lib/mix.js';
+import {
+  parseUsersCsv, pickUser, tokenRequest, logoutRequest, shouldLogout, parseToken, bearer,
+  needsRelogin, expiryFrom, signupPayload, validateAuth,
+} from './lib/auth.js';
 import { compileLayers, layerHit, statusBuckets, overGuillotine } from './lib/classify.js';
 import { buildSummary, renderSummaryText } from './lib/summary.js';
 
@@ -75,6 +79,22 @@ if (!BASE_URL)  throw new Error('BASE_URL env var is required');
 
 // ─────────────────────────── profile (init context: open() only here) ────────────────────────────────
 const PROFILE = JSON.parse(open(PROFILE_F));
+
+// Authenticated classes need a token endpoint and credentials. Checked HERE, in the init context: a
+// profile that is missing them would otherwise produce a class at 100% failures and a run that reads
+// like a capacity result.
+const AUTH = PROFILE.auth || {};
+const AUTH_ERRORS = validateAuth(PROFILE, __ENV);
+if (AUTH_ERRORS.length) {
+  throw new Error('profile: ' + AUTH_ERRORS.join('; '));
+}
+// Credentials come from a path, and the environment variable wins: a profile gets copied around and
+// shared, a secret should not travel with it.
+const USERS_PATH = __ENV.CROWDSIM_AUTH_USERS || AUTH.users_csv || '';
+// open() at the top of the init context, like the profile above: reading the file inside the
+// SharedArray callback would tie a file read to the lifetime of a lazily-built shared object.
+const USERS_CSV = USERS_PATH ? open(USERS_PATH) : '';
+const USERS = new SharedArray('users', function () { return parseUsersCsv(USERS_CSV); });
 
 const CLASS_DEFS = usableClasses(PROFILE.classes, SKIP);
 // shares are recomputed over the REMAINING classes, so --peak stays the total you asked for
@@ -275,9 +295,54 @@ function tagsFor(cls, name) {
 
 function get(url, headers, cls, name) {
   const tags = tagsFor(cls, name);
-  const res = http.get(BASE_URL + url, { headers, tags: tags, timeout: TIMEOUT });
+  const res = http.get(abs(url), { headers, tags: tags, timeout: TIMEOUT });
   record(res, cls, tags.step);
   return res;
+}
+
+// The token endpoint lives on the identity provider, which is a different host from the site under
+// test: an absolute URL must not be prefixed with BASE_URL.
+function abs(url) {
+  return /^https?:\/\//.test(url) ? url : BASE_URL + url;
+}
+
+function post(url, body, headers, cls, name) {
+  const tags = tagsFor(cls, name);
+  const res = http.post(abs(url), body, { headers, tags: tags, timeout: TIMEOUT });
+  record(res, cls, tags.step);
+  return res;
+}
+
+// ─────────────────────────── authenticated state, per virtual user ───────────────────────────────────
+// Module scope in k6 is per-VU, which is exactly the lifetime a session needs: VU 7 keeps its own
+// account and its own token for the whole run.
+let TOKEN = null;
+let REFRESH = null;
+let TOKEN_EXP = 0;
+
+/**
+ * Sign in and keep the token. Returns false when the token endpoint did not give one, so the caller can
+ * skip the authenticated request instead of sending a request with no credentials — which would be
+ * recorded as a 401 and read as "the API rejects us under load".
+ */
+function login(cls, name) {
+  const user = pickUser(USERS, exec.vu.idInTest);
+  if (!user) return false;
+  const req = tokenRequest(AUTH, user);
+  const res = post(req.url, req.body, Object.assign(baseHeaders(), req.headers), cls, name);
+  const parsed = parseToken(res.body);
+  if (parsed.error) {
+    TOKEN = null;
+    return false;
+  }
+  TOKEN = parsed.token;
+  REFRESH = parsed.refreshToken;
+  TOKEN_EXP = expiryFrom(Date.now(), parsed.expiresIn);
+  if (shouldLogout(AUTH)) {
+    const out = logoutRequest(AUTH, REFRESH);
+    if (out) post(out.url, out.body, Object.assign(baseHeaders(), out.headers), cls, name + ' logout');
+  }
+  return true;
 }
 
 // ─────────────────────────── SHAPE=mix — one generic executor, driven by the profile ─────────────────
@@ -290,10 +355,26 @@ export function run_class() {
   const path = classPath(c, pick(pool(c.pool)),
                          c.path_suffix_pool ? pick(pool(c.path_suffix_pool)) : undefined);
 
+  const label = c.label || c.name;
+
   if (c.kind === 'rsc') {
-    get(rscQuery(path, i), rscHeaders(c.rsc_state_path || path), c.name, c.label || c.name);
+    get(rscQuery(path, i), rscHeaders(c.rsc_state_path || path), c.name, label);
+  } else if (c.kind === 'login') {
+    login(c.name, label);
+  } else if (c.kind === 'authed') {
+    // A token issued at the start of a ramp expires while the ramp is still climbing: without this the
+    // class would collapse to 100% failures and trip the brake for a reason that is not the system's.
+    if (needsRelogin(0, TOKEN, TOKEN_EXP, Date.now()) && !login(c.name, label + ' login')) return;
+    const res = get(path, bearer(baseHeaders(), TOKEN), c.name, label);
+    if (needsRelogin(res.status, TOKEN, TOKEN_EXP, Date.now())) TOKEN = null;
+  } else if (c.kind === 'signup') {
+    const s = c.signup || {};
+    const payload = signupPayload(s, `${exec.vu.idInTest}-${i}`, RUN_ID);
+    const headers = Object.assign(baseHeaders(), { 'Content-Type': 'application/json' },
+                                  s.headers || {});
+    post(s.url, JSON.stringify(payload.body), headers, c.name, label);
   } else {
-    get(path, baseHeaders(), c.name, c.label || c.name);
+    get(path, baseHeaders(), c.name, label);
   }
 }
 

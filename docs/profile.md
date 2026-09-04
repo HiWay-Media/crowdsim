@@ -260,6 +260,98 @@ profile's `max_p95_ms`. A class with its own limit is always its own brake.
 
 ---
 
+## `auth` — signing in
+
+Everything above generates anonymous GETs, and that hides the component that usually breaks first. On a
+real campaign the web tier held over **7,000 concurrent users** without effort while **sign-in saturated
+at ~150 logins/s**: the ceiling was in authentication, and no anonymous profile can reach it. A load test
+that cannot log in confirms what you already knew and stays silent about the only thing that was wrong.
+
+Three class kinds use this block: `login`, `authed` and `signup`.
+
+```json
+"auth": {
+  "token_url": "https://auth.example.test/realms/example/protocol/openid-connect/token",
+  "client_id": "example-web",
+  "logout": false,
+  "logout_url": "https://auth.example.test/realms/example/protocol/openid-connect/logout"
+}
+```
+
+| Key | Meaning |
+|---|---|
+| `token_url` | the OAuth2 token endpoint. Absolute: the identity provider is a different host from the site, and the URL is not prefixed with the target's base URL |
+| `client_id` | the client to authenticate as. Prefer a **public** client for load tests |
+| `client_secret` | only for confidential clients. A secret in a profile is a secret in a file that gets copied around |
+| `scope` | optional, passed through to the token request |
+| `logout` / `logout_url` | end each session instead of leaving it to expire — see [sessions are a resource](#sessions-are-a-resource) |
+
+**The grant is the password grant** (`Direct Access Grants` in Keycloak). If your client only allows
+Authorization Code + PKCE, do not script the login form: create a **client dedicated to load tests** with
+the password grant enabled. Parsing a login page is three requests of HTML scraping that break on the
+next redesign, and the numbers you get are about the form, not about authentication.
+
+### Credentials stay out of the profile
+
+```bash
+# username,password — one per line. `#` comments and a header row are skipped.
+printf 'username,password\nuser1@example.test,pw-one\nuser2@example.test,pw-two\n' > users.csv
+
+CROWDSIM_ALLOW_TARGETS="www.example.test,auth.example.test" \
+CROWDSIM_AUTH_USERS=./users.csv \
+  crowdsim load --profile profiles/example.json --peak 10 --steps 2 --step-dur 10s --dry-run
+```
+
+`CROWDSIM_AUTH_USERS` wins over `auth.users_csv`, and it is the way to pass credentials: profiles get
+shared, secrets should not travel with them. In the container the file must be **mounted**, and the path
+is the one inside the container.
+
+**One account per virtual user**, assigned deterministically: VU 7 always signs in as the same account.
+With a single shared account you would measure how the provider handles one subject's sessions rather
+than how it handles load, and a failure could not be traced to a credential.
+
+### The three kinds
+
+```json
+{ "name": "login",      "kind": "login",  "weight": 2.0, "max_p95_ms": 1500 }
+{ "name": "authed_api", "kind": "authed", "weight": 3.0, "pool": "api", "max_p95_ms": 800 }
+{ "name": "signup",     "kind": "signup", "weight": 0.5, "max_p95_ms": 2000,
+  "signup": { "url": "/api/auth/register", "email_pattern": "crowdsim+{tag}@example.test",
+              "body": { "email": "{email}", "password": "throwaway", "name": "load test {tag}" } } }
+```
+
+- **`login`** posts the password grant and keeps the token for that VU. It takes no `pool`: its URL is
+  `auth.token_url`.
+- **`authed`** sends `Authorization: Bearer` and draws paths from its `pool`. It **needs a `login` class
+  in the same profile** — the validator refuses the profile otherwise, because the token would have no
+  source. The token is refreshed on its own when it is about to expire or when the API answers 401: a
+  token issued at the start of a ramp expires while the ramp is still climbing, and without that the
+  class would collapse to 100% failures and trip the brake for a reason that is not the system's.
+- **`signup`** registers a **new identity per iteration**. Replaying one address would create the account
+  on the first request and measure the conflict on every one after. `{email}` and `{tag}` are substituted
+  in the body; `{tag}` includes the run id and the VU, so two runs never collide.
+
+⚠️ **The accounts a signup class creates are real.** Plan the cleanup before you run it: a campaign that
+generated ~3,000 of them left them behind, and finding them afterwards is only possible because they
+share a dedicated mail domain. Use one.
+
+### Sessions are a resource
+
+150 logins/s for one minute is **9,000 sessions** on the identity provider, and the memory they hold is a
+variable of the result: a second run that starts from a loaded provider is not comparable with the first.
+`"logout": true` (with `logout_url`) keeps runs comparable at the cost of one extra request per iteration.
+Leaving it off is fine for a one-off; it is not fine for a before/after.
+
+### What to know before pointing this at production
+
+- **Brute-force detection**: successful logins do not trip it, but a single wrong credential in the CSV
+  does — and from that point the run measures lockouts, not capacity. Check the CSV against one account
+  by hand first.
+- **The login class is normally the first to knee**, so give it its own `max_p95_ms`: without one it
+  inherits the global SLO and the brake fires on the wrong class.
+- **Sign-in is not cacheable**, so a CDN in front changes nothing here: whatever you point at, the
+  identity provider takes the full rate.
+
 ## `safety` — the two gates
 
 ```json
