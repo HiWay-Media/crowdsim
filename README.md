@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.24.0        # or :1.24, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.25.0        # or :1.25, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.24.0 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.25.0 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.24.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.25.0 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -133,9 +133,10 @@ crowdsim load     --profile p.json --target edge --peak 60
 crowdsim validate p.json                                  # every rule at once, before anything runs
 crowdsim record  session.har                              # a browser HAR export → a journey file
 crowdsim history                                          # one line per run, with the knee each measured
-crowdsim compare <run-a> <run-b>                          # the delta, or a refusal if they differ
+crowdsim compare previous latest                          # the delta, or a refusal if they differ
 crowdsim weights access.log --profile p.json               # the class mix, counted on your own edge log
 crowdsim init                                             # a first profile, drafted from what was measured
+crowdsim report  latest                                   # the run that just finished, resolved out loud
 crowdsim report  <run-id>                                 # the run as markdown, caveats attached
 crowdsim report  <run-id> --html                          # the same run drawn: the ramp, the knee, per class
 crowdsim serve                                            # the same thing with a GUI, on loopback
@@ -329,7 +330,7 @@ and is the same markdown you can read here in **[docs/](docs/index.md)**:
 | Page | What |
 |---|---|
 | [docs/index.md](docs/index.md) | the map, and the three things worth knowing before you start |
-| [Install](docs/install.md) | Docker, native, Nomad — and which is right for what |
+| [Install](docs/install.md) | Docker, native, Nomad — and which is right for what, plus shell completion for bash and zsh |
 | [Docker](docs/docker.md) | the container in detail: GUI, runs, mounts, environment, permissions, troubleshooting |
 | [Running a test](docs/running-a-test.md) | the sequence from `doctor` to a defensible number, and the choreography around it |
 | [Reading results](docs/reading-results.md) | the summary field by field, in the order that keeps you honest |

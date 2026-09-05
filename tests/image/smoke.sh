@@ -136,6 +136,21 @@ set -e
 [ "$rc" = "3" ] && ok "a peak above the safe ceiling is refused (exit 3)" \
                 || bad "a peak of 5000 exited $rc, expected 3"
 
+# ── the help answers for one subcommand, and the completions are there ───────────────────────────────
+# `crowdsim load --help` inside the image is how somebody in a container finds a flag: there is no README
+# next to them and no man page. It reads the same comment header the global help comes from, so this also
+# asserts that the header survived the COPY intact.
+h="$(run "$IMAGE" crowdsim load --help 2>/dev/null || true)"
+case "$h" in
+  *"--i-know-this-breaks-production"*) ok "crowdsim load --help answers inside the image" ;;
+  *) bad "crowdsim load --help does not print load's own flags in the image" ;;
+esac
+if run "$IMAGE" sh -c 'test -r "${CROWDSIM_ROOT:-/crowdsim}/completions/crowdsim.bash"' >/dev/null 2>&1; then
+  ok "the shell completions are in the image"
+else
+  bad "no completions/ at CROWDSIM_ROOT: a container shell completes nothing"
+fi
+
 # ── the image reads its own JavaScript the way a checkout does ───────────────────────────────────────
 # One field, `"type": "module"`, decides whether every .js under k6/ and lib/ is an ES module or CommonJS.
 # Without a package.json above them it is CommonJS in the image and ESM everywhere else, so the image runs

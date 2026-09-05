@@ -70,6 +70,227 @@
 # Exit: 0 = executed (a run stopped by the brake is an OUTCOME, not an error) · 2 = usage
 #       3 = safety gate · 4 = target unreachable · 5 = k6 missing
 # Requires: k6, curl, python3 (and node for `validate`, `record`, `weights` and `serve`).
+#
+#@@ ─── per-subcommand help ────────────────────────────────────────────────────────────────────────
+# `crowdsim --help` stops at the line above; `crowdsim <subcommand> --help` prints one block below.
+# One source, two views: a second copy of a flag list is a copy that disagrees with the driver by the
+# next release. tests/cli/help.bats asserts that every flag the parser accepts appears in at least one
+# block, so a new flag that is never documented fails the suite — and completions/ reads these same
+# blocks at completion time rather than carrying a copy of the list.
+#
+#@ doctor
+#   crowdsim doctor [--profile <f.json>] [--bench]
+#
+#   What is missing on this machine, and (with --profile) what is wrong with that profile. A report,
+#   never a gate: it exits 0 even when things are missing, because deciding is yours.
+#
+#     --profile <f.json>   also run the structural profile checks (pools, references, empty pools)
+#     --bench              measure what THIS machine can generate, against a local server on loopback.
+#                          Needs node. A generator that cannot hold the rate makes every number a
+#                          property of the generator; this is how you find that out beforehand.
+#
+#   Example:
+#     crowdsim doctor --profile profiles/example.json
+#
+#@ discover
+#   crowdsim discover --profile <f.json> [--target <name>] [--limit 400] [--verify]
+#
+#   Fetch the sitemap and write a pool of REAL URLs. 404s do not load the app tier, so a pool of
+#   invented paths yields a false "it handles this beautifully".
+#
+#     --profile <f.json>   the profile whose target and pool paths are used  (required)
+#     --target <name>      a named target from the profile (default: targets.default)
+#     --limit <n>          maximum URLs in the pool (default: 400)
+#     --verify             request each path and keep only those answering 2xx. Sequential, paced by
+#                          CROWDSIM_VERIFY_DELAY: discovery must not become the load test.
+#
+#   Example:
+#     crowdsim discover --profile profiles/example.json --limit 400 --verify
+#
+#@ probe
+#   crowdsim probe --profile <f.json> [--target <name>] [--insecure]
+#
+#   Preflight one target: status, TTFB, page weight, a verdict per declared cache layer, and — for
+#   every `authed` class — one request sent WITHOUT the token, to check that the endpoint really
+#   requires it. Writes out/probe-<run>.log and out/probe-<run>.json.
+#
+#     --profile <f.json>   the profile to preflight  (required)
+#     --target <name>      a named target from the profile (default: targets.default)
+#     --insecure           skip TLS verification, for a node addressed by IP
+#
+#   Exits 4 if the target answers >=400, or if an authed class turns out not to need its token.
+#
+#   Example:
+#     crowdsim probe --profile profiles/example.json --target edge
+#
+#@ load
+#   crowdsim load --profile <f.json> [--target <name>] [flags]
+#
+#   The load test. Climbs in steps to --peak, holds, and brakes as soon as the SLO is crossed.
+#   Exits 0 whenever it executed — INCLUDING when the brake tripped, because finding the knee is
+#   the point. Writes out/summary-<run>.json, out/load-<run>.log, and appends to out/history.tsv.
+#
+#     --profile <f.json>   the profile  (required)
+#     --target <name>      a named target from the profile (default: targets.default)
+#     --base-url <url>     bypass target resolution. Still subject to the allowlist.
+#     --shape mix|journey  mix = one scenario per class; journey = sessions from a journey file
+#     --peak <n>           total requests/s at peak, split across classes by weight (default: 60)
+#     --start <n>          rate of the first step (default: 15)
+#     --steps <n>          linear steps from start to peak (default: 4)
+#     --step-dur <dur>     duration of each step (default: 60s)
+#     --hold <dur>         time held at peak; 0s means climb and leave (default: 120s)
+#     --rsc-mode repeat|random   repeat replays the few distinct navigation URLs a real build
+#                          produces; random measures the opposite hypothesis (default: repeat)
+#     --max-p95 <ms>       brake: abort when the brake class's p95 crosses this
+#     --max-5xx <ratio>    brake: abort when the failed rate crosses this
+#     --abort-delay <dur>  grace period before the brake is evaluated (default: 30s)
+#     --safe-peak <n>      the ceiling for this run
+#     --i-know-this-breaks-production   the ONLY way past the safe peak. Command line, every time.
+#     --warmup <dur>       an unmeasured run first: fills caches, opens pools, JITs the app. Its
+#                          numbers go to warmup-<run>.json and are NOT mixed into the result.
+#     --warmup-peak <n>    rate for the warm-up (default: --start)
+#     --touch-and-go       preset: --steps 3 --step-dur 20s --hold 0s --abort-delay 10s. The cheapest
+#                          ramp that still produces errors — NOT a way to make a test harmless.
+#     --skip-classes <a,b> classes to leave out (routes this tier does not serve)
+#     --insecure           skip TLS verification, for a node addressed by IP
+#     --slack              post a recap to CROWDSIM_SLACK_WEBHOOK
+#     --dry-run            print the exact k6 invocation and stop. Sends nothing.
+#
+#   Example:
+#     CROWDSIM_ALLOW_TARGETS='www.example.test' \
+#       crowdsim load --profile profiles/example.json --peak 60 --warmup 30s
+#
+#@ cache-ab
+#   crowdsim cache-ab --profile <f.json> [--peak 60] [--ttl 10] [--third <t.conf>] [--run]
+#   crowdsim cache-ab --new-leg <t.conf>
+#
+#   A/B a candidate cache config: local nginx legs against the same origin, one with the tweak and
+#   one as-is, so the offload factor is measured instead of argued about.
+#
+#     --profile <f.json>   the profile the legs are loaded with  (required, except with --new-leg)
+#     --target <name>      a named target from the profile, used as the origin
+#     --base-url <url>     origin URL, bypassing target resolution
+#     --peak <n>           requests/s each leg is loaded at (default: 60)
+#     --ttl <s>            cache TTL for the candidate leg (default: 10)
+#     --third <t.conf>     a third leg from your own template, alongside asis and candidate
+#     --new-leg <t.conf>   scaffold a leg template and exit. Carries the warning it must carry.
+#     --run                load every leg in turn and compare them. Sequential on purpose: two
+#                          generators on one host measure the host.
+#
+#   Example:
+#     crowdsim cache-ab --new-leg legs/narrow-fix.conf.template
+#     crowdsim cache-ab --profile profiles/example.json --third legs/narrow-fix.conf.template
+#
+#@ history
+#   crowdsim history
+#
+#   One line per run from out/history.tsv, so the knee can be watched over time rather than
+#   reconstructed. Reads the file the driver writes; it never re-runs anything.
+#
+#   Example:
+#     crowdsim history
+#
+#@ compare
+#   crowdsim compare <run-a> <run-b> [--json]
+#
+#   The delta between two runs — and a refusal when they are not comparable. Two runs with different
+#   pools, profiles, or a generator that did not hold the rate produce a difference that is about the
+#   measurement, not about the system.
+#
+#     --json   machine-readable output
+#
+#   Example:
+#     crowdsim compare 20260901T101500Z 20260901T121500Z
+#
+#@ report
+#   crowdsim report <run-id> [--compare <run-id>] [--out <file.md>] [--html]
+#
+#   One run as pasteable markdown, with the caveats that do not survive retyping — or, with --html,
+#   the same run drawn: the ramp as a curve, the knee band, p95 per class against that class's own
+#   limit, cache per layer. One self-contained file, no external resources and no scripts.
+#
+#     --compare <run-id>   include the delta against another run, with the same refusals as `compare`
+#     --out <file.md>      write to a file instead of stdout
+#     --html               the page instead of the markdown. Needs node.
+#
+#   A run with generator_ok: false or an unreachable target gets no latency charts at all — only the
+#   part that shows why it is invalid.
+#
+#   Example:
+#     crowdsim report 20260901T121500Z --out ticket.md
+#     crowdsim report 20260901T121500Z --html
+#
+#@ weights
+#   crowdsim weights [<access.log>] --profile <f.json> [--format "time method path status"]
+#                    [--top 10] [--json]
+#   … | crowdsim weights - --profile <f.json>
+#
+#   Count YOUR access log into the class mix — the one input this tool demands and used to refuse to
+#   help measure. Needs node. Reads a file or stdin; writes nothing, anywhere: the log is handed
+#   over, never fetched, and nothing from it lands in out/.
+#
+#     --profile <f.json>   the profile whose classes define what to count  (required)
+#     --format <fields>    columns of a log that is not the combined format: request, path, method,
+#                          status, time, -
+#     --top <n>            how many unclassified paths to show (default: 10)
+#     --json               counts, shares and the window — never a path from the log
+#
+#   Example:
+#     crowdsim weights /var/log/nginx/access.log --profile profiles/example.json
+#     ssh host 'cat /var/log/nginx/access.log' | crowdsim weights - --profile profiles/example.json
+#
+#@ init
+#   crowdsim init [--out <profile.json>] [--access-log <access.log>]
+#
+#   Draft a first profile from what probe, discover and record have already measured, saying which
+#   run each part came from. The two safety keys are left EMPTY on purpose: an allowlist and a safe
+#   peak are decisions, and no tool gets to make them for you.
+#
+#     --out <profile.json>   where to write the draft (default: ./profile.json)
+#     --access-log <file>    measure the class weights from this log instead of writing them as TODO
+#
+#   Example:
+#     crowdsim init --out my-site.json --access-log /var/log/nginx/access.log
+#
+#@ record
+#   crowdsim record <file.har> [--out <journey.json>] [--origin <url>] [--rsc-query _rsc] [--force]
+#
+#   Turn a browser HAR export into a journey file for --shape journey. Needs node.
+#
+#     --out <journey.json>   where to write it (default: alongside the HAR)
+#     --origin <url>         keep only requests to this origin
+#     --rsc-query <name>     the query parameter that marks a navigation request (default: _rsc)
+#     --force                overwrite an existing journey file
+#
+#   Example:
+#     crowdsim record session.har --out journeys/browse.json --origin https://www.example.test
+#
+#@ validate
+#   crowdsim validate <f.json>
+#
+#   Every rule at once, before anything runs: structure, pool references, class kinds, the auth
+#   block, the brake class, the SLO. Needs node. Generates nothing. Exits 2 on a bad profile.
+#
+#   Without node, `crowdsim doctor --profile <f>` still does the structural checks and says which
+#   ones did not run — rather than printing nothing and letting you believe it passed.
+#
+#   Example:
+#     crowdsim validate profiles/example.json
+#
+#@ serve
+#   crowdsim serve [--port 8787] [--bind 127.0.0.1]
+#
+#   The GUI. Needs node. Every run is a child process of this same driver, so both gates and every
+#   exit code are exactly the ones above — the page re-implements none of it.
+#
+#     --port <n>      port (default: 8787)
+#     --bind <addr>   bind address (default: 127.0.0.1). Anything but loopback REQUIRES
+#                     CROWDSIM_GUI_TOKEN: a page that can generate 500 req/s at your production has
+#                     no business on a shared network.
+#
+#   Example:
+#     crowdsim serve --port 8787
+#
 
 set -eo pipefail
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -92,7 +313,26 @@ GUI_PORT=""; GUI_BIND=""
 # to the first line that is not a comment — and not by a line count: the previous version read lines 1-60
 # and so printed `!/usr/bin/env bash` as the first line of `crowdsim --help`, and silently truncated the
 # help the moment the header grew past sixty lines.
-usage() { sed -n '2,${/^#/!q; s/^# \{0,1\}//p;}' "$0"; }
+usage() { sed -n '2,${/^#/!q; /^#@/q; s/^# \{0,1\}//p;}' "$0" | sed '/./,$!d'; }
+
+# `crowdsim <subcommand> --help`. The per-subcommand text lives in the SAME header the global help comes
+# from, in `#@ <name>` blocks below the `#@@` marker that stops usage(). Two sources would disagree once,
+# and a help page that contradicts the tool is worse than a long one.
+#
+# Returns 1 when the subcommand has no block, so the caller falls back to the global help rather than
+# printing nothing — an empty --help is indistinguishable from a broken one.
+subcommand_usage() {
+  local found
+  found="$(awk -v want="$1" '
+    $0 == "#@ " want { inblock = 1; next }
+    /^#@/ && inblock  { exit }
+    inblock && /^#/   { sub(/^# ?/, ""); print; next }
+    inblock           { exit }
+  ' "$0")"
+  [ -n "$found" ] || return 1
+  printf '%s\n' "$found"
+  printf '%s\n' "Every flag, every exit code and the environment: crowdsim --help"
+}
 say()   { printf '%s\n' "$*"; }
 ok()    { printf '  ✅ %s\n' "$*"; }
 warn()  { printf '  ⚠️  %s\n' "$*"; }
@@ -174,7 +414,9 @@ while [ $# -gt 0 ]; do
     --slack) SLACK=1; shift;;
     --dry-run) DRY=1; shift;;
     --i-know-this-breaks-production) FORCE=1; shift;;
-    -h|--help) usage; exit 0;;
+    # A subcommand answers for itself when it can. `load` alone has twenty flags, and finding them used
+    # to mean reading the synopsis of twelve other subcommands first.
+    -h|--help) if [ -n "$CMD" ] && subcommand_usage "$CMD"; then exit 0; fi; usage; exit 0;;
     # A single `-` is the conventional name for stdin, and `weights` is the one subcommand whose input
     # normally arrives that way: an access log usually cannot be copied off the host that holds it.
     -) if [ "$CMD" = "weights" ]; then POSITIONAL+=("-"); shift; else die "unknown option: -" 2; fi;;
@@ -1627,11 +1869,54 @@ print(f"  Then:  crowdsim validate {dest}")
 PYMIX
 }
 
+# ───────────────────── `latest` and `previous`, wherever a run id is accepted ────────────────────────
+# `crowdsim report latest` used to answer `no summary for latest`, so the only way to report on the run
+# that just finished was to read the id out of history and retype sixteen characters — which is also how
+# the wrong run gets reported: 20260901T123654Z and 20260901T123645Z are one glance apart.
+#
+# Two rules make this a convenience rather than a hazard:
+#
+#  · **the resolution is always printed**, on stderr so it cannot land in a redirected report. A command
+#    that silently picks a run is how a result gets attributed to the wrong experiment.
+#  · **`latest` skips nothing.** The newest run resolves even when it is a discard (generator_ok: false),
+#    and is then reported as the discard it is. Quietly stepping back to the previous run would hand over
+#    a valid-looking result for a run nobody asked about.
+#
+# One resolver, not three: `report`, `compare` and anything added later go through here.
+run_ids_newest_first() {
+  ls -1 "$OUT_DIR"/summary-*.json 2>/dev/null \
+    | sed -e 's|.*/summary-||' -e 's|\.json$||' \
+    | sort -r
+}
+
+resolve_run_id() {
+  local sel="$1"
+  case "$sel" in latest|previous) ;; *) printf '%s' "$sel"; return 0;; esac
+
+  local ids; ids="$(run_ids_newest_first)"
+  local n; n="$(printf '%s' "$ids" | grep -c . || true)"
+  if [ "${n:-0}" -eq 0 ]; then
+    die "there are no runs in $OUT_DIR yet, so \`$sel\` resolves to nothing. \`crowdsim history\` lists
+  the runs there are." 2
+  fi
+  if [ "$sel" = "previous" ] && [ "${n:-0}" -lt 2 ]; then
+    die "only one run in $OUT_DIR, so there is no \`previous\`. \`crowdsim history\` lists them." 2
+  fi
+
+  local want=1
+  [ "$sel" = "previous" ] && want=2
+  local id; id="$(printf '%s\n' "$ids" | sed -n "${want}p")"
+  printf '  ℹ️  %s → %s\n' "$sel" "$id" >&2
+  printf '%s' "$id"
+}
+
 cmd_report() {
   local run="${POSITIONAL[0]:-}"
   if [ -z "$run" ]; then
-    die "report needs a run id: crowdsim report <run-id> (see crowdsim history)" 2
+    die "report needs a run id: crowdsim report <run-id|latest|previous> (see crowdsim history)" 2
   fi
+  run="$(resolve_run_id "$run")"
+  if [ -n "${REPORT_COMPARE:-}" ]; then REPORT_COMPARE="$(resolve_run_id "$REPORT_COMPARE")"; fi
   local summary="$OUT_DIR/summary-$run.json"
   if [ ! -f "$summary" ]; then
     die "no summary for $run in $OUT_DIR — is that a run id? (crowdsim history)" 2
@@ -1903,8 +2188,11 @@ PY
 cmd_compare() {
   local a="${POSITIONAL[0]:-}" b="${POSITIONAL[1]:-}"
   if [ -z "$a" ] || [ -z "$b" ]; then
-    die "compare needs two run ids: crowdsim compare <run-a> <run-b> (see crowdsim history)" 2
+    die "compare needs two run ids: crowdsim compare <run-a|latest|previous> <run-b> (see crowdsim history)" 2
   fi
+  # Resolved BEFORE anything else, and every refusal compare already has still applies to the result: a
+  # resolved id is checked for a matching pool, profile and generator_ok exactly like a typed one.
+  a="$(resolve_run_id "$a")"; b="$(resolve_run_id "$b")"
   local rc=0
   python3 - "$OUT_DIR" "$a" "$b" "${COMPARE_JSON:-0}" <<'PY' || rc=$?
 import json, os, sys

@@ -4,6 +4,57 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.25.0] — 2026-09-05
+
+Three of the five items of milestone v1.10.0, which is about the tool being usable rather than the tool
+being right. None of these changes what a run measures; all three are things somebody had to work around
+every single day.
+
+### Added
+- **`crowdsim <subcommand> --help`** ([#55](https://github.com/HiWay-Media/crowdsim/issues/55)). `load`
+  has twenty flags, and finding one of them meant reading the synopsis of twelve other subcommands first:
+  every subcommand answered `--help` with the same seventy lines. Now each one answers for itself, with
+  its own synopsis, its own flags and one copy-pasteable example, and exits **0** — asking for help is not
+  a usage error.
+
+  It stays **one source**. The per-subcommand text lives in the same comment header the global help comes
+  from, in `#@ <name>` blocks below a marker where `crowdsim --help` stops; `usage()` and
+  `subcommand_usage()` both extract by structure. Two sources would disagree once, and a help page that
+  contradicts the tool is worse than a long one. `tests/cli/help.bats` asserts that **every flag the
+  argument parser accepts appears in at least one block**, so a flag added and never documented fails the
+  suite instead of shipping invisible.
+- **Shell completion for bash and zsh** ([#56](https://github.com/HiWay-Media/crowdsim/issues/56)), in
+  `completions/`, installed as documented in [docs/install.md](docs/install.md#optional-shell-completion)
+  and shipped in the image at `/crowdsim/completions/`. Subcommands, the flags of the subcommand actually
+  being typed, `--profile` against `$CROWDSIM_PROFILES`, and run ids against `$CROWDSIM_OUT/history.tsv`.
+
+  Two properties are deliberate. It **reads the driver's own comment header** for subcommands and flags
+  rather than carrying a copy — a copy is stale by the next release, and then quietly hides the flag
+  somebody just added. And it **never runs crowdsim**: reading a file is free, while a completion that
+  shells out to this tool is a completion that can generate load from a keystroke.
+  `--i-know-this-breaks-production` completes like any other flag; hiding it would make nobody safer, it
+  would only make the gate look like a secret instead of a decision somebody takes.
+- **`latest` and `previous`, wherever a run id is accepted**
+  ([#57](https://github.com/HiWay-Media/crowdsim/issues/57)). `crowdsim report latest` used to answer *no
+  summary for latest*, so reporting on the run that just finished meant reading its id out of `history`
+  and retyping sixteen characters — which is also how the wrong run gets reported: `20260901T123654Z` and
+  `20260901T123645Z` are one glance apart. One resolver, used by `report`, `compare` and
+  `report --compare`, so `crowdsim compare previous latest` works and keeps every refusal `compare`
+  already has.
+
+  **The resolution is always printed** — `ℹ️  latest → 20260901T121500Z` — on stderr, so it cannot land in
+  a redirected report. A command that silently picks a run is how a result gets attributed to the wrong
+  experiment. And **`latest` skips nothing**: the newest run resolves even when it is a discard
+  (`generator_ok: false`) and is reported as the discard it is, because quietly stepping back to the
+  previous run would hand over a valid-looking result for a run nobody asked about. No runs at all, or
+  `previous` with only one, exits 2 and names `crowdsim history`.
+
+### Changed
+- `crowdsim --help` no longer opens with a blank line, and stops at the per-subcommand marker rather than
+  growing by every block added below it.
+- `tests/image/smoke.sh` asserts that `crowdsim load --help` answers inside the image and that the
+  completions are there: in a container there is no README next to you and no man page.
+
 ## [1.24.0] — 2026-09-05
 
 **A run was green and measured nothing, and a test suite that could have caught it was failing thirteen

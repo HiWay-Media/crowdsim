@@ -24,6 +24,56 @@ crowdsim serve                                            # the GUI, on loopback
 crowdsim --version      # crowdsim 1.13.2 — including inside the image, where nothing else can say
 ```
 
+## Asking about one subcommand
+
+`crowdsim --help` is the synopsis of everything. `crowdsim <subcommand> --help` is that subcommand's own
+synopsis, its own flags and one copy-pasteable example — and it exits **0**, because asking for help is
+not a usage error:
+
+```bash
+crowdsim load --help        # twenty flags, without reading the other twelve subcommands first
+crowdsim report --help
+crowdsim cache-ab --help
+```
+
+Both come from the **same comment header** in `bin/crowdsim`, extracted by structure: the global help stops
+at a marker line, and each subcommand's text is the block below it. Two sources would disagree once, and a
+help page that contradicts the tool is worse than a long one. `tests/cli/help.bats` asserts that every flag
+the argument parser accepts appears in at least one block, so a flag added and never documented fails the
+suite rather than shipping invisible.
+
+That is also why the [shell completions](install.md#optional-shell-completion) can read the header instead
+of carrying their own copy of the flag list.
+
+## `latest` and `previous`
+
+Anywhere a run id is accepted — `report`, `compare`, `report --compare` — `latest` and `previous` resolve
+to one, through a single resolver:
+
+```bash
+crowdsim report latest
+crowdsim compare previous latest
+crowdsim report latest --compare previous --html
+```
+
+**The resolution is always printed**, on stderr so it never lands in a redirected report:
+
+```
+  ℹ️  latest → 20260901T121500Z
+```
+
+A convenience that silently picks a run is how a result gets attributed to the wrong experiment — and
+`20260901T123654Z` and `20260901T123645Z` are one glance apart, which is the other half of why retyping
+them by hand was the problem.
+
+**`latest` skips nothing.** The newest run resolves even when it is a discard (`generator_ok: false`), and
+is then reported as the discard it is. Quietly stepping back to the previous run would hand over a
+valid-looking result for a run nobody asked about.
+
+With no runs at all, or `previous` when there is only one, it exits **2** and names `crowdsim history`.
+Every refusal `compare` already has still applies to a resolved id: matching pool, matching profile, and a
+generator that held the rate.
+
 `--version` (and `-V`) answers the question that gets asked while something is going wrong. Inside the image
 the answer is baked in at build time, because there is no `package.json` there to read: without it the CLI
 had no answer and the GUI reported `null`, so the only source was whatever somebody typed into `docker run`

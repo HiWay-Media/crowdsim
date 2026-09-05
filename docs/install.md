@@ -73,6 +73,40 @@ make test              # 32 unit + 50 GUI + 68 CLI, generating no load whatsoeve
 `npm install` is not needed to run a load test. It buys exactly two things: `crowdsim serve` and `make
 test`.
 
+### Optional: shell completion
+
+Twelve subcommands, forty flags, and run ids that are sixteen-character UTC timestamps. Both files read
+the `crowdsim` script's own comment header for the subcommand and flag lists, so they cannot go stale —
+and neither of them ever *runs* crowdsim: a completion that shells out to this tool is a completion that
+can generate load from a keystroke. Run ids come from `$CROWDSIM_OUT/history.tsv`, which is a file read.
+
+**bash** — source it, or install it where bash-completion looks:
+
+```bash
+source completions/crowdsim.bash                                   # this shell only
+sudo cp completions/crowdsim.bash /usr/share/bash-completion/completions/crowdsim   # every shell
+```
+
+**zsh** — put it on `$fpath` under the name `_crowdsim`:
+
+```bash
+mkdir -p ~/.zsh/completions
+cp completions/crowdsim.zsh ~/.zsh/completions/_crowdsim
+echo 'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit' >> ~/.zshrc
+```
+
+Then `crowdsim load --<TAB>` offers `load`'s own flags, `crowdsim report <TAB>` offers your run ids plus
+`latest` and `previous`, and `--profile <TAB>` offers what is in `$CROWDSIM_PROFILES`.
+`--i-know-this-breaks-production` completes like every other flag: hiding it would make nobody safer, it
+would only make the gate look like a secret instead of a decision somebody takes.
+
+In the container the files are at `/crowdsim/completions/`, so a shell opened in the image gets them too:
+
+```bash
+docker run --rm -it --entrypoint sh ghcr.io/hiway-media/crowdsim:1.25.0 \
+  -c '. /crowdsim/completions/crowdsim.bash; bash'
+```
+
 ## Nomad
 
 `ci/nomad/crowdsim.nomad.hcl` is a parameterized **batch** job on the published image:

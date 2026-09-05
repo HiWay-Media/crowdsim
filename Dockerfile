@@ -79,6 +79,9 @@ COPY bin/crowdsim /usr/local/bin/crowdsim
 COPY k6/ /crowdsim/k6/
 COPY cache-ab/ /crowdsim/cache-ab/
 COPY profiles/example.json /crowdsim/profiles/example.json
+# The completions are read, never executed, by the shell of anybody who opens one in this image —
+# and they read the driver's own comment header for subcommands and flags, so they cannot go stale.
+COPY completions/ /crowdsim/completions/
 # lib/ holds the profile rules, shared by `crowdsim validate`, doctor, load and the GUI. Without it the
 # driver would silently degrade to the structural checks inside the image only — the worst kind of drift,
 # because the same command would validate differently depending on where it ran.
