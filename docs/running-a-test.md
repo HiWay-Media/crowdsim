@@ -26,20 +26,35 @@ prompt either hangs or gets auto-answered. The gates are explicit arguments inst
 4. Expect **20–40 seconds of errors** even with `--touch-and-go`. A 504 needs a *queue*, and a queue needs
    time to build; "just a few seconds" is not a thing.
 
+## Where am I?
+
+The sequence below is nine steps long, and a page cannot know which one you are on. The tool can:
+
+```bash
+crowdsim next
+```
+
+It reports what `out/` already holds, which profiles exist and which are still drafts, and names **the one
+command to run next** — generating no traffic, writing nothing, and changing no profile. Run it whenever
+you lose your place, including on a machine somebody else set up. See [`next`](cli.md#next).
+
+The one thing it will not do is fill anything in: `safety.allow_hosts` and `safety.safe_peak_rps` are the
+two gates above, and it reports them as the decisions they are rather than suggesting a value.
+
 ## The sequence
 
 ```
-doctor → discover → probe → init → dry-run → touch-and-go → the real ramp → compare → report
-  │         │         │       │        │           │              │            │         │
-  │         │         │       │        │           │              │            │         └─ hand it over
-  │         │         │       │        │           │              │            └─ against a previous run
-  │         │         │       │        │           │              └─ the number you will quote
-  │         │         │       │        │           └─ 20-40s: does anything break at all
-  │         │         │       │        └─ what k6 will be told, without sending anything
-  │         │         │       └─ a first profile, drafted from the three steps above (first time only)
-  │         │         └─ does the target answer, and what does each layer say about caching
-  │         └─ a pool of URLs that actually render
-  └─ is this machine able to generate the load at all
+next → discover → probe → init → dry-run → touch-and-go → the real ramp → compare → report
+  │        │        │       │       │            │              │            │         │
+  │        │        │       │       │            │              │            │         └─ hand it over
+  │        │        │       │       │            │              │            └─ against a previous run
+  │        │        │       │       │            │              └─ the number you will quote
+  │        │        │       │       │            └─ 20-40s: does anything break at all
+  │        │        │       │       └─ what k6 will be told, without sending anything
+  │        │        │       └─ a first profile, drafted from the three steps above (first time only)
+  │        │        └─ does the target answer, and what does each layer say about caching
+  │        └─ a pool of URLs that actually render
+  └─ where you are, and what to run — `doctor` for what this machine is missing
 ```
 
 The first time through, `init` sits in the middle of that line rather than at the start: writing a profile is

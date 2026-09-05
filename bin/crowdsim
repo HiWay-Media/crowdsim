@@ -30,6 +30,8 @@
 #   weights     count YOUR access log into the class mix: the one input this tool demands and used to
 #               refuse to help measure. Reads a file or stdin, writes nothing (needs node)
 #   init        draft a first profile from what probe/discover/record already measured (safety left blank)
+#   next        where you are: what has been measured, which profiles are still drafts, and the one
+#               command to run next. Generates nothing, writes nothing, decides nothing for you
 #   record      turn a browser HAR export into a journey file for --shape journey (needs node)
 #   validate    check a profile against every rule at once, without generating anything (needs node)
 #   serve       the GUI: same gates, same output directory, on http://127.0.0.1:8787 (needs node)
@@ -48,6 +50,7 @@
 #                     [--top 10] [--json]     ·  or:  … | crowdsim weights - --profile <f.json>
 #   crowdsim compare  <run-a> <run-b> [--json]
 #   crowdsim init     [--out <profile.json>] [--access-log <access.log>]
+#   crowdsim next
 #   crowdsim report   <run-id> [--compare <run-id>] [--out <file.md>]
 #                     [--html]   the same run as a self-contained page with charts (needs node)
 #   crowdsim record   <file.har> [--out <journey.json>] [--origin <url>] [--rsc-query _rsc] [--force]
@@ -182,13 +185,26 @@
 #     crowdsim cache-ab --profile profiles/example.json --third legs/narrow-fix.conf.template
 #
 #@ history
-#   crowdsim history
+#   crowdsim history [--last N] [--target <host>] [--profile <name>] [--cols a,b,c] [--json]
 #
 #   One line per run from out/history.tsv, so the knee can be watched over time rather than
 #   reconstructed. Reads the file the driver writes; it never re-runs anything.
 #
+#   The default view is eight columns, not fourteen, and always keeps the run id, the knee and
+#   whether the generator held the rate. A run that did not (generator_ok: false) is marked in
+#   the margin, because a discard that reads like a result is worse than no row at all.
+#
+#     --last <n>        the n newest runs
+#     --target <host>   only runs against this base_url (substring match on the host)
+#     --profile <name>  only runs of this profile
+#     --cols a,b,c      exactly these columns, by their names in history.tsv
+#     --json            the same records the GUI's own history endpoint returns
+#
+#   A filtered or truncated view says so on its last line, with the total. A subset of runs that
+#   looks like all of them is the same class of mistake as a p95 for a rate that never happened.
+#
 #   Example:
-#     crowdsim history
+#     crowdsim history --last 10 --profile my-site
 #
 #@ compare
 #   crowdsim compare <run-a> <run-b> [--json]
@@ -251,6 +267,20 @@
 #
 #   Example:
 #     crowdsim init --out my-site.json --access-log /var/log/nginx/access.log
+#
+#@ next
+#   crowdsim next
+#
+#   Where you are. What out/ already holds from probe, discover and record; which profiles exist
+#   and which of them are still drafts; and the ONE command to run next, as text to copy.
+#
+#   It generates no traffic, writes nothing, and never edits a profile. It also fills nothing in:
+#   `safety.allow_hosts` and `safety.safe_peak_rps` are left empty by `init` on purpose, and this
+#   command reports them as the two decisions they are rather than suggesting a value. There is no
+#   wizard and no prompt — this tool has no interactive confirmations, by design.
+#
+#   Example:
+#     crowdsim next
 #
 #@ record
 #   crowdsim record <file.har> [--out <journey.json>] [--origin <url>] [--rsc-query _rsc] [--force]
@@ -404,6 +434,8 @@ while [ $# -gt 0 ]; do
     --origin) RECORD_ORIGIN="$2"; shift 2;;
     --format) LOG_FORMAT="$2"; shift 2;;
     --top) LOG_TOP="$2"; shift 2;;
+    --last) HISTORY_LAST="$2"; shift 2;;
+    --cols) HISTORY_COLS="$2"; shift 2;;
     --access-log) ACCESS_LOG="$2"; shift 2;;
     --rsc-query) RSC_QUERY_OVERRIDE="$2"; shift 2;;
     --force) FORCE_OVERWRITE=1; shift;;
@@ -1507,21 +1539,152 @@ print('\t'.join(str(f(v)) for v in [
 PY
 }
 
+# ─────────────────────────────── history: a wall of numbers, made readable ───────────────────────────
+# This subcommand's entire job is to let somebody see whether the knee moves over time, and it printed all
+# fourteen columns of every run ever recorded — which after a few dozen runs is a wall that wraps, and the
+# knee is somewhere inside it. It took no arguments at all: `--last 5` was `unknown option`.
+#
+# The data was already header-keyed, which is what makes this a formatting problem and not a schema one.
+# Two rules that are not formatting:
+#
+#  · **a filtered or truncated view says so, with the total.** A subset of runs that looks like all of
+#    them is the same class of mistake as a p95 quoted for a rate that never happened.
+#  · **a run with generator_ok: false is marked in the margin**, not merely carried in a column somebody
+#    has to know to read. It is a discard, and a discard that reads like a result is worse than no row.
+#
+# Still python3 and still no node: `column(1)` is not in busybox, and neither is anything else clever.
 cmd_history() {
   if [ ! -f "$HISTORY_F" ]; then say "no runs yet ($HISTORY_F)"; return 0; fi
-  # Aligned in python3, not with column(1): column comes from util-linux and busybox does not have it, so
-  # inside the published image this subcommand used to fail with 127 — the one command whose entire job is
-  # to print a file. python3 is already a hard runtime dependency; column never was.
-  python3 - "$HISTORY_F" <<'PY'
-import sys
-rows = [l.rstrip('\n').split('\t') for l in open(sys.argv[1], encoding='utf-8') if l.strip()]
-if not rows:
+  python3 - "$HISTORY_F" "${HISTORY_LAST:-}" "${TARGET:-}" "${PROFILE_F:-}" "${HISTORY_COLS:-}" \
+           "${COMPARE_JSON:-0}" <<'PY'
+import json, sys
+
+path, last, target, profile, cols, as_json = sys.argv[1:7]
+as_json = as_json == '1'
+
+lines = [l.rstrip('\n') for l in open(path, encoding='utf-8') if l.strip()]
+if not lines:
     raise SystemExit(0)
-width = max(len(r) for r in rows)
-rows = [r + [''] * (width - len(r)) for r in rows]
-pads = [max(len(r[i]) for r in rows) for i in range(width)]
-for r in rows:
-    print('  '.join(c.ljust(pads[i]) for i, c in enumerate(r)).rstrip())
+header = lines[0].split('\t')
+
+# Header-keyed on purpose: rows written before a column existed keep working, and a missing cell is
+# EMPTY rather than 0 — a knee of 0 req/s is a claim, and "this run predates the knee" is not.
+records = []
+for line in lines[1:]:
+    cells = line.split('\t')
+    if len(cells) < 3:
+        continue
+    records.append({header[i]: (cells[i] if i < len(cells) else '') for i in range(len(header))})
+
+total = len(records)
+records.reverse()  # newest first, the way anybody reads this
+
+def host_of(url):
+    u = (url or '').split('//', 1)[-1]
+    return u.split('/', 1)[0]
+
+filtered = False
+if target:
+    records = [r for r in records if target in host_of(r.get('base_url', ''))]
+    filtered = True
+if profile:
+    records = [r for r in records if r.get('profile', '') == profile]
+    filtered = True
+
+truncated = False
+if last:
+    try:
+        n = int(last)
+    except ValueError:
+        print("--last takes a number of runs", file=sys.stderr)
+        raise SystemExit(2)
+    if n < 1:
+        print("--last takes a number of runs, 1 or more", file=sys.stderr)
+        raise SystemExit(2)
+    if len(records) > n:
+        truncated = True
+    records = records[:n]
+
+def num(v):
+    if v is None or v == '':
+        return None
+    try:
+        f = float(v)
+    except ValueError:
+        return v
+    return int(f) if f == int(f) else f
+
+def boolean(v):
+    if v in ('True', 'true'):
+        return True
+    if v in ('False', 'false'):
+        return False
+    return None
+
+if as_json:
+    # The SAME record shape the GUI's history endpoint returns (gui/server/lib/history.js). Two shapes
+    # would mean the page and the terminal disagreeing about what a run was, while somebody decides
+    # something. tests/gui/ asserts the two against one fixture.
+    out = [{
+        'run_id': r.get('run_id'),
+        'profile': r.get('profile') or None,
+        'base_url': r.get('base_url') or None,
+        'shape': r.get('shape') or None,
+        'peak': num(r.get('peak')),
+        'aborted': boolean(r.get('aborted')),
+        'requests': num(r.get('reqs')),
+        'rps': num(r.get('rps')),
+        'failed': num(r.get('failed')),
+        'p95': num(r.get('p95')),
+        'e504': num(r.get('e504')),
+        'generator_ok': boolean(r.get('gen_ok')),
+        'knee_clean': num(r.get('knee_clean')),
+        'knee_crossed': num(r.get('knee_crossed')),
+    } for r in records]
+    print(json.dumps(out, indent=1))
+    raise SystemExit(0)
+
+DEFAULT = ['run_id', 'profile', 'shape', 'peak', 'rps', 'p95', 'failed', 'knee_clean', 'knee_crossed']
+if cols:
+    want = [c.strip() for c in cols.split(',') if c.strip()]
+    unknown = [c for c in want if c not in header]
+    if unknown:
+        print("no such column(s) in %s: %s" % (path, ', '.join(unknown)), file=sys.stderr)
+        print("available: %s" % ' '.join(header), file=sys.stderr)
+        raise SystemExit(2)
+    # run_id and gen_ok are never dropped: a row nobody can identify, or a discard nobody can see, is
+    # not a shorter table — it is a different and more confident one.
+    want = ['run_id'] + [c for c in want if c != 'run_id']
+else:
+    want = [c for c in DEFAULT if c in header]
+
+if not records:
+    print("  no runs match (of %d in %s)" % (total, path))
+    raise SystemExit(0)
+
+rows = [want] + [[r.get(c, '') for c in want] for r in records]
+# The margin: a discard is marked where the eye already is, not in a column at the far right.
+marks = ['  '] + [('⛔' if boolean(r.get('gen_ok')) is False else '  ') for r in records]
+pads = [max(len(str(row[i])) for row in rows) for i in range(len(want))]
+for mark, row in zip(marks, rows):
+    print(('%s ' % mark) + '  '.join(str(c).ljust(pads[i]) for i, c in enumerate(row)).rstrip())
+
+discards = sum(1 for r in records if boolean(r.get('gen_ok')) is False)
+notes = []
+if truncated or filtered:
+    notes.append("showing %d of %d runs" % (len(records), total))
+if truncated:
+    notes.append("--last %s" % last)
+if target:
+    notes.append("target ~ %s" % target)
+if profile:
+    notes.append("profile %s" % profile)
+if notes:
+    print("  " + ' · '.join(notes))
+if discards:
+    print("  ⛔ %d run(s) here are discards: the generator did not hold the requested rate, so their"
+          % discards)
+    print("     numbers describe the generator. Not comparable, not quotable.")
 PY
 }
 
@@ -2458,6 +2621,170 @@ PY
 # A HAR export is that recording. The judgements it takes (drop third-party hosts, strip per-request cache
 # busters but keep build hashes, do not record failures) live in lib/har.mjs with unit tests, because each of
 # them is a way to end up measuring something other than your site.
+# ─────────────────────────── next: which of the eight steps you are on ───────────────────────────────
+# Getting from a clean checkout to a run is doctor → discover → probe → init → edit the TODOs and the two
+# deliberately empty safety keys → validate → load. Every one of those is documented and every one works.
+# What was missing was any answer to *where am I*: doctor reports on the machine and stops, init writes a
+# draft and stops, and the only thing that knew a profile was still a draft was validate — which you had
+# to run to find out.
+#
+# This is the step where the tool loses people, and it is also the one step where guessing on their behalf
+# is not allowed. The empty allow_hosts and the empty safe_peak_rps are the two gates. They are reported
+# as decisions, with what they mean, and the next step this command names for them is *you decide these* —
+# never a suggested value. No prompts, no wizard, no -y: a guided setup is exactly where an interactive
+# confirmation would get added by accident, and this tool has none on purpose.
+cmd_next() {
+  local profiles_dir="${CROWDSIM_PROFILES:-$PWD/profiles}"
+  python3 - "$OUT_DIR" "$profiles_dir" "$PWD" <<'PY'
+import glob, json, os, sys
+
+out_dir, profiles_dir, cwd = sys.argv[1:4]
+
+def newest(prefix):
+    files = sorted(glob.glob(os.path.join(out_dir, prefix + '-*.json')))
+    return files[-1] if files else None
+
+def run_id_of(path):
+    return os.path.basename(path).rsplit('.', 1)[0].split('-', 1)[1]
+
+print("▶ where you are")
+print()
+
+# ── what has been measured ──
+print("  Measured so far (%s)" % out_dir)
+artefacts = {}
+for kind, what in (('probe', 'reachability, page weight, cache layers'),
+                   ('discover', 'a pool of URLs that actually render'),
+                   ('summary', 'a completed load run')):
+    f = newest(kind)
+    artefacts[kind] = f
+    if f:
+        extra = ''
+        try:
+            d = json.load(open(f, encoding='utf-8'))
+            extra = d.get('base_url') or d.get('target') or ''
+        except Exception:
+            pass
+        print("    ✅ %-9s %s  %s" % (kind, run_id_of(f), extra))
+    else:
+        print("    ·  %-9s nothing yet — %s" % (kind, what))
+journeys = sorted(glob.glob(os.path.join(cwd, '**', '*journey*.json'), recursive=True))[:1]
+print("    %s journey   %s" % ('✅' if journeys else '· ',
+                               journeys[0] if journeys else 'nothing recorded (only needed for --shape journey)'))
+print()
+
+# ── the profiles ──
+def inspect(path):
+    """Draft or ready — and never rewritten. The two safety keys are read, reported, and left alone."""
+    try:
+        d = json.load(open(path, encoding='utf-8'))
+    except Exception as e:
+        return {'unreadable': str(e)}
+    safety = d.get('safety') or {}
+    todos = 0
+    def walk(v):
+        nonlocal todos
+        if isinstance(v, str) and 'TODO' in v:
+            todos += 1
+        elif isinstance(v, dict):
+            for x in v.values():
+                walk(x)
+        elif isinstance(v, list):
+            for x in v:
+                walk(x)
+    walk(d)
+    return {
+        'todos': todos,
+        'allow_hosts': list(safety.get('allow_hosts') or []),
+        'safe_peak_rps': safety.get('safe_peak_rps'),
+        'classes': len(d.get('classes') or []),
+    }
+
+candidates = sorted(glob.glob(os.path.join(profiles_dir, '*.json')))
+for extra in (os.path.join(cwd, 'profile.json'),):
+    if os.path.isfile(extra) and extra not in candidates:
+        candidates.append(extra)
+
+print("  Profiles (%s)" % profiles_dir)
+ready, drafts = [], []
+if not candidates:
+    print("    ·  none yet")
+for path in candidates:
+    info = inspect(path)
+    name = os.path.relpath(path, cwd)
+    if 'unreadable' in info:
+        print("    ⛔ %s  is not readable JSON: %s" % (name, info['unreadable']))
+        continue
+    missing = []
+    if not info['allow_hosts']:
+        missing.append('safety.allow_hosts')
+    if not info['safe_peak_rps']:
+        missing.append('safety.safe_peak_rps')
+    if info['todos']:
+        missing.append('%d TODO value(s)' % info['todos'])
+    if missing:
+        drafts.append((name, info, missing))
+        print("    ⚠️  %s  draft: %s" % (name, ', '.join(missing)))
+    else:
+        ready.append((name, info))
+        print("    ✅ %s  %d classes, allowlist and safe peak set" % (name, info['classes']))
+print()
+
+# ── the one next command ──
+print("  Next")
+if not candidates:
+    print("    You need a profile to point anything at. Start from the example, with your own base_url:")
+    print()
+    print("      cp profiles/example.json my-site.json")
+    print()
+    print("    Then run `crowdsim next` again: it will tell you what to measure first.")
+elif drafts:
+    name, info, missing = drafts[0]
+    if not info['allow_hosts'] or not info['safe_peak_rps']:
+        print("    %s is a draft, and the two things it is missing are not things this tool" % name)
+        print("    gets to decide:")
+        print()
+        if not info['allow_hosts']:
+            print("      safety.allow_hosts    which hosts this tool may generate load against. There is no")
+            print("                            default anywhere — without it every run exits 3.")
+        if not info['safe_peak_rps']:
+            print("      safety.safe_peak_rps  the rate above which a run needs")
+            print("                            --i-know-this-breaks-production on the command line, every time.")
+        print()
+        print("    Edit %s, then:" % name)
+        print()
+        print("      crowdsim validate %s" % name)
+    else:
+        print("    %s still has %d TODO value(s) — the class weights, most likely." % (name, info['todos']))
+        print("    Measure them from your own edge log instead of guessing:")
+        print()
+        print("      crowdsim weights /var/log/nginx/access.log --profile %s" % name)
+elif not artefacts['discover'] and ready:
+    print("    You have a usable profile and nothing measured against it yet. A pool of URLs that")
+    print("    actually render, first — 404s do not load the app tier:")
+    print()
+    print("      crowdsim discover --profile %s --verify" % ready[0][0])
+elif not artefacts['probe'] and ready:
+    print("    A preflight before any load: what answers, how big a page is, which caches are in front")
+    print("    of it — and, if the profile has an authed class, whether its endpoint needs the token.")
+    print()
+    print("      crowdsim probe --profile %s" % ready[0][0])
+elif ready:
+    name = ready[0][0]
+    print("    Everything this tool needs is in place. Validate once, then climb:")
+    print()
+    print("      crowdsim validate %s" % name)
+    print("      crowdsim load --profile %s --peak 60 --warmup 30s" % name)
+    print()
+    print("    Read the result with `crowdsim report latest`, and `crowdsim history` to see whether")
+    print("    the knee moves.")
+else:
+    print("    Nothing here is ready to run. `crowdsim doctor` says what is missing on this machine.")
+print()
+print("  This command generated no traffic, wrote nothing and changed no profile.")
+PY
+}
+
 cmd_record() {
   local har="${POSITIONAL[0]:-}"
   if [ -z "$har" ]; then
@@ -2724,6 +3051,7 @@ case "$CMD" in
   report)   cmd_report;;
   weights)  cmd_weights;;
   init)     cmd_init;;
+  next)     cmd_next;;
   record)   cmd_record;;
   validate) cmd_validate;;
   serve)    cmd_serve;;

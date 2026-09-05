@@ -4,6 +4,53 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.26.0] — 2026-09-05
+
+Milestone v1.10.0, closed. The two remaining items are both about a command that knew the answer and made
+you work for it.
+
+### Added
+- **`crowdsim next` — where you are, and the one command to run next**
+  ([#59](https://github.com/HiWay-Media/crowdsim/issues/59)). Getting from a clean checkout to a run is
+  `doctor` → `discover` → `probe` → `init` → editing the `TODO`s and the two deliberately empty safety
+  keys → `validate` → `load`. Every one of those is documented and every one works; what was missing was
+  any answer to *where am I*. `doctor` reports on the machine and stops, `init` writes a draft and stops,
+  and the only thing that knew a profile was still a draft was `validate` — which you had to run to find
+  out.
+
+  It reports what `out/` holds from `probe`, `discover` and a completed run, which profiles exist and
+  which are still drafts, and names the single next command as text to copy. It **generates no traffic,
+  writes nothing and never edits a profile**, which is what makes it safe to run blind on a machine
+  somebody else set up.
+
+  And it **fills nothing in**. `safety.allow_hosts` and `safety.safe_peak_rps` are the two gates: it
+  reports them as the decisions they are, with what each one means, and the next step it names is *you
+  decide these* — never a suggested value. No prompt, no wizard, no `-y`. A guided setup is exactly where
+  an interactive confirmation would get added by accident, and this tool has none on purpose.
+- **`history` takes arguments** ([#58](https://github.com/HiWay-Media/crowdsim/issues/58)):
+  `--last N`, `--target <host>`, `--profile <name>`, `--cols a,b,c`, `--json`. It used to accept nothing
+  at all — `--last 5` was `unknown option` — and printed all fourteen columns of every run ever recorded,
+  which after a few dozen runs is a wall that wraps around the one thing it exists to show: whether the
+  knee moves.
+
+  The default view is eight columns and always keeps the run id and the knee. **A run whose generator did
+  not hold the rate is marked in the margin**, not carried in a column at the far right that somebody has
+  to know to read: it is a discard, and a discard that reads like a result is worse than no row at all.
+  **A filtered or truncated view says so on its last line, with the total** — `showing 2 of 3 runs ·
+  --last 2` — because a subset of runs that looks like all of them is the same class of mistake as a p95
+  quoted for a rate that never happened.
+
+  `--json` emits the **same record shape** `gui/server/lib/history.js` produces, and
+  `tests/gui/history-shape.test.js` runs the driver and the GUI module against one fixture and compares
+  them field by field. Two shapes would mean the page and the terminal disagreeing about what a run was,
+  while somebody is deciding something. The parser stays header-keyed, so a row written before a column
+  existed still prints, with an empty cell rather than a `0` — a knee of 0 req/s is a claim about the
+  system, and *this run predates the knee* is not the same statement.
+
+### Changed
+- `docs/running-a-test.md` opens on **where am I** rather than on a nine-step list a reader has to keep
+  their place in, and `docs/index.md` §Start here leads with `next`.
+
 ## [1.25.0] — 2026-09-05
 
 Three of the five items of milestone v1.10.0, which is about the tool being usable rather than the tool

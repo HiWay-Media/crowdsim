@@ -140,12 +140,13 @@ setup() { crowdsim_setup; }
 @test "the history columns line up, so a long run id does not shift the row" {
   mkdir -p "$CROWDSIM_OUT"
   # the peak values are chosen not to occur inside the run ids, so index() finds the column, not a digit
-  printf 'run_id\tpeak\n20260805T090000Z\t77\nshort\t488\n' > "$CROWDSIM_OUT/history.tsv"
+  printf 'run_id\tprofile\tpeak\n20260805T090000Z\tp\t77\nshort\tp\t488\n' > "$CROWDSIM_OUT/history.tsv"
   run "$CROWDSIM" history
   [ "$status" -eq 0 ]
-  # the second column starts at the same offset on both rows
+  # the second column starts at the same offset on both rows. Since 1.26.0 every row carries a
+  # two-character margin (where a discard is marked), so the anchor is the run id, not the line start.
   a="$(echo "$output" | awk '/20260805T090000Z/ {print index($0, "77")}')"
-  b="$(echo "$output" | awk '/^short/ {print index($0, "488")}')"
+  b="$(echo "$output" | awk '/ short / {print index($0, "488")}')"
   [ -n "$a" ] && [ "$a" = "$b" ]
 }
 

@@ -28,8 +28,12 @@ caching would actually buy you — instead of estimating it from logs after the 
 
 ## Start here
 
+**On a machine that already has crowdsim: `crowdsim next`.** It says what has been measured, which
+profiles are still drafts, and the single command to run next — generating nothing and changing nothing.
+
 | If you want to… | Read |
 |---|---|
+| find out where you are, mid-setup | [`next`](cli.md#next) |
 | see it working in three commands | [Install](install.md) → Docker |
 | understand what it does that `hey`/`vegeta`/`wrk` do not | [Architecture](architecture.md) |
 | know why it exists, and what it refuses to do | [`INTENT.md`](../INTENT.md) |

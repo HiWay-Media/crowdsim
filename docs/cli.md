@@ -4,13 +4,14 @@
 `bin/crowdsim`, whose comment header is also its `--help`.
 
 ```bash
+crowdsim next                                             # where you are, and the one command to run next
 crowdsim doctor                                          # what is missing on this machine
 crowdsim discover --profile p.json --limit 400            # build a URL pool from the sitemap
 crowdsim probe    --profile p.json --target edge          # reachability + cache headers hop by hop
 crowdsim load     --profile p.json --target edge --peak 60
 crowdsim cache-ab --profile p.json --ttl 10               # two proxy legs, one origin
 crowdsim validate p.json                                  # every rule at once, before anything runs
-crowdsim history                                          # one line per run: does the knee move?
+crowdsim history --last 10                                # one line per run: does the knee move?
 crowdsim compare <run-a> <run-b>                          # the delta, or a refusal if they differ
 crowdsim record  session.har                              # a browser HAR export → a journey file
 crowdsim weights access.log --profile p.json              # the class mix, counted on your own log
@@ -654,14 +655,100 @@ picture behind two different experiments. The markdown report embeds the compari
 
 ### `history`
 
-Prints `out/history.tsv` as a table: one line per run. What it is for is watching whether the knee moves
-after a change — not for reading a single run, which is what the summary is for.
+```bash
+crowdsim history [--last N] [--target <host>] [--profile <name>] [--cols a,b,c] [--json]
+```
 
-The last two columns are the knee each run measured (`knee_clean`, `knee_crossed`), and they are **empty**
-rather than `0` when a run could not support one — see
-[the knee](reading-results.md#5-the-knee-named-or-refused). Aligned in python3, not with `column(1)`: that
-comes from util-linux, busybox does not have it, and this subcommand used to exit 127 inside the published
-image.
+`out/history.tsv` as a table: one line per run. What it is for is watching whether the knee moves after a
+change — not for reading a single run, which is what the summary is for.
+
+The default view is **eight columns, not fourteen**, and always keeps the run id and the knee. A run whose
+generator did not hold the rate is marked **in the margin**:
+
+```
+   run_id            profile  shape  peak  rps   p95   failed  knee_clean  knee_crossed
+⛔ 20260901T121500Z  site-a   mix    80    20.0  300   0.002
+   20260901T111500Z  site-b   mix    60    55.1  5100  0.06    40          50
+   20260901T101500Z  site-a   mix    40    39.8  210   0.001   30          40
+```
+
+A discard carried in a column at the far right is a discard nobody reads, and a discard that reads like a
+result is worse than no row at all.
+
+| Flag | What it does |
+|---|---|
+| `--last <n>` | the n newest runs |
+| `--target <host>` | only runs whose `base_url` host contains this |
+| `--profile <name>` | only runs of this profile |
+| `--cols a,b,c` | exactly these columns, named as they are in `history.tsv`. `run_id` is never dropped |
+| `--json` | the same records the GUI's history endpoint returns |
+
+**A filtered or truncated view says so, on its last line, with the total** — `showing 2 of 3 runs · --last
+2`. A subset of runs that looks like all of them is the same class of mistake as a p95 quoted for a rate
+that never happened.
+
+The parser stays **header-keyed**, so rows written before a column existed keep working and a missing cell
+prints empty rather than `0`. The knee columns (`knee_clean`, `knee_crossed`) are empty rather than `0`
+whenever a run could not support one — see [the knee](reading-results.md#5-the-knee-named-or-refused). A
+knee of 0 req/s is a claim about the system; *this run predates the knee* is not the same statement.
+
+`--json` emits **the same record shape** `gui/server/lib/history.js` produces, and
+`tests/gui/history-shape.test.js` runs both against one fixture and compares them field by field. Two
+shapes would mean the page and the terminal disagreeing about what a run was, while somebody is deciding
+something.
+
+Aligned in python3, not with `column(1)`: that comes from util-linux, busybox does not have it, and this
+subcommand used to exit 127 inside the published image.
+
+### `next`
+
+```bash
+crowdsim next
+```
+
+Where you are. What `out/` already holds from `probe`, `discover` and a completed run; which profiles
+exist and which of them are still drafts; and **the one command to run next**, as text to copy.
+
+```
+▶ where you are
+
+  Measured so far (/work/out)
+    ·  probe     nothing yet — reachability, page weight, cache layers
+    ·  discover  nothing yet — a pool of URLs that actually render
+    ·  summary   nothing yet — a completed load run
+
+  Profiles (/work/profiles)
+    ⚠️  profiles/site.json  draft: safety.allow_hosts, safety.safe_peak_rps
+
+  Next
+    profiles/site.json is a draft, and the two things it is missing are not things this tool
+    gets to decide:
+
+      safety.allow_hosts    which hosts this tool may generate load against. There is no
+                            default anywhere — without it every run exits 3.
+      safety.safe_peak_rps  the rate above which a run needs
+                            --i-know-this-breaks-production on the command line, every time.
+
+    Edit profiles/site.json, then:
+
+      crowdsim validate profiles/site.json
+
+  This command generated no traffic, wrote nothing and changed no profile.
+```
+
+Getting from a clean checkout to a run is `doctor` → `discover` → `probe` → `init` → editing the `TODO`s
+and the two deliberately empty safety keys → `validate` → `load`. Every one of those is documented and
+every one works; what was missing was any answer to *where am I*. `doctor` reports on the machine and
+stops, `init` writes a draft and stops, and the only thing that knew a profile was still a draft was
+`validate` — which you had to run to find out.
+
+**It fills nothing in.** `safety.allow_hosts` and `safety.safe_peak_rps` are the two gates, and the next
+step this command names for them is *you decide these* — never a suggested value. There is no wizard, no
+prompt and no `-y`: a guided setup is exactly where an interactive confirmation would get added by
+accident, and this tool has none on purpose (see [Safety](../README.md#safety)).
+
+It generates no traffic, writes nothing, and never edits a profile — which is what makes it safe to run
+blind, on a machine you have just walked up to.
 
 ### `serve`
 

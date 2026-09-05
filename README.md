@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.25.0        # or :1.25, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.26.0        # or :1.26, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.25.0 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.26.0 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.25.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.26.0 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -125,6 +125,7 @@ duration go in the dispatch call, and the profile is fetched at dispatch time fr
 ## Use
 
 ```bash
+crowdsim next                                             # where you are, and the one command to run next
 crowdsim doctor                                          # what is missing on this machine
 crowdsim doctor --bench                                   # what this machine can generate (loopback)
 crowdsim discover --profile p.json --limit 400 --verify    # a URL pool, minus what does not render
@@ -132,7 +133,7 @@ crowdsim probe    --profile p.json --target edge          # reachability, cache 
 crowdsim load     --profile p.json --target edge --peak 60
 crowdsim validate p.json                                  # every rule at once, before anything runs
 crowdsim record  session.har                              # a browser HAR export → a journey file
-crowdsim history                                          # one line per run, with the knee each measured
+crowdsim history --last 10                                # one line per run, with the knee each measured
 crowdsim compare previous latest                          # the delta, or a refusal if they differ
 crowdsim weights access.log --profile p.json               # the class mix, counted on your own edge log
 crowdsim init                                             # a first profile, drafted from what was measured
