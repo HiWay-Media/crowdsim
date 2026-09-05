@@ -1,0 +1,82 @@
+{
+ "name": "e2e-auth-no-token",
+ "_comment": "The token endpoint answers 200 with no usable token. The run must COUNT that (cs_auth_fail, `no token:`) rather than let the class quietly send nothing.",
+ "targets": {
+  "default": "local",
+  "list": {
+   "local": {
+    "base_url": "http://127.0.0.1:18080"
+   }
+  }
+ },
+ "safety": {
+  "allow_hosts": [
+   "127.0.0.1"
+  ],
+  "safe_peak_rps": 200
+ },
+ "slo": {
+  "max_p95_ms": 5000,
+  "max_failed_rate": 0.5
+ },
+ "brake_class": "html",
+ "cache_headers": [
+  {
+   "label": "proxy",
+   "header": "X-Proxy-Cache",
+   "hit": "HIT"
+  }
+ ],
+ "auth": {
+  "token_url": "http://127.0.0.1:18080/auth/token-empty",
+  "mode": "form",
+  "token_path": "data.access_token",
+  "refresh_path": "data.refresh_token",
+  "logout": false
+ },
+ "pools": {
+  "pages": [
+   "/",
+   "/news"
+  ],
+  "api": [
+   "/api/me"
+  ]
+ },
+ "classes": [
+  {
+   "name": "html",
+   "kind": "plain",
+   "pool": "pages",
+   "weight": 60
+  },
+  {
+   "name": "login",
+   "kind": "login",
+   "weight": 20,
+   "max_p95_ms": 3000
+  },
+  {
+   "name": "authed_api",
+   "kind": "authed",
+   "pool": "api",
+   "weight": 15,
+   "max_p95_ms": 3000
+  },
+  {
+   "name": "signup",
+   "kind": "signup",
+   "weight": 5,
+   "max_p95_ms": 3000,
+   "signup": {
+    "url": "/auth/signup",
+    "email_pattern": "crowdsim+{tag}@example.test",
+    "body": {
+     "email": "{email}",
+     "password": "throwaway-not-a-real-secret",
+     "name": "e2e {tag}"
+    }
+   }
+  }
+ ]
+}

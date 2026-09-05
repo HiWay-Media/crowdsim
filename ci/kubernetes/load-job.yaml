@@ -79,7 +79,7 @@ spec:
       containers:
         - name: crowdsim
           # Pinned, never :latest — see README.
-          image: ghcr.io/hiway-media/crowdsim:1.26.0
+          image: ghcr.io/hiway-media/crowdsim:1.27.0
           imagePullPolicy: IfNotPresent
 
           # The gates behave exactly as they do on a command line. There is no allowlist default anywhere,

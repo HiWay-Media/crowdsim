@@ -381,13 +381,19 @@ export function validateAuth(profile, env) {
   // summary rather than reported as broken — the same invisibility that made a zero-account credentials
   // file look like a working run. `probe` checks the other half (that the URLs actually require the
   // token); this half needs no target and so is refused here, at init.
-  const pools = (profile && profile.pools) || {};
+  //
+  // Membership is only claimed when the pools were actually handed over. The generator calls this with a
+  // SUBSET of the profile — `{ auth, classes }`, because --skip-classes has already been applied — and
+  // reading `profile.pools` off that subset made every authenticated run die in k6's init context
+  // claiming a pool was missing from a profile that had it. Not being shown the pools is not evidence
+  // that a pool is absent.
+  const pools = profile && profile.pools;
   for (const c of classes) {
     if (!c || c.kind !== 'authed') continue;
     const name = c.name || '(unnamed)';
     if (!c.pool) {
       errs.push(`the authed class \`${name}\` names no pool, so it has no URL to request`);
-    } else if (!Array.isArray(pools[c.pool]) || !pools[c.pool].length) {
+    } else if (pools && (!Array.isArray(pools[c.pool]) || !pools[c.pool].length)) {
       errs.push(`the authed class \`${name}\` draws from the pool "${c.pool}", which is `
         + `${Array.isArray(pools[c.pool]) ? 'empty' : 'not in this profile'}`);
     }

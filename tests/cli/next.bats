@@ -118,3 +118,20 @@ JSON
   [[ "$output" == *"crowdsim next"* ]]
   [[ "$output" == *"decides nothing"* || "$output" == *"fills nothing in"* ]]
 }
+
+@test "it does not walk the whole working directory looking for a journey" {
+  # A recursive `**` glob over a checkout with node_modules in it takes minutes, and this command's whole
+  # value is that it answers immediately — it was doing exactly that, and it turned `make test` from one
+  # minute into thirty. So: two conventional places, one level deep, and a journey buried somewhere else
+  # is simply not found.
+  ready_profile
+  mkdir -p "$WORK/deep/a/b/c" "$WORK/journeys"
+  echo '{}' > "$WORK/deep/a/b/c/browse-journey.json"
+  echo '{}' > "$WORK/journeys/browse.json"
+
+  cd "$WORK"
+  run "$CROWDSIM" next
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"journeys/browse.json"* ]]
+  [[ "$output" != *"deep/a/b/c"* ]]
+}

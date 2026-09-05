@@ -42,7 +42,7 @@ thirteen went unexamined for as long as they did.
 | `tests/cli/` | `bats` (**bash ≥ 4**) | `bin/crowdsim` against a stub k6: both gates, exit codes, profile and target resolution, empty pools, `--touch-and-go`, history, and `scripts/new-release.sh` | no |
 | `tests/gui/` | `node --test` | the API over a real socket: traversal, the override confirmation, one-run-at-a-time, refusals passed through, read-only mounts | no |
 | `tests/ui/` | `node --test` | the front end's decisions and its safety wording, as plain modules from `gui/ui/src/lib` | no |
-| `tests/e2e/` | shell + docker | three legs, one per conclusion the tool produces: a fast nginx (chain works, healthy target does *not* abort), a slow single-worker origin (**the brake does abort**, early, generator still holding), and an unreachable target (**connectivity, not capacity**). Skips (exit 0) without docker or k6 | **yes**, on loopback |
+| `tests/e2e/` | shell + docker | four legs: a fast nginx (chain works, healthy target does *not* abort), a slow single-worker origin (**the brake does abort**, early, generator still holding), an unreachable target (**connectivity, not capacity**), and **the authenticated classes end to end** — a real sign-in against a local token endpoint, a bearer read the target refuses without the header, and a registration that posts. Skips (exit 0) without docker or k6 | **yes**, on loopback |
 | `tests/image/` | shell + docker | the published artefact: driver finds generator, GUI starts, gates survived the build, no allowlist default, **and that the image under test was built from this working tree** | no |
 | `tests/k8s/` | shell + kubectl | `ci/kubernetes` rendered client-side (no cluster): never-retried Job, cluster-enforced deadline, one GUI replica, ClusterIP only, no CronJob, no committed override, pinned image | no |
 
@@ -171,7 +171,7 @@ between testing the artefact and testing that the artefact boots.
 `summary-unreachable.json` are asserted to be reported as *invalid* and as *unreachable* — never as capacity
 numbers. A load test's failure mode is a plausible wrong answer, so the tests aim at exactly that.
 
-### Why the e2e suite has three legs
+### Why the e2e suite has four legs
 
 A brake is only worth having if it fires. `brakeTripped()` is unit-tested against synthetic metric trees,
 and the fast leg asserts the *opposite* case — that a healthy target does not abort a run. Neither would
@@ -198,6 +198,36 @@ absent from the global DNS (RFC 6761), but a resolver that hijacks NXDOMAIN woul
 address — and the test would then generate load against them. The profile's `bypass` removes DNS from the
 question and sends the connection to a loopback port where nothing listens. `example.com` is somebody's real
 infrastructure and is never a target.
+
+
+### Why the authenticated classes have their own leg
+
+Every bug the authenticated classes have shipped lived in the **wiring**, where a unit test cannot go, and
+every one was found by running them rather than by the suite:
+
+- **the login could not read its own token at all.** The run sets `discardResponseBodies`, so `res.body`
+  is `undefined`, and in k6's runtime `JSON.parse(undefined)` returns `undefined` instead of throwing:
+  reading `.error` off it threw a `TypeError` on *every* iteration of both authenticated classes. Three
+  releases of unit tests never saw it, because a unit test calls `parseToken` with a string.
+- **a credentials file that parsed to zero accounts** made the login class send nothing and vanish from
+  every table — the run closed clean with the whole authenticated half never having happened.
+- **nothing counted 401/403**, so a class being refused printed zero errors.
+
+And a fourth, found by writing this leg: 1.24.0 added a check that an `authed` class names a pool it can
+draw from, and the generator calls `validateAuth` with a *subset* of the profile (`{ auth, classes }`,
+because `--skip-classes` has already been applied) — so it read `profile.pools` off an object that has
+none and **every authenticated run died in k6's init context** claiming a pool was missing from a profile
+that had it. The unit tests passed, the CLI suite passed, and the profile was valid.
+
+Leg 4 is the smallest thing that exercises all of it: four nginx endpoints (a token endpoint with a
+**wrapped** body — `data.access_token`, the shape that broke — one that answers 200 with no usable token,
+a read that 401s without the header, and one that does not), plus a registration endpoint. It asserts
+that the token was read, that the bearer reached the API (`denied: 0`), that a login handing back no token
+is *counted* (`cs_auth_fail`, `no token:`), that the signup manifest names the accounts and carries no
+password, and that a credentials file with only a header refuses the run.
+
+The credentials it uses are **generated into `.out/` at run time**, never committed: a file that looks
+like a credential list has no place in a public repository, even a fake one.
 
 ### Writing a test
 

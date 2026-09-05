@@ -98,7 +98,10 @@ if (ALLOC.note) console.warn('crowdsim: ' + ALLOC.note);
 // Everything here reads CLASS_DEFS, not PROFILE.classes: --skip-classes has already been applied, so a
 // run that skips the login class needs no credentials and must not fail looking for them.
 const AUTH = PROFILE.auth || {};
-const AUTH_ERRORS = validateAuth({ auth: PROFILE.auth, classes: CLASS_DEFS }, __ENV);
+// pools travel with it: without them the pool-membership check has nothing to check against, and
+// silence there would be indistinguishable from a verified pool.
+const AUTH_ERRORS = validateAuth({ auth: PROFILE.auth, classes: CLASS_DEFS, pools: PROFILE.pools },
+                                 __ENV);
 if (AUTH_ERRORS.length) {
   throw new Error('profile: ' + AUTH_ERRORS.join('; '));
 }

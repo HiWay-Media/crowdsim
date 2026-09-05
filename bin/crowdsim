@@ -2668,7 +2668,12 @@ for kind, what in (('probe', 'reachability, page weight, cache layers'),
         print("    ✅ %-9s %s  %s" % (kind, run_id_of(f), extra))
     else:
         print("    ·  %-9s nothing yet — %s" % (kind, what))
-journeys = sorted(glob.glob(os.path.join(cwd, '**', '*journey*.json'), recursive=True))[:1]
+# NOT a recursive glob: `**` over a working directory with node_modules in it takes minutes, and this
+# command's whole value is that it answers immediately. Two conventional places, one level deep.
+journeys = []
+for pattern in ('journeys/*.json', '*journey*.json'):
+    journeys.extend(sorted(glob.glob(os.path.join(cwd, pattern))))
+journeys = journeys[:1]
 print("    %s journey   %s" % ('✅' if journeys else '· ',
                                journeys[0] if journeys else 'nothing recorded (only needed for --shape journey)'))
 print()

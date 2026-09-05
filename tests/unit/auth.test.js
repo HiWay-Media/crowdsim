@@ -5,6 +5,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import {
   parseUsersCsv, pickUser, usersNeeded, tokenRequest, logoutRequest, shouldLogout,
   parseToken, bearer, needsRelogin, expiryFrom, signupPayload, validateAuth, usesAuth,
@@ -396,4 +397,36 @@ test('a well-formed authed class is not refused', () => {
     classes: [{ name: 'login', kind: 'login' }, { name: 'authed_api', kind: 'authed', pool: 'api' }],
   }, {});
   assert.deepEqual(errs, []);
+});
+
+test('membership is only claimed when the pools were actually handed over', () => {
+  // The generator calls validateAuth with a SUBSET of the profile — `{ auth, classes }`, because
+  // --skip-classes has already been applied to the class list. 1.24.0 added the pool-membership check
+  // and read `profile.pools` from that subset, where it does not exist: every authenticated run died in
+  // k6's init context with "draws from the pool \"api\", which is not in this profile", and the profile
+  // was fine. It shipped because no test and no suite ever ran an authenticated class against a target.
+  //
+  // Two things fix it: the call site passes pools (k6/live-event.js), and this function does not claim a
+  // pool is missing when it was never shown any pools.
+  const errs = validateAuth({
+    auth: { token_url: 'https://x.test/token', mode: 'form', users_csv: '/tmp/u.csv' },
+    classes: [{ name: 'login', kind: 'login' }, { name: 'authed_api', kind: 'authed', pool: 'api' }],
+  }, {});
+  assert.deepEqual(errs, [], errs.join(' | '));
+
+  // A class that names NO pool is still wrong on paper, pools or no pools.
+  const errs2 = validateAuth({
+    auth: { token_url: 'https://x.test/token', mode: 'form', users_csv: '/tmp/u.csv' },
+    classes: [{ name: 'login', kind: 'login' }, { name: 'authed_api', kind: 'authed' }],
+  }, {});
+  assert.ok(errs2.some((e) => /names no pool/.test(e)), errs2.join(' | '));
+});
+
+test('the generator hands validateAuth its pools', () => {
+  // Asserted against the source, because the failure above was invisible from every other angle: the
+  // unit tests passed, the CLI suite passed, and the profile was valid.
+  const src = readFileSync(new URL('../../k6/live-event.js', import.meta.url), 'utf8');
+  const call = src.match(/validateAuth\(\{[^}]*\}/);
+  assert.ok(call, 'validateAuth is no longer called with an object literal — check this test');
+  assert.match(call[0], /pools/, 'live-event.js calls validateAuth without pools: every authed run dies');
 });

@@ -4,6 +4,60 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.27.0] — 2026-09-05
+
+Milestone v1.13.0, closed — and the leg it adds found a regression this project had shipped two releases
+earlier, which is the entire argument for it.
+
+**Every authenticated run has been broken since 1.24.0.** That release added a check that an `authed`
+class names a pool it can draw from. The generator calls `validateAuth` with a *subset* of the profile —
+`{ auth, classes }`, because `--skip-classes` has already been applied to the class list — so the new
+check read `profile.pools` off an object that has none, concluded the pool was missing, and threw in k6's
+init context: `the authed class \`authed_api\` draws from the pool "api", which is not in this profile`.
+The profile was fine. The unit tests passed. The CLI suite passed. Nothing in this repository ran an
+authenticated class against anything.
+
+### Added
+- **An end-to-end leg for the authenticated classes**
+  ([#68](https://github.com/HiWay-Media/crowdsim/issues/68)). Every bug these classes have shipped lived
+  in the **wiring**, and all of them were found by running them rather than by the suite: the login that
+  could not read its own token (`discardResponseBodies` makes `res.body` undefined, and in k6's runtime
+  `JSON.parse(undefined)` returns undefined instead of throwing, so reading `.error` off it threw a
+  `TypeError` on every iteration of both authenticated classes — three releases, invisible, because a
+  unit test calls `parseToken` with a string); a credentials file that parsed to zero accounts, which
+  made the login class send nothing and vanish from every table; and 401/403 going uncounted, so a class
+  being refused printed zero errors.
+
+  `tests/e2e/run.sh` now drives a real sign-in against four nginx endpoints — a token endpoint with a
+  **wrapped** body (`data.access_token`, the shape that broke), one that answers 200 with no usable
+  token, a read that 401s without the header, and one that does not — plus a registration endpoint that
+  the `signup` class posts to. It asserts that the token was read, that the bearer reached the API
+  (`denied: 0`), that a login handing back no token is *counted* (`cs_auth_fail`, reported as
+  `no token:`), that the signup manifest names the accounts and carries **no password**, that a
+  credentials file with only a header refuses the run, and that `probe` verifies the premise against an
+  endpoint that requires the token and refuses one that does not.
+
+  Each of the three original bugs fails this leg if reintroduced — checked by reintroducing one:
+  disabling the login's `responseType` produces `the login could not read a token out of
+  data.access_token (39 failures)`.
+
+  The credentials it uses are **generated into `.out/` at run time**, never committed: a file that looks
+  like a credential list has no place in a public repository, even a fake one.
+
+### Fixed
+- **Authenticated runs work again.** `k6/live-event.js` passes `pools` to `validateAuth`, and
+  `validateAuth` no longer claims a pool is missing when it was never shown any pools — not being handed
+  the pools is not evidence that a pool is absent. Two unit tests hold both ends, one of them asserting
+  the call site in the generator's source, because that failure was invisible from every other angle.
+- **`crowdsim next` answered in minutes on a real checkout.** It looked for a journey file with a
+  recursive `**` glob over the working directory, which on a repository with `node_modules` in it walks
+  everything — `make test` went from one minute to thirty. It now looks in two conventional places, one
+  level deep, and a test asserts it does not descend.
+
+### Changed
+- `docs/development.md`: the e2e suite has four legs, and the new section says why the authenticated ones
+  needed their own.
+
 ## [1.26.0] — 2026-09-05
 
 Milestone v1.10.0, closed. The two remaining items are both about a command that knew the answer and made

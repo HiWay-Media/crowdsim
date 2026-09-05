@@ -554,5 +554,173 @@ PY2
   fi
 fi
 
+# ─────────────────────────── leg 4: the authenticated classes, end to end ───────────────────────────
+# WHY THIS LEG EXISTS — the authenticated classes shipped in 1.20.0 and were audited in 1.20.4, and both
+# times the bugs that mattered were found by RUNNING them, not by the suite:
+#
+#   · the login could not read its own token at all. The run sets discardResponseBodies, so res.body is
+#     undefined, and in k6's runtime JSON.parse(undefined) returns undefined instead of throwing: reading
+#     .error off it threw a TypeError on EVERY iteration of both authenticated classes. Three releases of
+#     unit tests never saw it, because a unit test calls parseToken with a string.
+#   · a credentials file that parsed to zero accounts made the login class send nothing and vanish from
+#     every table.
+#   · nothing counted 401/403, so a class being refused printed zero errors.
+#
+# All three live in the wiring, which is why they are asserted here against a real socket. Each one fails
+# this leg if it is reintroduced.
+say ""
+say "▶ leg 4 — the authenticated classes"
+
+AUTH_PROFILE="$HERE/profile-auth.json"
+AUTH_NOTOKEN_PROFILE="$HERE/profile-auth-notoken.json"
+AUTH_PUBLIC_PROFILE="$HERE/profile-auth-public.json"
+
+# Credentials are GENERATED here, never committed: a file that looks like a credential list has no place
+# in a public repository, even a fake one. These accounts exist nowhere — the token endpoint is an nginx
+# `return 200` that does not read them.
+USERS_CSV="$OUT/e2e-users.csv"
+printf 'username,password\n' > "$USERS_CSV"
+for i in 1 2 3 4; do printf 'e2e-user-%s,not-a-real-secret\n' "$i" >> "$USERS_CSV"; done
+
+# ── the premise guard, against a real target ──
+# probe sends one request per authed class WITHOUT the token. Against /api/me that must verify; against
+# /api/public-whoami it must refuse, because a class pointed there measures an anonymous GET.
+if CROWDSIM_OUT="$OUT" CROWDSIM_AUTH_USERS="$USERS_CSV" \
+     "$ROOT/bin/crowdsim" probe --profile "$AUTH_PROFILE" > "$OUT/probe-auth.txt" 2>&1; then
+  grep -q "refused the request without a token (401)" "$OUT/probe-auth.txt" \
+    || die "probe did not verify the premise of the authed class against an endpoint that requires the token"
+  ok "probe verified that /api/me refuses an anonymous request"
+else
+  cat "$OUT/probe-auth.txt"; die "probe failed against the authenticated profile"
+fi
+
+set +e
+CROWDSIM_OUT="$OUT" CROWDSIM_AUTH_USERS="$USERS_CSV" \
+  "$ROOT/bin/crowdsim" probe --profile "$AUTH_PUBLIC_PROFILE" > "$OUT/probe-auth-public.txt" 2>&1
+rc=$?
+set -e
+[ "$rc" = "4" ] || die "probe exited $rc against an authed class pointed at a public endpoint (expected 4)"
+grep -q "does not require the token" "$OUT/probe-auth-public.txt" \
+  || die "probe refused, but did not say that the endpoint does not require the token"
+ok "probe refused an authed class pointed at a public endpoint (exit 4)"
+
+# ── a credentials file with only a header refuses the run at init ──
+# A class that sends nothing is ABSENT from every table rather than reported as broken: the run closes
+# clean with the whole authenticated half never having happened. That must be a refusal, not a shape.
+EMPTY_CSV="$OUT/e2e-users-empty.csv"
+printf 'username,password\n' > "$EMPTY_CSV"
+set +e
+CROWDSIM_OUT="$OUT" CROWDSIM_AUTH_USERS="$EMPTY_CSV" \
+  "$ROOT/bin/crowdsim" load --profile "$AUTH_PROFILE" --peak 8 --start 8 --steps 1 \
+  --step-dur 5s --hold 0s > "$OUT/load-auth-empty.txt" 2>&1
+rc=$?
+set -e
+[ "$rc" != "0" ] || die "a credentials file with no accounts produced a clean run: the login class sent nothing"
+grep -qi "credential\|no accounts\|users" "$OUT/load-auth-empty.txt" \
+  || die "the run was refused but did not name the credentials file as the reason"
+ok "a credentials file with only a header refuses the run (exit $rc), instead of a class that vanishes"
+
+# ── the real authenticated run ──
+say "  … running the authenticated mix (this one signs in for real)"
+CROWDSIM_OUT="$OUT" CROWDSIM_AUTH_USERS="$USERS_CSV" \
+  "$ROOT/bin/crowdsim" load --profile "$AUTH_PROFILE" --peak 12 --start 12 --steps 1 \
+  --step-dur 10s --hold 0s > "$OUT/load-auth.txt" 2>&1 \
+  || die "the authenticated run failed: $(tail -5 "$OUT/load-auth.txt")"
+
+AUTH_RUN="$(grep -oE '\b[0-9]{8}T[0-9]{6}Z\b' "$OUT/load-auth.txt" | tail -1)"
+[ -n "$AUTH_RUN" ] || die "the authenticated run produced no run id"
+AUTH_SUMMARY="$OUT/summary-$AUTH_RUN.json"
+[ -f "$AUTH_SUMMARY" ] || die "no summary for the authenticated run"
+
+python3 - "$AUTH_SUMMARY" <<'PY3'
+import json, sys
+d = json.load(open(sys.argv[1], encoding='utf-8'))
+fail = []
+def check(cond, msg):
+    if not cond:
+        fail.append(msg)
+
+classes = d.get('per_class') or {}
+
+# Every authenticated class must have SENT something. A class with no requests is invisible: steps.js
+# skips it and the per-class table filters it out, so "no errors" and "never happened" look identical.
+for name in ('login', 'authed_api', 'signup'):
+    c = classes.get(name)
+    check(c is not None, f"the {name} class is absent from the summary: it sent nothing")
+    if c:
+        check((c.get('reqs') or 0) > 0, f"the {name} class made 0 requests")
+
+# The token was read out of a WRAPPED body. If parseToken had broken again, every login would count as a
+# failure to obtain one.
+check((d.get('authFail') or 0) == 0,
+      f"the login could not read a token out of data.access_token ({d.get('authFail')} failures)")
+
+# And the authenticated read was accepted, which it can only be if the header actually went out: the
+# endpoint answers 401 without it.
+check((d.get('denied') or 0) == 0,
+      f"{d.get('denied')} authenticated requests were refused 401/403 — the token did not reach the API")
+a = classes.get('authed_api') or {}
+check((a.get('failed') or 0) == 0, f"the authed class failed {a.get('failed')} of its requests")
+
+sig = d.get('signup') or {}
+check(sig.get('email_glob'), "the summary does not say which addresses the signup class created")
+check((sig.get('created') or 0) > 0, "the signup class created nothing")
+
+if fail:
+    print("\n".join("  ❌ " + f for f in fail))
+    sys.exit(1)
+print(f"  ✅ login read its token out of data.access_token, authed_api was accepted "
+      f"({(classes.get('authed_api') or {}).get('reqs')} requests), signup posted "
+      f"{(classes.get('signup') or {}).get('reqs')} registrations")
+PY3
+
+# The registration manifest: real accounts, recorded, and never a password.
+MANIFEST="$OUT/signups-$AUTH_RUN.json"
+[ -f "$MANIFEST" ] || die "a signup class ran and left no manifest: nothing records what it created"
+python3 - "$MANIFEST" "$AUTH_PROFILE" <<'PY3'
+import json, sys
+d = json.load(open(sys.argv[1], encoding='utf-8'))
+assert d.get('run_id'), "the manifest does not say which run created these accounts"
+assert d.get('email_glob'), "the manifest has no glob: the list can be shorter than the count"
+
+# The value, not the word: the file's own _comment says "No password is recorded here, by design", and an
+# assertion that greps for the word would fail on the sentence promising the opposite of what it checks.
+def keys(o):
+    if isinstance(o, dict):
+        for k, v in o.items():
+            yield k
+            yield from keys(v)
+    elif isinstance(o, list):
+        for v in o:
+            yield from keys(v)
+
+secret = json.loads(open(sys.argv[2], encoding='utf-8').read())
+secret = ((([c for c in secret['classes'] if c.get('kind') == 'signup'] or [{}])[0]
+           .get('signup') or {}).get('body') or {}).get('password')
+assert secret, "the e2e signup profile has no password in its body — this check would prove nothing"
+assert secret not in json.dumps(d), "the signup manifest contains the password it registered with"
+assert 'password' not in list(keys(d)), "the signup manifest has a field called password"
+assert d.get('created'), "the manifest records no accounts"
+print("  ✅ the signup manifest names %d accounts and carries no password" % d['created'])
+PY3
+
+# ── a token endpoint that answers 200 with nothing usable ──
+# The opposite failure: the login "succeeds" and hands back no token. It must be COUNTED.
+CROWDSIM_OUT="$OUT" CROWDSIM_AUTH_USERS="$USERS_CSV" \
+  "$ROOT/bin/crowdsim" load --profile "$AUTH_NOTOKEN_PROFILE" --peak 12 --start 12 --steps 1 \
+  --step-dur 10s --hold 0s > "$OUT/load-auth-notoken.txt" 2>&1 \
+  || die "the no-token run failed outright: $(tail -5 "$OUT/load-auth-notoken.txt")"
+
+grep -q "no token:" "$OUT/load-auth-notoken.txt" \
+  || die "a login that returns no usable token is not reported as \`no token:\` in the panel"
+NOTOKEN_RUN="$(grep -oE '\b[0-9]{8}T[0-9]{6}Z\b' "$OUT/load-auth-notoken.txt" | tail -1)"
+python3 - "$OUT/summary-$NOTOKEN_RUN.json" <<'PY3'
+import json, sys
+d = json.load(open(sys.argv[1], encoding='utf-8'))
+n = d.get('authFail') or 0
+assert n > 0, "a token endpoint that hands back no token produced 0 auth failures"
+print(f"  ✅ a login that answers 200 with no usable token was counted {n} times (cs_auth_fail)")
+PY3
+
 say ""
 ok "end-to-end suite passed"
