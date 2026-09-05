@@ -12,16 +12,27 @@ make image-smoke     # builds, then asserts the image is still the tool with its
 ```
 
 ## The test layout
-### The CLI suite needs bash >= 4, and fails on purpose on a full laptop
+### The CLI suite needs bash >= 4, and is green
 
 `make test-cli` **refuses to run** under bash 3.2, which is what macOS ships: there, a failing `[[ ]]`
 assertion does not fail the test, so the suite would report every test as passing whatever the driver
 printed. `brew install bash bats-core` and the suite runs.
 
-Once it runs, expect failures on a developer machine — **eleven at the time of writing**. Every one is a
-`without <tool>` test: they simulate an environment where k6, node, docker or `column(1)` is missing, and
-on a laptop that has them installed the absence cannot be reproduced. They pass in CI, where the image is
-minimal. Before reading a failure as a regression, check whether its name starts with «without».
+**Any `not ok` is a regression.** There is no expected-failure baseline: on a developer machine with k6,
+node, docker and `column(1)` installed, the suite is green, and so it is in CI.
+
+It used to document a baseline instead — *"expect eleven failures, every one a `without <tool>` test"* —
+and the count was thirteen. Both numbers were wrong in a more interesting way: the `without <tool>` tests
+build a `PATH` of symlinks to everything the driver needs, minus the one tool being removed, and that list
+was copied into four helpers and missing `dirname` in all of them. `bin/crowdsim` calls `dirname` on its
+second line to find its own root, so every one of those tests died at **exit 1** before reaching the check
+it was written for — `without node, validate exits 5` was asserting nothing at all. The remaining two were
+`cache-ab --run`: since 1.20.4 a generator that exits 0 without writing a summary is exit 4, and the stub
+k6 does exactly that. Fixed in 1.24.0; the tool list now lives in one place (`CROWDSIM_TEST_TOOLS`) and
+the helpers are one function, `path_without <tool>`.
+
+A suite whose expected output includes thirteen failures is a suite nobody reads — which is how the
+thirteen went unexamined for as long as they did.
 
 
 

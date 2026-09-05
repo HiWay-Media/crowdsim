@@ -339,11 +339,17 @@ which is why the path is declared rather than inferred. A login that answers wit
 counted as `no token:` in the summary (`cs_auth_fail`) — it is not an HTTP error, and nothing else
 would show it.
 
-**An `authed` class needs an endpoint that actually refuses an anonymous request.** This is worth checking
-with `curl` before the run: an endpoint that answers 200 with the same body and no token proves nothing,
-and the class then measures an anonymous GET wearing an `Authorization` header. `401/403` in the summary
-(`cs_denied`) is the counter that tells you the opposite case — an authenticated class being *refused*
-under load, which is neither a 5xx nor a 404.
+**An `authed` class needs an endpoint that actually refuses an anonymous request.** An endpoint that
+answers 200 with the same body and no token proves nothing: the class then measures an anonymous GET
+wearing an `Authorization` header, and reports it as an authenticated read. Since **1.24.0 `probe` checks
+this for you** — one request per `authed` class, sent without the token, and exit 4 if it succeeds — so
+this is no longer a `curl` you have to remember (see [the CLI reference](cli.md#the-premise-of-an-authed-class)).
+`401/403` in the summary (`cs_denied`) is the counter for the opposite case: an authenticated class being
+*refused* under load, which is neither a 5xx nor a 404.
+
+The class also needs a **pool with URLs in it**. `validate` and `load` refuse an `authed` class that names
+no pool, or an empty one, before anything runs: a class with no URLs sends nothing, and a class that sends
+nothing is *absent* from the summary rather than reported as broken.
 
 **With `mode: "password_grant"` the grant is the OAuth2 password grant** (`Direct Access Grants` in
 Keycloak). If your client only allows

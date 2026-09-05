@@ -377,6 +377,21 @@ export function validateAuth(profile, env) {
   if (kinds.includes('authed') && !kinds.includes('login')) {
     errs.push('an `authed` class needs a `login` class in the same profile: the token comes from there');
   }
+  // A class with no URLs sends nothing, and a class that sends nothing is absent from every table in the
+  // summary rather than reported as broken — the same invisibility that made a zero-account credentials
+  // file look like a working run. `probe` checks the other half (that the URLs actually require the
+  // token); this half needs no target and so is refused here, at init.
+  const pools = (profile && profile.pools) || {};
+  for (const c of classes) {
+    if (!c || c.kind !== 'authed') continue;
+    const name = c.name || '(unnamed)';
+    if (!c.pool) {
+      errs.push(`the authed class \`${name}\` names no pool, so it has no URL to request`);
+    } else if (!Array.isArray(pools[c.pool]) || !pools[c.pool].length) {
+      errs.push(`the authed class \`${name}\` draws from the pool "${c.pool}", which is `
+        + `${Array.isArray(pools[c.pool]) ? 'empty' : 'not in this profile'}`);
+    }
+  }
   if (kinds.includes('signup')) {
     const s = classes.find((c) => c.kind === 'signup') || {};
     if (!s.signup || !s.signup.url) errs.push('the signup class needs signup.url');

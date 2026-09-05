@@ -4,6 +4,66 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.24.0] — 2026-09-05
+
+**A run was green and measured nothing, and a test suite that could have caught it was failing thirteen
+tests on purpose.** Both halves of this release come from the same week: the first authenticated smoke
+against a real target, and the count of failures somebody had to reproduce before trusting the suite.
+
+The `authed` class in that smoke was pointed at `/api/auth/whoami`, which answers **200 with the same body
+and no `Authorization` header at all**. So the class sent an anonymous GET wearing a bearer token and
+reported p50 63 ms as an authenticated read. The login itself was genuinely proven — a real token out of
+`data.access_token`, `no token: 0` over 29 iterations — and nothing in the tool could tell the two apart.
+That is the failure shape this project exists to avoid: a run that completed, clean, and answered a
+question nobody asked. `cs_denied` (1.20.5) does not help, because it counts a class being *refused* under
+load, and here the anonymous request succeeds.
+
+### Added
+- **`probe` verifies the premise of every `authed` class instead of assuming it**
+  ([#67](https://github.com/HiWay-Media/crowdsim/issues/67)). One request per class, sent **without the
+  token**, before any load. A `401`/`403` is the only thing that proves the class measures an
+  authenticated read, and it is stated out loud — *"no warning"* is not evidence:
+
+  ```
+  ── the premise of every authed class (one request, sent without the token) ──
+    ✅ authed_api  /api/me
+       the endpoint refused the request without a token (401)
+       so what this class measures is an authenticated read, not a public one.
+  ```
+
+  A `2xx` is refused with **exit 4** and named: *this endpoint does not require the token*. So is a `404`,
+  which is the older trap (a pool of URLs the target does not serve) and reads differently because the fix
+  is different. A **`3xx` is deliberately not counted either way**: from here a redirect to a login wall
+  and a redirect to a public canonical URL look identical, and choosing between them would be exactly the
+  confident wrong answer the rest of this is written against — it warns, names the ambiguity, and
+  continues. Verdicts in `lib/premise.mjs`, unit tested; the requests are made by the driver with the same
+  TLS and Host flags as the rest of `probe`.
+- **The half that needs no target is refused at validation.** An `authed` class that names no pool, or an
+  empty one, now fails `validate` and `load` before anything runs. A class with no URLs sends nothing —
+  and a class that sends nothing is *absent* from every table in the summary rather than reported as
+  broken, which is the same invisibility that made a zero-account credentials file look like a working run.
+- **`tests/cli/premise.bats`**: six tests against a python3 server on loopback that answers 401 on one path
+  and 200 on another. It is the one CLI test that needs something to answer, because the question is what
+  the *target* says to a request without a token, and a stub cannot have an opinion about that.
+
+### Fixed
+- **The CLI suite is green, and any `not ok` is now a regression**
+  ([#69](https://github.com/HiWay-Media/crowdsim/issues/69)). `docs/development.md` documented an expected
+  baseline of **eleven** failures "by design" on a developer machine; the real count was **thirteen**; and
+  the number was the least of it. The `without <tool>` tests build a `PATH` of symlinks to everything the
+  driver needs minus the one tool being removed — and that list was copied into four helpers, **missing
+  `dirname` in all four**. `bin/crowdsim` calls `dirname` on its second line to find its own root, so
+  every one of those tests died at **exit 1** before reaching the check it was written for: *"without
+  node, validate exits 5"* had been asserting nothing at all for as long as it had existed. The tool list
+  is now one constant (`CROWDSIM_TEST_TOOLS`) and the four helpers are one function, `path_without <tool>`.
+- **The two `cache-ab --run` legs were testing the 1.20.4 exit code, not their own subject.** Since 1.20.4
+  a generator that exits 0 without writing a summary is exit 4 — correctly, a run that never happened is
+  not a result — and the suite's stub k6 does exactly that, so both tests stopped at the first leg. The
+  `cache-ab` stub now leaves a summary behind, which is what a real k6 does.
+
+  A suite whose expected output includes thirteen failures is a suite nobody reads, which is how these
+  went unexamined for three releases. There is no baseline to reproduce any more.
+
 ## [1.23.0] — 2026-09-04
 
 Milestone v1.12.0, closed. **A signup class creates real accounts in a real identity provider, and the tool

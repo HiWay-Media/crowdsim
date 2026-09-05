@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.23.0        # or :1.23, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.24.0        # or :1.24, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.23.0 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.24.0 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.23.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.24.0 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -128,7 +128,7 @@ duration go in the dispatch call, and the profile is fetched at dispatch time fr
 crowdsim doctor                                          # what is missing on this machine
 crowdsim doctor --bench                                   # what this machine can generate (loopback)
 crowdsim discover --profile p.json --limit 400 --verify    # a URL pool, minus what does not render
-crowdsim probe    --profile p.json --target edge          # reachability + cache headers hop by hop
+crowdsim probe    --profile p.json --target edge          # reachability, cache headers, authed premise
 crowdsim load     --profile p.json --target edge --peak 60
 crowdsim validate p.json                                  # every rule at once, before anything runs
 crowdsim record  session.har                              # a browser HAR export → a journey file
@@ -149,6 +149,11 @@ crowdsim load --profile p.json --peak 60 --warmup 30s    # stays under the profi
 crowdsim report <run-id> --out ticket.md                 # what to paste, with what it is worth
 crowdsim report <run-id> --html                          # and the same run drawn, to attach
 ```
+
+If the profile has an `authed` class, `probe` also sends one request per class **without the token** and
+refuses the profile (exit 4) if the endpoint answers 200 anyway: that class would be an anonymous GET
+wearing a bearer token, reported as an authenticated read. It happened — green run, nothing measured — and
+`docs/cli.md` has the whole table of verdicts.
 
 First time, with no profile of your own yet: `probe` and `discover` once against
 [`profiles/example.json`](profiles/example.json) with your `base_url` and allowlist in it, then

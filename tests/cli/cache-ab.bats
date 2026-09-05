@@ -30,6 +30,21 @@ exit 0
 STUB
   chmod +x "$BATS_TEST_TMPDIR/stub/docker"
   export DOCKER_LOG
+
+  # `--run` is the one place in this suite where a leg goes all the way through `load`, and since 1.20.4 a
+  # generator that exits 0 without writing a summary is exit 4 — correctly: a run that never happened is
+  # not a result. The default stub does exactly that, so both `--run` tests failed at the leg rather than
+  # at anything they assert, and the failure was read as environmental for three releases.
+  # This stub therefore leaves a summary behind, which is what a real k6 does.
+  cat > "$BATS_TEST_TMPDIR/stub/k6" <<'STUB'
+#!/usr/bin/env bash
+printf 'STUB-K6 %s\n' "$*"
+for a in "$@"; do case "$a" in SUMMARY_OUT=*) out="${a#SUMMARY_OUT=}";; esac; done
+if [ -n "${out:-}" ]; then cp "$CROWDSIM_TEST_SUMMARY" "$out"; fi
+exit 0
+STUB
+  chmod +x "$BATS_TEST_TMPDIR/stub/k6"
+  export CROWDSIM_TEST_SUMMARY="$FIXTURES/summary-good.json"
   # No CROWDSIM_ALLOW_TARGETS here: minimal.json allowlists its own target, and an env value would OVERRIDE
   # the profile's — refusing the run at the gate before any of this is reached. That is the gate working, and
   # it is asserted on purpose in the last test.

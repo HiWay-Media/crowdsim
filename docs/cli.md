@@ -147,6 +147,58 @@ generator's own classification (`k6/lib/classify.js`), so the two cannot disagre
 Only cache-relevant headers are stored in the JSON. A probe against a real site can come back with
 `Set-Cookie`, and a run archive is not the place for somebody's session.
 
+#### The premise of an `authed` class
+
+If the profile has an `authed` class, `probe` sends **one request per class, without the token**, and says
+what came back. A 401 or a 403 is the only thing that proves the class measures an authenticated read:
+
+```
+── the premise of every authed class (one request, sent without the token) ──
+  ✅ authed_api  /api/me
+     the endpoint refused the request without a token (401)
+     so what this class measures is an authenticated read, not a public one.
+  Every authed class is pointed at an endpoint that requires the token.
+```
+
+An endpoint that answers **200 without the header** is refused, and `probe` exits **4**:
+
+```
+  ⛔ whoami  /api/auth/whoami
+     this endpoint does not require the token (200 without one)
+     this class would send an anonymous GET wearing a bearer token, and report the result as an
+     authenticated read. Point it at a path that answers 401 without a token, or drop the class:
+     the numbers it produces describe the public path.
+```
+
+That is not a hypothetical. The first authenticated smoke against a real target used `/api/auth/whoami`,
+which returns the same body with or without an `Authorization` header: the login was genuinely proven — a
+real token, `no token: 0` over 29 iterations — and the read was an anonymous GET reported as p50 63 ms of
+authenticated traffic. The run was green and measured nothing, which is the exact failure this tool exists
+to avoid. `cs_denied` cannot catch it: that counter is for a class being **refused** under load, and here
+the anonymous request succeeds.
+
+The other answers, and why they are not merged into two:
+
+| Without the token | Verdict | `probe` |
+|---|---|---|
+| **401 / 403** | verified — the premise holds | continues |
+| **2xx** | the endpoint does not require the token | **exits 4** |
+| **404 / 410** | the pool names a path this target does not serve | **exits 4** |
+| **3xx** | unknown: a redirect may be a login wall or a public canonical URL | warns, continues |
+| **5xx, no answer** | unknown: the check itself did not run | warns, continues |
+
+A redirect is deliberately *not* counted as a refusal. From here a 302 to a login page and a 302 to a
+canonical URL that is then served publicly look identical, and picking one would be the confident wrong
+answer the rest of this is written against.
+
+The half that needs no target is checked earlier, by `validate` and by `load` at startup: an `authed`
+class that names no pool, or an empty one, is refused before anything runs. A class with no URLs sends
+nothing — and a class that sends nothing is *absent* from every table in the summary rather than reported
+as broken.
+
+Without `node` the premise cannot be checked (the verdicts live in `lib/premise.mjs`). `probe` says so
+rather than staying quiet, and does not present the class as usable.
+
 ### `load`
 
 The load test. Validates the profile, resolves the target, passes both gates, then runs k6 with one scenario
@@ -631,7 +683,7 @@ They are an API: the Nomad job, CI and the GUI all branch on them.
 | `0` | Executed | Also when the brake tripped — that is an outcome, not an error |
 | `2` | Usage | Unknown flag or subcommand, missing/unparseable profile, unknown target, `--shape journey` without `journey.file` |
 | `3` | A safety gate refused it | No allowlist, host not allowlisted, peak above the ceiling without the override, GUI asked to bind off-loopback without a token |
-| `4` | Nothing usable came out of it | `probe` got ≥400 or no answer; `record` found no page in the HAR; `weights` classified nothing in the log; `init` found no artefacts to assemble — and, since 1.20.4, a `load` whose generator produced **no summary**: a run that never happened is not a success, and until then it warned on a terminal and exited 0 |
+| `4` | Nothing usable came out of it | `probe` got ≥400 or no answer, or found an `authed` class whose endpoint does not require the token (1.24.0) — a class that would measure the public path; `record` found no page in the HAR; `weights` classified nothing in the log; `init` found no artefacts to assemble — and, since 1.20.4, a `load` whose generator produced **no summary**: a run that never happened is not a success, and until then it warned on a terminal and exited 0 |
 | `5` | Missing or broken prerequisite | k6 absent, docker absent for `cache-ab`, node absent for `serve`, `validate`, `record` or `weights` — and, since 1.20.2, a profile validator that crashes instead of reaching a verdict: that is the installation, not the profile, and it used to be reported as exit 2 |
 
 ### `compare`

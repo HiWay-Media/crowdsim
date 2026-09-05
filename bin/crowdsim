@@ -18,7 +18,8 @@
 #   doctor      check the prerequisites on this machine and say what is missing (run this first)
 #   discover    fetch the sitemap and extract a pool of REAL URLs (404s do not load the app tier:
 #               testing non-existent URLs yields a false "it handles this beautifully")
-#   probe       preflight: reachability, a verdict per declared cache layer, weight of one page
+#   probe       preflight: reachability, a verdict per declared cache layer, weight of one page,
+#               and — for every authed class — whether its endpoint really requires the token
 #   load        the load test
 #   cache-ab    A/B a candidate cache config: two local nginx legs against the same origin, one with
 #               the tweak under evaluation and one as-is → measured hit ratio and offload
@@ -700,15 +701,65 @@ PY
 }
 
 # ─────────────────────────────── probe ──────────────────────────────────────────────────────────────
+# ─────────────────── does an authed class actually measure an authenticated read? ───────────────────
+# One request per `authed` class, sent WITHOUT the token, before any load. An endpoint that answers 200
+# without an `Authorization` header turns the whole class into an anonymous GET wearing a bearer token —
+# green, fast, and measuring the public path. That happened on the first authenticated smoke against a
+# real target, and nothing in the tool could tell it apart from a working authenticated read.
+#
+# The verdicts live in lib/premise.mjs, where they are unit tested; the requests are made here, with the
+# same TLS and Host flags as the rest of `probe`, because those flags are the driver's business.
+authed_premise() {
+  local cli="$ROOT/lib/premise-cli.mjs"
+  local plan_f="$OUT_DIR/.premise-plan" obs_f="$OUT_DIR/.premise-obs"
+  local has_authed
+  has_authed="$(python3 -c '
+import json,sys
+try: d=json.load(open(sys.argv[1]))
+except Exception: print(0); raise SystemExit
+print(1 if any((c or {}).get("kind")=="authed" for c in (d.get("classes") or [])) else 0)' \
+    "$RESOLVED" 2>/dev/null || echo 0)"
+  [ "$has_authed" = "1" ] || return 0
+
+  if ! command -v node >/dev/null 2>&1 || [ ! -f "$cli" ]; then
+    say ""
+    warn "this profile has an authed class and the premise could not be checked: that check needs node (18+)."
+    say "     Without it nothing here can tell an authenticated read from an endpoint that ignores the"
+    say "     token and answers 200 anyway — which reads as a fast, green class measuring the public path."
+    return 0
+  fi
+
+  node "$cli" plan "$RESOLVED" > "$plan_f" 2>/dev/null || { rm -f "$plan_f"; return 0; }
+  [ -s "$plan_f" ] || { rm -f "$plan_f"; return 0; }
+  : > "$obs_f"
+  local tag a b st
+  while IFS="$(printf '\t')" read -r tag a b; do
+    case "$tag" in
+      T)  st="$(curl "${curl_opts[@]}" -D /dev/null -o /dev/null -w '%{http_code}' \
+                "$BASE_URL$b" 2>/dev/null || echo 0)"
+          printf 'T\t%s\t%s\t%s\n' "$a" "$b" "${st:-0}" >> "$obs_f";;
+      S)  printf 'S\t%s\t%s\n' "$a" "$b" >> "$obs_f";;
+    esac
+  done < "$plan_f"
+
+  say ""
+  local rc=0
+  node "$cli" render < "$obs_f" || rc=$?
+  if [ "$rc" = "4" ]; then echo 4 > "$OUT_DIR/.premise-rc"; fi
+  rm -f "$plan_f" "$obs_f"
+  return 0
+}
+
 cmd_probe() {
   need_profile; resolve_target; gate_allowlist
   local log="$OUT_DIR/probe-$RUN_ID.log"
   say "▶ preflight on $BASE_URL"
-  local curl_opts=(-sS -o /dev/null --max-time 10 --retry 1 --retry-connrefused
-                   -D "$OUT_DIR/.probe-hdr")
+  curl_opts=(-sS -o /dev/null --max-time 10 --retry 1 --retry-connrefused
+             -D "$OUT_DIR/.probe-hdr")
   if [ "$INSECURE" = "1" ]; then curl_opts+=(-k); fi
   if [ -n "$HOST_HEADER" ]; then curl_opts+=(-H "Host: $HOST_HEADER"); fi
   if [ -n "$BYPASS" ]; then curl_opts+=(--resolve "${BYPASS/=/:443:}"); fi
+  rm -f "$OUT_DIR/.premise-rc"
 
   local first; first="$(python3 -c '
 import json,sys
@@ -810,10 +861,21 @@ if absent:
     print("     profile rather than a cold cache — and a layer that never speaks is reported as unknown,")
     print("     never as a miss, so it cannot quietly drag a hit ratio to zero.")
 PY
+    authed_premise
   } | tee "$log"
   rm -f "$OUT_DIR/.probe-hdr"
   local rc="${code:-0}"
   if [ "$rc" -ge 400 ] 2>/dev/null; then exit 4; fi
+  # An authed class that cannot measure an authenticated read makes the authenticated half of every run
+  # from this profile meaningless, so it is an exit code and not a line somebody may scroll past. 4 is
+  # probe's existing "this profile and this target do not go together".
+  if [ -f "$OUT_DIR/.premise-rc" ]; then
+    rm -f "$OUT_DIR/.premise-rc"
+    say ""
+    say "  ⛔ at least one authed class cannot measure an authenticated read (see above)"
+    ok "probe log: $log"
+    exit 4
+  fi
   say ""
   ok "probe log: $log"
 }

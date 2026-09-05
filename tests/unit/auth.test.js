@@ -363,3 +363,37 @@ test('a signup-only profile needs no credentials: it creates accounts, it does n
   assert.ok(credentialsRefusal([], [{ name: 'signup', kind: 'signup' },
     { name: 'login', kind: 'login' }], 'x.csv'));
 });
+
+// ── the half of #67 that is checkable without a target ───────────────────────────────────────────────
+// `probe` verifies the premise by asking the target. Everything it needs a target for stays there — but a
+// class with no URLs at all is wrong on paper, and a run that starts with it sends nothing for that class
+// and then leaves it out of every table, which is the same invisibility the credentials refusal exists for.
+
+test('an authed class that names no pool is refused before a target is involved', () => {
+  const errs = validateAuth({
+    auth: { token_url: 'https://x.test/token', mode: 'form', users_csv: '/tmp/u.csv' },
+    pools: { api: ['/api/me'] },
+    classes: [{ name: 'login', kind: 'login' }, { name: 'authed_api', kind: 'authed' }],
+  }, {});
+  assert.ok(errs.some((e) => /authed_api/.test(e) && /pool/.test(e)), errs.join(' | '));
+});
+
+test('an authed class whose pool is empty or absent is refused for the same reason', () => {
+  for (const pools of [{ api: [] }, { other: ['/x'] }]) {
+    const errs = validateAuth({
+      auth: { token_url: 'https://x.test/token', mode: 'form', users_csv: '/tmp/u.csv' },
+      pools,
+      classes: [{ name: 'login', kind: 'login' }, { name: 'authed_api', kind: 'authed', pool: 'api' }],
+    }, {});
+    assert.ok(errs.some((e) => /authed_api/.test(e) && /pool/.test(e)), JSON.stringify(pools));
+  }
+});
+
+test('a well-formed authed class is not refused', () => {
+  const errs = validateAuth({
+    auth: { token_url: 'https://x.test/token', mode: 'form', users_csv: '/tmp/u.csv' },
+    pools: { api: ['/api/me'] },
+    classes: [{ name: 'login', kind: 'login' }, { name: 'authed_api', kind: 'authed', pool: 'api' }],
+  }, {});
+  assert.deepEqual(errs, []);
+});

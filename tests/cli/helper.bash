@@ -27,47 +27,42 @@ STUB
   export PATH="$BATS_TEST_TMPDIR/stub:$PATH"
 }
 
-# A PATH with the tools the driver needs and NO k6, to test the "k6 is not installed" path.
+# ── a PATH without one tool ──────────────────────────────────────────────────────────────────────────
+#
 # Built from symlinks rather than by filtering $PATH: on a developer machine k6 usually lives in the same
-# directory as python3 (both from brew), so filtering would remove python3 too and the test would pass
-# for the wrong reason — at the wrong exit code.
-path_without_k6() {
-  local dir="$BATS_TEST_TMPDIR/nok6" tool p
+# directory as python3 (both from brew), and docker is in /usr/local/bin on a Mac but /usr/bin on a Linux
+# runner — filtering either would remove tools the driver needs and the test would pass for the wrong
+# reason, at the wrong exit code.
+#
+# The list below is one list on purpose. It used to be copied into each helper, and each copy was missing
+# `dirname` — which bin/crowdsim calls on its second line to find its own root. Every "without <tool>"
+# test therefore died at exit 1 before reaching the check it was written for, and the thirteen failures
+# were documented as failing by design rather than read as the bug they were.
+CROWDSIM_TEST_TOOLS="bash sh dirname basename python3 curl sed awk tr date mkdir cat grep tee cut wc
+  sort head tail column rm env ln cp mv touch find xargs uname sleep printf id stat"
+
+# path_without <tool> [more tools...] — everything the driver needs except those, plus the stub k6 unless
+# k6 itself is what is being removed.
+path_without() {
+  local dir="$BATS_TEST_TMPDIR/without-$(printf '%s-' "$@")" tool p want
   mkdir -p "$dir"
-  for tool in bash sh python3 curl sed tr date mkdir cat grep tee cut wc column rm env docker; do
+  for tool in $CROWDSIM_TEST_TOOLS node docker k6; do
     p="$(command -v "$tool" 2>/dev/null)" && ln -sf "$p" "$dir/$tool"
   done
-  rm -f "$dir/k6"
+  # the stub, not whatever k6 the developer has: this suite must never be able to generate load
+  ln -sf "$BATS_TEST_TMPDIR/stub/k6" "$dir/k6"
+  for want in "$@"; do rm -f "$dir/$want"; done
   printf '%s' "$dir"
 }
 
-# A PATH with the tools the driver needs and NO docker, to test the "docker is not installed" path.
-# Filtering a directory out of $PATH would not do: docker lives in /usr/local/bin on a developer's Mac
-# but in /usr/bin on a Linux CI runner, alongside everything else the driver needs.
-path_without_docker() {
-  local dir="$BATS_TEST_TMPDIR/nodocker" tool p
-  mkdir -p "$dir"
-  for tool in bash sh python3 curl sed tr date mkdir cat grep tee cut wc column rm env node; do
-    p="$(command -v "$tool" 2>/dev/null)" && ln -sf "$p" "$dir/$tool"
-  done
-  ln -sf "$BATS_TEST_TMPDIR/stub/k6" "$dir/k6"
-  rm -f "$dir/docker"
-  printf '%s' "$dir"
-}
+path_without_k6()     { path_without k6; }
+path_without_docker() { path_without docker; }
+path_without_node()   { path_without node; }
 
-# A PATH with the tools the driver needs and NO node, to test the degraded validation path. Same symlink
-# approach as path_without_k6, and for the same reason: filtering $PATH would take python3 with it.
-path_without_node() {
-  local dir="$BATS_TEST_TMPDIR/nonode" tool p
-  mkdir -p "$dir"
-  for tool in bash sh python3 curl sed tr date mkdir cat grep tee cut wc column rm env k6 docker; do
-    p="$(command -v "$tool" 2>/dev/null)" && ln -sf "$p" "$dir/$tool"
-  done
-  # the stub k6 must still be reachable: this tests missing node, not missing k6
-  ln -sf "$BATS_TEST_TMPDIR/stub/k6" "$dir/k6"
-  rm -f "$dir/node"
-  printf '%s' "$dir"
-}
+# `column` comes from util-linux/bsdmainutils and is absent from busybox, which is what the published
+# image is built on — so `crowdsim history` inside the container was the one subcommand that could not
+# run at all.
+path_without_column() { path_without column; }
 
 # k6 is a stub on PATH for this suite; a test that needs the real one says so and skips otherwise, the way
 # the e2e suite skips without docker. A red run that means "you don't have k6" teaches people to ignore red.
@@ -82,18 +77,4 @@ skip_unless_k6() {
 # The PATH this suite was given, minus the stub directory it prepended.
 path_without_stub() {
   printf '%s' "${PATH#"$BATS_TEST_TMPDIR/stub:"}"
-}
-
-# A PATH with the tools the driver needs and NO `column`. Not a hypothetical: `column` comes from
-# util-linux/bsdmainutils and is absent from busybox, which is what the published image is built on — so
-# `crowdsim history` inside the container was the one subcommand that could not run at all.
-path_without_column() {
-  local dir="$BATS_TEST_TMPDIR/nocolumn" tool p
-  mkdir -p "$dir"
-  for tool in bash sh python3 curl sed tr date mkdir cat grep tee cut wc rm env node docker; do
-    p="$(command -v "$tool" 2>/dev/null)" && ln -sf "$p" "$dir/$tool"
-  done
-  ln -sf "$BATS_TEST_TMPDIR/stub/k6" "$dir/k6"
-  rm -f "$dir/column"
-  printf '%s' "$dir"
 }
