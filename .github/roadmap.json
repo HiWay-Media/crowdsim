@@ -108,6 +108,9 @@
   },
   {
    "title": "v1.16.0"
+  },
+  {
+   "title": "v1.17.0"
   }
  ],
  "issues": [
@@ -1653,6 +1656,141 @@
     "by the version it ran under, and the only way to correct one is to run it again. Worth deciding",
     "deliberately: either recompute derived prose at render time from the facts in the summary, or state in",
     "the docs that a headline is a property of the version that wrote it. Not proposed as part of this fix."
+   ]
+  },
+  {
+   "key": "gui-knee-plot-rate-unlabelled",
+   "title": "The knee plot draws the requested rate and does not say which rate it is drawing",
+   "milestone": "v1.17.0",
+   "labels": [
+    "area:gui",
+    "validity"
+   ],
+   "body": [
+    "**This is the unmet half of [#78](https://github.com/HiWay-Media/crowdsim/issues/78), which was closed with it unmet.** That issue's acceptance said: *`delivery` appears wherever the page shows a rate, as requested → delivered, and the knee plot's axis says which of the two it is drawing.* v1.34.0 delivered the banners and did not touch the plot.",
+    "",
+    "`stepCurve()` maps `r.requested_rps` onto the x-axis and `kneeText()` renders `clean.requested_rps → crossed.requested_rps`. Both rates are in the summary and in every history row since 1.29.0; the plot uses one of them and its axis is unlabelled as to which. On a mix with a fan-out of 1.25 the reader sees a knee at 60 while the target was taking 76 — the same wrong answer 1.29.0 removed from the text, still on the chart.",
+    "",
+    "A chart is worse than a sentence here: a wrong scale does not throw, it produces a convincing picture. `lib/report-html.mjs` says so in its own header, and the report already draws requested against delivered as two series (`rateChart`). The page has no equivalent.",
+    "",
+    "**Done when**",
+    "- The knee plot's axis names the rate it plots, and the label is not a string in the component: it goes in `gui/ui/src/lib/` with the rest of the front end's decisions, like `kneeText` did.",
+    "- `kneeText()` carries both rates, so the badge over the plot reads the way the panel and the report read.",
+    "- A run whose delivered rate was refused (generator-bound, saturated target, no complete step) plots the requested rate and **says that is what it is** — falling back silently to the requested rate wearing the delivered label is the failure `delivery()` already refuses.",
+    "- Tests in `tests/ui/` over the label and over the refusal case; the existing focusable-points assertions keep passing."
+   ]
+  },
+  {
+   "key": "report-html-drift-guard",
+   "title": "`report --html` has the drift the GUI just had, and no guard: it never mentions why the rate was not held",
+   "milestone": "v1.17.0",
+   "labels": [
+    "area:cli",
+    "validity"
+   ],
+   "body": [
+    "Checked against what `buildSummary` produces today, these blocks are rendered nowhere in `lib/report-html.mjs`:",
+    "",
+    "```",
+    "drop_diagnosis  allocation  mix_target  e5xx  e404  denied  authFail  rsc_mode",
+    "```",
+    "",
+    "`drop_diagnosis` is the one that matters. Since 1.32.0 the summary distinguishes a starved generator from a target that could not absorb the rate, and the page still opens with **DISCARD THIS RUN** for both — so the drawn report, the artefact most likely to be attached to a ticket, gives the advice 1.32.0 exists to correct. The error counters are the other half: the page draws p95 per class and never shows that 2.2% of requests were 404s.",
+    "",
+    "v1.34.0 gave the GUI a guard for exactly this — two exhaustive lists and a test that asks `buildSummary` itself — and left the HTML report without one. Six blocks accumulated in the GUI because nothing noticed; there is no reason to expect the report to be different.",
+    "",
+    "**Done when**",
+    "- The page shows `drop_diagnosis` with the verdict's own wording, before the knee, and an invalid run says **which** kind of invalid it is.",
+    "- The error counters appear where a reader looks for them, per class as well as per run.",
+    "- `report-html.mjs` carries the same two exhaustive lists the GUI has, with a reason for each deliberate omission, and a unit test asks `buildSummary` for its keys and fails on a block that belongs to neither.",
+    "- The rule that an invalid run gets no latency chart is unchanged — a diagnosis is not a latency claim, which is why the failure-mode line is already shown on an invalid run.",
+    "- Verified by dropping a block from the list and watching the test name it, the way the GUI guard was."
+   ]
+  },
+  {
+   "key": "failure-mode-chart",
+   "title": "«Concentrated on 2 of 5 classes» is prose everywhere and a chart nowhere",
+   "milestone": "v1.17.0",
+   "labels": [
+    "area:cli",
+    "area:gui"
+   ],
+   "body": [
+    "`classChart()` draws p95 per class against that class's own limit. The status codes are not drawn at all — anywhere — so the single most useful distinction the failure-mode line makes is a sentence the reader has to hold in their head while looking at a chart of something else.",
+    "",
+    "That distinction is the whole finding: the same code on some classes and not others points at a pool or a route, spread evenly it points at the system. It is exactly what a chart is for, and it is the one thing the reader cannot see.",
+    "",
+    "**Done when**",
+    "- A per-class bar of outcomes — 2xx, 4xx, 5xx, 504, 401/403 — beside the existing p95 chart, in `report --html` and on the page, from `per_class.errors` (which exists since 1.29.0).",
+    "- **A class with no requests stays absent, not zero.** A bar of height zero reads as a class that was fine; a class that never ran is a different statement, and this project has been caught by that conversion more than once.",
+    "- The chart is drawn from counts, never from shares recomputed on the fly: `failure_mode.share` and the bars must not be able to disagree.",
+    "- Geometry unit-tested like the rest of `report-html.mjs` — a wrong scale here does not throw, it produces a convincing and false picture.",
+    "- The colours survive being printed to PDF in greyscale, since the report's whole point is that it travels."
+   ]
+  },
+  {
+   "key": "server-series-overlay",
+   "title": "A server-side series is a table, and the reader does the overlay in their head",
+   "milestone": "v1.17.0",
+   "labels": [
+    "area:cli",
+    "validity"
+   ],
+   "body": [
+    "`--server-metrics` (1.31.0) aligns a handed-in series to the run's own steps and reports it as a table of mean and max per step, in `report` and in `out/server-side-<run>.json`. Reading it against latency — which is the entire reason for aligning it — means putting two tables side by side and comparing rows by eye.",
+    "",
+    "Both halves already share an axis: every per-step row carries `start_ms`/`end_ms`, and the run id is the run's start in UTC. The overlay is computable and nothing draws it.",
+    "",
+    "**Done when**",
+    "- The series is drawn on the same time axis as the ramp, in `report --html`: latency and requested/delivered rate on one axis, the series on its own scale, with the step boundaries visible.",
+    "- **It stays a correlation.** The caveat is on the chart, not only in the prose above it, and the drawing must not imply causation by construction — no shared axis that makes two units look like one quantity, no trend line through both.",
+    "- A step with no samples is a **gap**, not a zero: the line breaks. Interpolating across a window nobody recorded would draw data that does not exist.",
+    "- An invalid run gets the series and no latency curve, for the same reason the failure mode is shown there: a counter that rose is not a latency claim.",
+    "- Geometry unit-tested, including the two-scale arithmetic and the gap."
+   ]
+  },
+  {
+   "key": "knee-over-time-page",
+   "title": "«Does the knee move?» is what `history` is for, and it cannot be handed to anybody",
+   "milestone": "v1.17.0",
+   "labels": [
+    "area:cli"
+   ],
+   "body": [
+    "`crowdsim history` exists to answer one question — does the knee move over time — and answers it as a table. The GUI has a plot of it; the CLI has nothing to hand over, and `report --html` draws exactly one run.",
+    "",
+    "So the trend, which is the only claim in this tool that survives the caveat about absolutes being optimistic, is the one thing that cannot be attached to a ticket.",
+    "",
+    "**Done when**",
+    "- A page for a set of runs — the knee per run over time, with the requested and delivered rates told apart, from `history.tsv` alone (it has carried both since 1.29.0).",
+    "- **It refuses what `compare` refuses.** Runs with different profiles, targets, shapes or fan-outs are not the same experiment, so they are not points on one line: either they are separated or the page declines to draw them, using the rules already in `k6/lib/delivery.js` and `compare` rather than a second copy.",
+    "- A discard (`generator_ok: false`) is marked, not plotted as a knee — and a run whose knee was refused is a gap rather than a zero.",
+    "- Same properties as the run report: one self-contained file, no external resources, no scripts, opens offline.",
+    "- Geometry unit-tested; the selection rules tested against the same fixtures `compare` uses."
+   ]
+  },
+  {
+   "key": "compare-drawn",
+   "title": "`compare` is the only honest number this tool produces, and it has no picture",
+   "milestone": "v1.17.0",
+   "labels": [
+    "area:cli"
+   ],
+   "body": [
+    "This tool measures deltas honestly and absolutes optimistically — it says so in its own source — and the delta is the thing worth quoting. `compare` produces it as text or JSON. There is no drawn form, and `report --html` explicitly refuses to draw two runs:",
+    "",
+    "```",
+    "--html reports one run. A delta between two runs is `crowdsim compare`",
+    "```",
+    "",
+    "That refusal is right for the reason it gives: two runs on one pair of axes without `compare`'s refusals is a picture of two different experiments. It is not an argument against drawing them **with** those refusals.",
+    "",
+    "**Done when**",
+    "- `crowdsim compare a b --html` draws both ramps on one pair of axes, and every refusal `compare` already has stops the drawing before it starts — different pool, different profile, different fan-out, a generator that did not hold, a target that never answered.",
+    "- The refusals come from `compare` itself, not from a second implementation: one of them changing must not leave the picture behind.",
+    "- The delta is drawn as a delta, not as two absolute curves the reader subtracts by eye.",
+    "- The caveats that travel with a delta are on the page: same pool, colder than real traffic, and which of the two runs is the baseline.",
+    "- `report --html`'s refusal message is updated to point here instead of implying no drawn comparison exists."
    ]
   }
  ]
