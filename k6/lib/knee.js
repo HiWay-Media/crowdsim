@@ -25,6 +25,21 @@ function refuse(reason, fix) {
 }
 
 /**
+ * A rate, said properly: what the ramp asked for AND what arrived at the target.
+ *
+ * `--peak` is total user requests per second and one user request fans out into several HTTP requests, so
+ * the number the target had to survive is the larger one. Quoting only the requested rate is wrong in the
+ * direction that gets capacity bought — see k6/lib/delivery.js. One helper for all three sentences below,
+ * so they cannot drift apart.
+ */
+function bothRates(row) {
+  const req = row.requested_rps;
+  const del = row.achieved_rps;
+  if (del === null || del === undefined) return req + ' req/s requested (nothing was measured arriving)';
+  return req + ' req/s requested, ' + del + ' delivered';
+}
+
+/**
  * Did this step stay inside the SLO? Returns null when it did, or { why, class } when it did not.
  * Per-class limits are checked too: they make the brake sharper, so a knee that ignored them would sit above
  * the rate at which the run actually aborted.
@@ -168,13 +183,13 @@ export function knee(rows, opts) {
     out.summary = 'no step stayed inside the SLO: the first one already crossed. The ramp starts above this '
       + 'system\'s capacity — lower --start.';
   } else if (!crossed) {
-    out.summary = 'clean at every rate this run reached, up to ' + clean.requested_rps + ' req/s'
+    out.summary = 'clean at every rate this run reached, up to ' + bothRates(clean)
       + (clean.sustained ? ' (sustained)' : ' (swept, not sustained)')
       + '. The knee is above this peak: the run did not find it.';
   } else {
-    out.summary = 'clean up to ' + clean.requested_rps + ' req/s'
+    out.summary = 'clean up to ' + bothRates(clean)
       + (clean.sustained ? ' (sustained)' : ' (swept, not sustained)')
-      + ', crossed at ' + crossed.requested_rps + ' req/s — ' + crossed.why + '.';
+      + ', crossed at ' + bothRates(crossed) + ' — ' + crossed.why + '.';
   }
   return out;
 }

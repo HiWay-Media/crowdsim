@@ -8,11 +8,13 @@ in which a run must be read, and what every field means.
 ```
 1. generator_ok      false → STOP. Discard the run. Nothing below means anything.
 2. target_unreachable true  → connectivity, not capacity. Not a knee.
-3. aborted           true  → you found the knee. That is a success.
-4. per step: at which RATE did latency leave the SLO   ← the knee itself
-5. knee: the same thing as one sentence, or a refusal
-6. per class: the share past guillotine_ms             ← your margin
-7. only then: the overall latency, errors, cache
+3. failure_mode            → WHAT broke: which class, which status code   ← before the brake
+4. aborted           true  → you found the knee. That is a success.
+5. delivery                → requested vs delivered: the rate that ARRIVED
+6. per step: at which RATE did latency leave the SLO   ← the knee itself
+7. knee: the same thing as one sentence, or a refusal
+8. per class: the share past guillotine_ms             ← your margin
+9. only then: the overall latency, errors, cache
 ```
 
 ### 1. `generator_ok: false` → discard the run
@@ -37,7 +39,42 @@ refused or never routed: wrong address, wrong port, TLS, firewall, or a containe
 does not reach the target. Reporting that as "the brake found the knee" would hand out a capacity number
 for a target nobody touched. Run `crowdsim probe` before trying again.
 
-### 3. `aborted: true` → the knee, and that is the point
+### 3. `failure_mode` → what broke, before what stopped the run
+
+A run's report once opened with *ABORTED by the brake — stopped by class html p95*, and the actual news was
+**6.31% 404s, concentrated on the frontend classes alone**. Both sentences were true: a class answering 404
+at volume drags a p95 up with it, so the brake really did fire on latency. But a reader who starts at that
+headline goes looking for a slow renderer, and the renderer was fine — the pool named paths that tier does
+not serve.
+
+So `failure_mode` comes first, and it names three things:
+
+```
+  outcome       ✅ completed without crossing the thresholds
+  failure mode  32.30% of requests answered 404 (paths this target does not serve),
+                concentrated on 1 of 3 classes: rsc_page. The other classes did not see it,
+                so this is about what those classes request — not about the system as a
+                whole.
+  volume        161 requests · 10.1 req/s avg
+```
+
+That run **completed without crossing its thresholds** — and a third of its requests were 404s on one
+class, whose pool named paths that target does not serve. Without the line, the outcome reads as a pass.
+
+**A concentration and an even spread are different findings.** The same code on some classes and not
+others points at a pool or a route; spread evenly across every class it points at the system. The line
+says which it is, and never guesses: it is derived from the per-class error counters in the summary and
+from nothing else.
+
+`aborted_by` still says which threshold stopped the run, unchanged — the two are not merged. *What is
+wrong with the system* and *what stopped this run* are different questions, and the second one is not the
+headline.
+
+A clean run has **no** `failure_mode` at all, rather than an empty heading. A handful of errors in a large
+run is not a headline either: below 0.5% of requests the line is omitted, unless the brake aborted the run
+— in which case whatever failed is material by definition.
+
+### 4. `aborted: true` → the knee, and that is the point
 
 A threshold with `abortOnFail` fired: the brake stopped the run. The exit code stays **0**, because this is
 the outcome the tool exists to produce. Holding a system in collapse hurts real users and adds no
@@ -61,7 +98,46 @@ enough to act on. `class` is `null` when an overall threshold fired, and the who
 archived before this existed — never a guess reconstructed from the profile, which would name a class that
 may not be the one that crossed.
 
-### 4. The per-step table, not the aggregate p95
+### 5. `delivery` → the rate that was requested, and the rate that arrived
+
+`--peak` is the total **user** requests per second, on purpose. One user request in the mix fans out into
+several HTTP requests, so the rate the target actually had to survive is a different, larger number: on one
+campaign 60 requested arrived as roughly 76 delivered, and every report was translated by hand before it
+could be quoted.
+
+```
+  outcome       ⛔ ABORTED by the brake (knee exceeded)
+                stopped by class rsc_page — p(95)<700, reached 767
+  volume        23 requests · 2.3 req/s avg
+  delivered     3 req/s requested → 2.3 arrived at the target  (fewer arrived than asked for: the target did not keep up)
+```
+
+On a healthy run it reads the other way — `60 req/s requested → 76 arrived at the target (fan-out
+1.25×)` — and that second number is the one the target had to survive.
+
+Both numbers are true and they answer different questions — *what did we drive* and *what did it take*. A
+knee quoted as 60 when the system fell over at 76 is not conservative: it is wrong in the direction that
+gets capacity bought. So the knee sentence carries both, and so does `history.tsv`:
+
+```
+clean up to 60 req/s requested, 76 delivered (sustained), crossed at 80 req/s requested, 99 delivered
+```
+
+**The fan-out is a property of the mix, not of the run.** Which is why `compare` refuses two runs whose
+fan-out differs by more than 10%: one user request became a different number of HTTP requests, so the delta
+would be between two experiments rather than between two systems.
+
+**A ratio below one is not a fan-out.** A fan-out is HTTP requests *per* user request and cannot be under
+one; fewer arriving than were asked for means the target did not keep up with the requested rate. The tool
+reports that as the shortfall it is — usually the same finding as the knee — rather than as a property of
+the profile. It is measured on the step the rate was **held** at when the ramp has a hold, and over the
+steps that completed when it does not, so the number beside the pair describes the same rows the pair came
+from.
+
+Refused, not guessed, when the generator did not hold the rate or the target never answered: there,
+delivered/requested measures the generator or the network.
+
+### 6. The per-step table, not the aggregate p95
 
 A run climbs from `--start` to `--peak` in `--steps` steps and then holds. The `latency` line at the top of
 the panel is one p95 over **all** of it, so it describes a mixture of rates — mostly the cheap early ones —
@@ -93,7 +169,7 @@ A step that sent nothing is absent rather than shown as a row of zeros, which wo
 fast. Requests still in flight when the last stage ends carry no step tag at all: crediting them to the peak
 would move the slowest requests of the run into the step people quote.
 
-### 5. The knee, named or refused
+### 7. The knee, named or refused
 
 From that table the tool computes the sentence people actually came for, and prints it under it:
 
@@ -131,7 +207,7 @@ Each refusal names the condition and what to change. A refusal is printed as lou
 been: a quiet absence reads as *no knee found*, and then the requested peak gets quoted — the one rate nobody
 measured the system surviving.
 
-### 6. The share past `guillotine_ms`, per class
+### 8. The share past `guillotine_ms`, per class
 
 `guillotine_ms` is your reverse proxy's read timeout. Requests slower than it become 504s for real
 visitors, so the interesting column is not the average latency but the **percentage that crossed it**:
@@ -276,15 +352,25 @@ One appended line per run, written by the driver — the GUI reads the same file
 terminal and runs launched from the page sit side by side:
 
 ```
-run_id  profile  base_url  shape  peak  aborted  reqs  rps  failed  p95  e504  gen_ok  knee_clean  knee_crossed
+run_id  profile  base_url  shape  peak  aborted  reqs  rps  failed  p95  e504  gen_ok
+        knee_clean  knee_crossed  knee_clean_del  knee_crossed_del  fan_out
 ```
 
-The last two are the knee, and they are **empty** — not `0` — when the run could not support one. `knee_crossed`
-empty with `knee_clean` filled means the run stayed clean throughout: the knee is above its peak.
+The knee is **two rates**: `knee_clean`/`knee_crossed` are what the ramp asked for, and
+`knee_clean_del`/`knee_crossed_del` are what arrived at the target. `fan_out` is the ratio between them —
+see [step 5](#5-delivery--the-rate-that-was-requested-and-the-rate-that-arrived).
+
+All of them are **empty** — not `0` — when the run could not support a knee, or when it predates the
+column. An empty cell is *no knee*; a `0` would be a knee at zero req/s. `knee_crossed` empty with
+`knee_clean` filled means the run stayed clean throughout: the knee is above its peak.
 
 ```bash
-crowdsim history          # printed as a table
+crowdsim history          # printed as a table, with the knee as requested→delivered
+crowdsim history --json   # the same records the GUI's own history endpoint returns
 ```
+
+The default table renders each knee as one `requested→delivered` cell, so both numbers travel together
+without four knee columns in an eight-column view; `--cols` and `--json` give them separately.
 
 ## Handing a run to somebody else
 

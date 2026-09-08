@@ -245,3 +245,47 @@ test('every step crossing, with no recovery, still means the ramp starts too hig
   assert.match(k.summary, /starts (at or )?above/i);
   assert.match(k.summary, /--start/);
 });
+
+// ── both rates, everywhere the knee is said out loud (#71) ───────────────────────────────────────────
+// `--peak` is total USER requests per second and one user request fans out into several HTTP requests, so
+// the rate the target had to survive is the larger one. On the campaign this came from, 60 requested
+// arrived as ~76 delivered and every report was translated by hand. A knee quoted as 60 when the system
+// fell over at 76 is not conservative — it is wrong in the direction that gets capacity bought.
+
+test('the knee sentence names the requested rate AND the delivered one', () => {
+  const rows = [
+    { step: 's1', requested_rps: 20, achieved_rps: 25, p95: 100, failed_rate: 0, partial: false, per_class: {} },
+    { step: 's2', requested_rps: 40, achieved_rps: 50, p95: 200, failed_rate: 0, partial: false, per_class: {} },
+    { step: 's3', requested_rps: 60, achieved_rps: 76, p95: 300, failed_rate: 0, partial: false,
+      sustained: true, per_class: {} },
+    { step: 's4', requested_rps: 80, achieved_rps: 99, p95: 9000, failed_rate: 0, partial: false, per_class: {} },
+  ];
+  const k = knee(rows, { maxP95: 1000 });
+  assert.match(k.summary, /clean up to 60 req\/s requested, 76 delivered/);
+  assert.match(k.summary, /crossed at 80 req\/s requested, 99 delivered/);
+  // and neither number appears alone as "the" knee
+  assert.equal(k.clean.requested_rps, 60);
+  assert.equal(k.clean.achieved_rps, 76);
+  assert.equal(k.crossed.requested_rps, 80);
+  assert.equal(k.crossed.achieved_rps, 99);
+});
+
+test('a run that never crossed still names both rates for the rate it reached', () => {
+  const rows = [
+    { step: 's1', requested_rps: 10, achieved_rps: 13, p95: 90, failed_rate: 0, partial: false, per_class: {} },
+    { step: 's2', requested_rps: 20, achieved_rps: 25, p95: 95, failed_rate: 0, partial: false, per_class: {} },
+  ];
+  const k = knee(rows, { maxP95: 1000 });
+  assert.match(k.summary, /up to 20 req\/s requested, 25 delivered/);
+});
+
+test('a step with no delivered rate says so rather than repeating the requested one', () => {
+  // The failure this guards: printing the requested rate wearing the delivered label.
+  const rows = [
+    { step: 's1', requested_rps: 10, achieved_rps: null, p95: 90, failed_rate: 0, partial: false, per_class: {} },
+    { step: 's2', requested_rps: 20, achieved_rps: null, p95: 95, failed_rate: 0, partial: false, per_class: {} },
+  ];
+  const k = knee(rows, { maxP95: 1000 });
+  assert.match(k.summary, /nothing was measured arriving/);
+  assert.doesNotMatch(k.summary, /20 delivered/);
+});

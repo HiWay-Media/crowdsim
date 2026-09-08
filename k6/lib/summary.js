@@ -39,8 +39,12 @@ import { abortedBy as abortedByLocal } from './brake.js';
 import { stepPlan, perStep } from './steps.js';
 import { knee } from './knee.js';
 import { concurrency, concurrencyCaveat } from './session.js';
+import { failureMode } from './failure.js';
+import { delivery } from './delivery.js';
 
 export { abortedBy } from './brake.js';
+export { failureMode } from './failure.js';
+export { delivery } from './delivery.js';
 
 export function brakeTripped(metrics) {
   return Object.keys(metrics || {}).some((key) => {
@@ -90,6 +94,16 @@ export function buildSummary(metrics, ctx) {
       failed: g('http_req_failed{class:' + cls + '}', 'rate'),
       over_guillotine: g('cs_over_guillotine{class:' + cls + '}', 'rate'),
       cache: cache,
+      // WITH WHAT this class failed, not only how often. Without these the failure-mode line can name a
+      // code but never a concentration: it would have to attribute the run's dominant code to every class
+      // that failed, which is the guess it exists to avoid. Read by k6/lib/failure.js. (#74)
+      errors: {
+        e504: g('cs_504{class:' + cls + '}', 'count', 0),
+        e502: g('cs_502{class:' + cls + '}', 'count', 0),
+        e5xx: g('cs_5xx{class:' + cls + '}', 'count', 0),
+        e404: g('cs_404{class:' + cls + '}', 'count', 0),
+        denied: g('cs_denied{class:' + cls + '}', 'count', 0),
+      },
       reqs: g('http_reqs{class:' + cls + '}', 'count', 0),
       rps_target: (isMix && ctx.shares[cls] !== undefined)
         ? Math.round(ctx.peakRps * ctx.shares[cls] * 10) / 10 : null,
@@ -195,6 +209,21 @@ export function buildSummary(metrics, ctx) {
 
   out.generator_ok = generatorHeldRate(out.dropped_iterations, out.requests);
   out.target_unreachable = targetUnreachable(out.failed_rate, out.dur.p95);
+
+  // WHAT BROKE, before what stopped the run. Derived from the summary above and nothing else; null when
+  // nothing failed, so a clean run gets no heading at all. See k6/lib/failure.js. (#74)
+  out.failure_mode = failureMode(out);
+
+  // The two rates this run has: what the ramp asked for, and what arrived. `--peak` is total USER
+  // requests per second and one user request fans out into several HTTP requests, so the number the
+  // target had to survive is the larger one — 60 requested arrived as ~76 delivered on the campaign this
+  // came from, and every report was translated by hand. Refused rather than guessed when the generator
+  // did not hold the rate: there, delivered/requested measures the generator. See k6/lib/delivery.js.
+  // (#71)
+  out.delivery = delivery(out.per_step, {
+    generatorOk: out.generator_ok,
+    targetUnreachable: out.target_unreachable,
+  });
 
   // The sentence people came for: the highest rate this run measured the system surviving, and the rate at
   // which it stopped — or a refusal, which is the more important half. Last, because it reads the two
@@ -310,8 +339,8 @@ export function renderSummaryText(out, ctx) {
         + '                check the address, port, TLS and network path. Nothing here is a capacity number.'
       : (out.aborted ? '⛔ ABORTED by the brake (knee exceeded)' + abortAttribution(out.aborted_by)
                      : '✅ completed without crossing the thresholds')}
-  volume        ${out.requests} requests · ${out.rps_avg.toFixed(1)} req/s avg
-  latency       p50 ${ms(out.dur.p50)} · p95 ${ms(out.dur.p95)} · p99 ${ms(out.dur.p99)} · max ${ms(out.dur.max)}
+${renderFailureMode(out)}  volume        ${out.requests} requests · ${out.rps_avg.toFixed(1)} req/s avg
+${renderDelivery(out)}  latency       p50 ${ms(out.dur.p50)} · p95 ${ms(out.dur.p95)} · p99 ${ms(out.dur.p99)} · max ${ms(out.dur.max)}
   over ${out.guillotine_ms} ms  ${pct(out.over_guillotine_rate)}   ← the proxy read timeout, i.e. where 504s come from
   errors        504: ${out.e504}   502: ${out.e502}   5xx total: ${out.e5xx}   404: ${out.e404}   401/403: ${out.denied || 0}   no token: ${out.authFail || 0}
   failed rate   ${pct(out.failed_rate)}
@@ -326,6 +355,51 @@ ${tbl}${renderStepTable(out)}${renderKnee(out)}${renderConcurrency(out)}`;
  * Concurrent users, printed as two numbers or as a refusal. Never one figure: the agreement between the two
  * methods is what makes either of them worth quoting, and their disagreement is the finding.
  */
+/**
+ * WHAT BROKE, at the top of the panel, wrapped to the panel's own width: the sentence runs to a couple of
+ * hundred characters on a real run, and one unwrapped line destroys a table of aligned columns. (#74)
+ */
+function renderFailureMode(out) {
+  if (!out.failure_mode) return '';
+  const words = String(out.failure_mode.line).split(/\s+/);
+  const lines = [];
+  var line = '';
+  for (var i = 0; i < words.length; i++) {
+    if (line && (line + ' ' + words[i]).length > 76) { lines.push(line); line = words[i]; }
+    else line = line ? line + ' ' + words[i] : words[i];
+  }
+  if (line) lines.push(line);
+  var outStr = '';
+  for (var j = 0; j < lines.length; j++) {
+    outStr += (j === 0 ? '  failure mode  ' : '                ') + lines[j] + '\n';
+  }
+  return outStr;
+}
+
+/**
+ * The two rates, side by side, wherever a rate is read. Never one alone: `--peak` is what we drove and
+ * `delivered` is what the target had to survive, and the gap between them is the mix's fan-out. A knee
+ * quoted as the requested rate when the system fell over at the delivered one is wrong in the direction
+ * that gets capacity bought. (#71)
+ */
+function renderDelivery(out) {
+  const d = out.delivery;
+  if (!d) return '';
+  if (d.refused) {
+    return '  delivered     not measured: ' + d.reason + '\n';
+  }
+  var line = '  delivered     ' + d.requested_rps + ' req/s requested → ' + d.delivered_rps
+    + ' arrived at the target';
+  if (d.fan_out !== null && d.fan_out !== undefined) {
+    line += '  (fan-out ' + d.fan_out + '×)';
+  } else if (d.shortfall) {
+    // Not a fan-out: fewer arrived than were asked for. Saying nothing here would leave the two numbers
+    // side by side with no explanation for why the second is smaller.
+    line += '  (fewer arrived than asked for: the target did not keep up)';
+  }
+  return line + '\n';
+}
+
 function renderConcurrency(out) {
   const c = out.concurrency;
   if (!c) return '';

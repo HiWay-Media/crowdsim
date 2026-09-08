@@ -22,10 +22,10 @@ import { readHistory } from '../../gui/server/lib/history.js';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const CROWDSIM = path.join(ROOT, 'bin', 'crowdsim');
 
-const HEADER = 'run_id\tprofile\tbase_url\tshape\tpeak\taborted\treqs\trps\tfailed\tp95\te504\tgen_ok\tknee_clean\tknee_crossed';
+const HEADER = 'run_id\tprofile\tbase_url\tshape\tpeak\taborted\treqs\trps\tfailed\tp95\te504\tgen_ok\tknee_clean\tknee_crossed\tknee_clean_del\tknee_crossed_del\tfan_out';
 const ROWS = [
-  '20260901T101500Z\tsite-a\thttps://a.test\tmix\t40\tFalse\t1000\t39.8\t0.001\t210\t0\tTrue\t30\t40',
-  '20260901T111500Z\tsite-b\thttps://b.test\tmix\t60\tTrue\t900\t55.1\t0.06\t5100\t12\tTrue\t40\t50',
+  '20260901T101500Z\tsite-a\thttps://a.test\tmix\t40\tFalse\t1000\t39.8\t0.001\t210\t0\tTrue\t30\t40\t38\t50\t1.25',
+  '20260901T111500Z\tsite-b\thttps://b.test\tmix\t60\tTrue\t900\t55.1\t0.06\t5100\t12\tTrue\t40\t50\t50\t63\t1.25',
   // a discard, and a run written before the knee columns existed
   '20260901T121500Z\tsite-a\thttps://a.test\tmix\t80\tFalse\t400\t20\t0.002\t300\t0\tFalse\t\t',
   '20260801T101500Z\told\thttps://a.test\tmix\t20\tFalse\t100\t19\t0\t150\t0\tTrue',

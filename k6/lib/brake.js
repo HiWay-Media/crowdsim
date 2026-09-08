@@ -80,6 +80,13 @@ export function brakeThresholds(opts) {
 
     t['cs_over_guillotine{class:' + cls + '}'] = ['rate>=0'];
     t['http_reqs{class:' + cls + '}'] = ['count>=0'];
+    // Status codes per class — decorative like the rest, and load-bearing for the same reason: k6 only
+    // surfaces a tagged sub-metric if a threshold mentions it. Without these the summary knows a class
+    // failed but not WITH WHAT, and the failure-mode line would have to attribute the run's dominant code
+    // to every class that failed — a guess, and the wrong one whenever two classes fail differently. (#74)
+    for (const code of ['cs_504', 'cs_502', 'cs_5xx', 'cs_404', 'cs_denied']) {
+      t[code + '{class:' + cls + '}'] = ['count>=0'];
+    }
     for (const label of cacheLabels) t['cache_hit_' + label + '{class:' + cls + '}'] = ['rate>=0'];
   }
 

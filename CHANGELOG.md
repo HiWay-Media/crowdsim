@@ -4,6 +4,72 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] — 2026-09-08
+
+Two of the four items of milestone v1.14.0, both from the same six-run campaign, and both the same shape
+of complaint: **the report was true and pointed at the wrong thing.**
+
+### Added
+- **The knee names the rate that was DELIVERED as well as the rate that was requested**
+  ([#71](https://github.com/HiWay-Media/crowdsim/issues/71)). `--peak` is the total *user* requests per
+  second, on purpose, and one user request in the mix fans out into several HTTP requests — so the rate
+  the target actually had to survive is a larger number. On the campaign this came from, 60 requested
+  arrived as roughly 76 delivered, consistently enough that every report was translated by hand before it
+  could be quoted. A knee quoted as 60 when the system fell over at 76 is not conservative: it is wrong
+  in the direction that gets capacity bought.
+
+  Both rates now appear everywhere the knee does — the panel, `summary.delivery`, `report`,
+  `report --html`, `history.tsv` (four columns, rendered as one `requested→delivered` cell in the default
+  view) and the GUI's history records. The delivered rate is **measured** (`http_reqs` over that step's
+  own window), never `requested × fan_out`: deriving it would make the fan-out an assumption dressed as a
+  measurement.
+
+  Three things this refuses, each found by running it rather than by reading it:
+
+  - **A ratio below one is not a fan-out.** A fan-out is HTTP requests *per* user request and cannot be
+    under one; fewer arriving than were asked for means the target did not keep up. The first version
+    printed *fan-out 0.77x* for a perfectly healthy generator against a slow origin.
+  - **The ratio is measured on the same rows the quoted pair comes from.** Reading the pair off the hold
+    while aggregating the ratio over every step, climbing ones included, produced *"12 requested → 12
+    arrived (fewer arrived than asked for)"* — a line contradicting itself. A hold is where a rate is
+    actually held, so that is what the ratio describes when the ramp has one.
+  - **The pair is the one the knee quotes.** A ramp with a hold has two complete rows at the top rate;
+    picking the climbing one made the panel say *12 → 11* while the knee said *12 → 12*. Two numbers for
+    one thing in one output is the disagreement this project refuses everywhere else.
+
+  And the fan-out is a property of the **mix**, not of the run: `compare` now refuses two runs whose
+  fan-out differs by more than 10%, for the same reason it already refuses two different URL pools. A run
+  archived without one is *unknown* rather than *the same* — a warning, not a silent match.
+- **A failure-mode line, before the brake's own reason**
+  ([#74](https://github.com/HiWay-Media/crowdsim/issues/74)). One report opened with *ABORTED by the
+  brake — stopped by class html p95* while the news was **6.31% 404s concentrated on the frontend classes
+  alone**. Both sentences were true — a class answering 404 at volume drags a p95 up with it — and the
+  headline sent its reader looking for a slow renderer that was never slow.
+
+  `summary.failure_mode` now names which class, which status code and what share, at the top of the
+  panel, the markdown report and the HTML page. A run that *completed without crossing its thresholds*
+  and served 32% 404s on one class now says so on the second line, where it used to read as a pass.
+
+  The rules that keep it from becoming a banner nobody reads: a clean run gets **no** line at all rather
+  than an empty heading; below 0.5% of requests it is omitted unless the brake aborted the run (where
+  whatever failed is material by definition); a **concentration** is named as one, with the denominator,
+  because the same code on some classes and not others points at a pool while an even spread points at
+  the system; the codes are ranked most-specific-first, so a 504 is not swallowed by the `cs_5xx` counter
+  that also counts it; and the brake's own reason still follows, unchanged — the two are not merged.
+
+  It is derived from the summary and nothing else. It is also the one thing on the HTML page that an
+  invalid run still gets: a 404 does not become untrue because the generator was short.
+
+### Changed
+- `k6/lib/brake.js` declares the per-class status-code thresholds (`cs_504`, `cs_502`, `cs_5xx`,
+  `cs_404`, `cs_denied`). Decorative like the rest and load-bearing for the same reason: k6 only surfaces
+  a tagged sub-metric if a threshold names it, and without them the summary knows a class failed but not
+  with what — so the failure-mode line would have to attribute the run's dominant code to every class
+  that failed, which is the guess it exists to avoid.
+- `docs/reading-results.md` reads in nine steps rather than seven: the failure mode is step 3, before the
+  brake, and requested-versus-delivered is step 5. Both quote real output from real runs, so
+  `check-doc-output.sh` verifies them.
+
 ## [1.28.0] — 2026-09-08
 
 **`crowdsim probe --profile p.json --out /tmp/elsewhere` exited 0 and wrote its output to

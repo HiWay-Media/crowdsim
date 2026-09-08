@@ -681,6 +681,7 @@ result is worse than no row at all.
 | `--target <host>` | only runs whose `base_url` host contains this |
 | `--profile <name>` | only runs of this profile |
 | `--cols a,b,c` | exactly these columns, named as they are in `history.tsv`. `run_id` is never dropped |
+| | The default view renders each knee as one `requested→delivered` cell; `--cols` and `--json` give the four columns separately. |
 | `--json` | the same records the GUI's history endpoint returns |
 
 **A filtered or truncated view says so, on its last line, with the total** — `showing 2 of 3 runs · --last

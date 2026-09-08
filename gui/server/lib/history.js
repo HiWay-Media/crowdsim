@@ -46,6 +46,13 @@ export function readHistory(outDir) {
       // for every run whose knee was refused — a refused knee must never arrive at the page as 0 req/s.
       knee_clean: num(row.knee_clean === '' ? null : row.knee_clean),
       knee_crossed: num(row.knee_crossed === '' ? null : row.knee_crossed),
+      // And what ARRIVED at those rates. `--peak` is the total USER rate and one user request becomes
+      // several HTTP requests, so the number the target had to survive is the larger one — a knee stored
+      // only as the requested rate is a knee every reader translates by hand. null for rows written
+      // before these columns existed, like the knee itself. (#71)
+      knee_clean_delivered: num(row.knee_clean_del === '' ? null : row.knee_clean_del),
+      knee_crossed_delivered: num(row.knee_crossed_del === '' ? null : row.knee_crossed_del),
+      fan_out: num(row.fan_out === '' ? null : row.fan_out),
     });
   }
   return rows.reverse();

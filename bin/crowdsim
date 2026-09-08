@@ -1582,7 +1582,7 @@ PY
 
 record_history() {
   if [ ! -f "$HISTORY_F" ]; then
-    printf 'run_id\tprofile\tbase_url\tshape\tpeak\taborted\treqs\trps\tfailed\tp95\te504\tgen_ok\tknee_clean\tknee_crossed\n' > "$HISTORY_F"
+    printf 'run_id\tprofile\tbase_url\tshape\tpeak\taborted\treqs\trps\tfailed\tp95\te504\tgen_ok\tknee_clean\tknee_crossed\tknee_clean_del\tknee_crossed_del\tfan_out\n' > "$HISTORY_F"
   fi
   python3 - "$1" >> "$HISTORY_F" <<'PY'
 import json, sys
@@ -1594,10 +1594,18 @@ f = lambda x: '' if x is None else x
 k = d.get('knee') or {}
 clean = None if k.get('refused') else ((k.get('clean') or {}).get('requested_rps'))
 crossed = None if k.get('refused') else ((k.get('crossed') or {}).get('requested_rps'))
+# And what ARRIVED at those rates. `--peak` is total user requests per second; one user request fans out
+# into several HTTP requests, so the rate the target had to survive is the larger one. A knee stored only
+# as the requested rate is a knee every reader has to translate by hand. (#71)
+clean_del = None if k.get('refused') else ((k.get('clean') or {}).get('achieved_rps'))
+crossed_del = None if k.get('refused') else ((k.get('crossed') or {}).get('achieved_rps'))
+dl = d.get('delivery') or {}
+fan_out = None if dl.get('refused') else dl.get('fan_out')
 print('\t'.join(str(f(v)) for v in [
     d['run_id'], d.get('profile'), d['base_url'], d['shape'], d['peak_rps_user_target'],
     d['aborted'], d['requests'], round(d['rps_avg'], 1), round(d['failed_rate'], 4),
-    round(d['dur']['p95'] or 0), d['e504'], d['generator_ok'], clean, crossed]))
+    round(d['dur']['p95'] or 0), d['e504'], d['generator_ok'], clean, crossed,
+    clean_del, crossed_del, fan_out]))
 PY
 }
 
@@ -1702,11 +1710,24 @@ if as_json:
         'generator_ok': boolean(r.get('gen_ok')),
         'knee_clean': num(r.get('knee_clean')),
         'knee_crossed': num(r.get('knee_crossed')),
+        'knee_clean_delivered': num(r.get('knee_clean_del')),
+        'knee_crossed_delivered': num(r.get('knee_crossed_del')),
+        'fan_out': num(r.get('fan_out')),
     } for r in records]
     print(json.dumps(out, indent=1))
     raise SystemExit(0)
 
 DEFAULT = ['run_id', 'profile', 'shape', 'peak', 'rps', 'p95', 'failed', 'knee_clean', 'knee_crossed']
+
+# The knee is two rates, not one: requested → delivered. Rendered into ONE cell in the default view so
+# both travel together without four knee columns in an eight-column table; --cols and --json still give
+# them separately. A knee stored as the requested rate alone is a knee somebody translates by hand. (#71)
+def knee_cell(row, which):
+    req = row.get('knee_' + which, '')
+    dl = row.get('knee_' + which + '_del', '')
+    if req == '':
+        return ''
+    return f'{req}→{dl}' if dl not in ('', None) else str(req)
 if cols:
     want = [c.strip() for c in cols.split(',') if c.strip()]
     unknown = [c for c in want if c not in header]
@@ -1724,7 +1745,12 @@ if not records:
     print("  no runs match (of %d in %s)" % (total, path))
     raise SystemExit(0)
 
-rows = [want] + [[r.get(c, '') for c in want] for r in records]
+def cell(r, c):
+    if c in ('knee_clean', 'knee_crossed'):
+        return knee_cell(r, c.split('_', 1)[1])
+    return r.get(c, '')
+
+rows = [want] + [[cell(r, c) for c in want] for r in records]
 # The margin: a discard is marked where the eye already is, not in a column at the far right.
 marks = ['  '] + [('⛔' if boolean(r.get('gen_ok')) is False else '  ') for r in records]
 pads = [max(len(str(row[i])) for row in rows) for i in range(len(want))]
@@ -1741,6 +1767,10 @@ if target:
     notes.append("target ~ %s" % target)
 if profile:
     notes.append("profile %s" % profile)
+if any(c in want for c in ('knee_clean', 'knee_crossed')):
+    print("  knee columns are requested→delivered req/s: --peak is the total USER rate, and one user "
+          "request")
+    print("  becomes several HTTP requests. The second number is what the target had to survive.")
 if notes:
     print("  " + ' · '.join(notes))
 if discards:
@@ -2243,6 +2273,16 @@ w('')
 # 2. Did the brake trip? An abort is the intended outcome, and the exit code is 0 for that reason.
 w('## What happened')
 w('')
+
+# 2a. WHAT BROKE, before what stopped the run. One report opened with "stopped by class html p95" while
+# the news was 6.31% 404s on the frontend classes alone: both true, and a reader who starts at the brake
+# goes looking for a slow renderer that was never slow. The brake's own reason still follows, unchanged —
+# the point is the order, not removing anything. (#74)
+fm = d.get('failure_mode')
+if fm:
+    w(f"**Failure mode:** {fm['line']}")
+    w('')
+
 if d.get('aborted'):
     by = d.get('aborted_by') or {}
     who = by.get('class')
@@ -2273,6 +2313,33 @@ if d.get('over_guillotine_rate') is not None and d.get('guillotine_ms') is not N
 # 3b. The knee: the claim this whole run exists to support, and the one that will be quoted without its
 # caveats unless they are attached to it here. Absent for a run archived before per-step numbers existed —
 # inventing a refusal reason for those would be a statement about a run that never had the data.
+# 3c. The two rates this run has. `--peak` is total USER requests per second, and one user request fans
+# out into several HTTP requests, so the rate the target had to survive is the larger one. Reporting only
+# the requested rate leaves the other as somebody's mental arithmetic, done under time pressure, in a
+# document that outlives the run. (#71)
+dl = d.get('delivery')
+if dl:
+    w('## Requested and delivered')
+    w('')
+    if dl.get('refused'):
+        w(f"**No delivered rate from this run.** {dl['reason']}")
+        w('')
+        w(f"{dl.get('fix', '')}")
+    else:
+        w(f"**{dl['requested_rps']} req/s requested → {dl['delivered_rps']} req/s arrived at the target.**")
+        w('')
+        if dl.get('fan_out') is not None:
+            w(f"- Fan-out **{dl['fan_out']}×**: one user request became that many HTTP requests. "
+              '`--peak` is the total *user* rate on purpose, so this is the number the target had to '
+              'survive — and it is a property of this mix, not of this run.')
+        elif dl.get('shortfall'):
+            # A fan-out cannot be under one. Fewer arriving than were asked for is the target refusing to
+            # be driven this fast, and it must not be dressed up as a property of the mix.
+            w(f"- **Fewer arrived than were asked for.** {dl['note']}")
+        w('- Both numbers answer different questions: what was driven, and what it took. Quoting the '
+          'requested rate alone is wrong in the direction that gets capacity bought.')
+    w('')
+
 knee = d.get('knee')
 if knee:
     w('## The knee')
@@ -2481,6 +2548,25 @@ for r in (a_id, b_id):
                           'is measurable.']))
     if runs[r].get('target_unreachable'):
         refusals.append((f'{r} never reached its target', ['That is connectivity, not capacity.']))
+
+# 1b. A fan-out that moved means the MIX moved, and then the delta is between two experiments rather than
+#     between two systems. `--peak` is total user requests per second; the fan-out is how many HTTP
+#     requests one of those became, so it is a property of the profile. The rule and the tolerance live in
+#     k6/lib/delivery.js (comparableFanOut) — a unit test asserts this constant still matches it. (#71)
+FAN_OUT_TOLERANCE = 0.1
+fa = ((A.get('delivery') or {}).get('fan_out'))
+fb = ((B.get('delivery') or {}).get('fan_out'))
+if fa and fb:
+    if abs(fa - fb) > max(fa, fb) * FAN_OUT_TOLERANCE:
+        refusals.append((
+            f'the fan-out differs between these runs ({fa} vs {fb})',
+            ['One user request became a different number of HTTP requests, so the mix is not the same. '
+             'The delta would be between two experiments, not between two systems.']))
+else:
+    # Not "the same": unknown. A run archived before this field existed has no fan-out, and calling that
+    # a match would silently compare two mixes.
+    warnings.append('one of these runs does not record a fan-out, so it could not be checked that both '
+                    'drove the same mix. Runs from 1.29.0 onwards record one.')
 
 # 2. Different pools mean two different experiments. The resolved profile of each run has the pools inlined,
 #    which is exactly why it is archived.

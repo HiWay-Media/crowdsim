@@ -400,3 +400,79 @@ test('a run that created nothing gets no accounts caveat', () => {
   assert.ok(!html.includes('accounts created'));
   assert.ok(!html.includes('will not delete them'));
 });
+
+// ── the failure mode, and both rates (#74, #71) ──────────────────────────────────────────────────────
+
+test('the page names the failure mode before it names the brake', () => {
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 60, requests: 10000, dropped_iterations: 0,
+    generator_ok: true, target_unreachable: false, aborted: true,
+    aborted_by: { class: 'html', threshold: 'p(95)<700', value: 768 },
+    failed_rate: 0.0631, dur: { p50: 100, p95: 768, p99: 900, max: 1200 },
+    failure_mode: {
+      code: '404', count: 631, share: 0.0631, classes: ['html'], class_count: 4, concentrated: true,
+      line: '6.31% of requests answered 404 (paths this target does not serve), concentrated on 1 of 4 '
+        + 'classes: html.',
+    },
+  });
+  assert.match(html, /Failure mode/);
+  assert.match(html, /6\.31% of requests answered 404/);
+  // before the knee, which is where the brake's own reason lives
+  assert.ok(html.indexOf('Failure mode') < html.indexOf('The knee') || !/The knee/.test(html));
+});
+
+test('an invalid run still gets its failure mode: what broke is not a latency claim', () => {
+  // The no-charts rule exists because latency from a generator-bound run describes the generator. A 404
+  // does not become untrue because the generator was short.
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 60, requests: 900, dropped_iterations: 400,
+    generator_ok: false, target_unreachable: false,
+    failed_rate: 0.2, dur: { p50: 10, p95: 20, p99: 30, max: 40 },
+    failure_mode: { code: '404', count: 180, share: 0.2, classes: ['html'], class_count: 2,
+      concentrated: true, line: '20.00% of requests answered 404, concentrated on 1 of 2 classes: html.' },
+  });
+  assert.match(html, /DISCARD THIS RUN/);
+  assert.match(html, /Failure mode/);
+  assert.match(html, /20\.00% of requests answered 404/);
+});
+
+test('a clean run gets no failure-mode heading at all', () => {
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 60, requests: 10000, dropped_iterations: 0,
+    generator_ok: true, target_unreachable: false, failure_mode: null,
+    failed_rate: 0, dur: { p50: 100, p95: 200, p99: 300, max: 400 },
+  });
+  assert.doesNotMatch(html, /Failure mode/);
+});
+
+test('the page prints both rates, and the fan-out that separates them', () => {
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 60, requests: 10000, dropped_iterations: 0,
+    generator_ok: true, target_unreachable: false,
+    failed_rate: 0, dur: { p50: 100, p95: 200, p99: 300, max: 400 },
+    delivery: { requested_rps: 60, delivered_rps: 76, step: 's4', fan_out: 1.25,
+      note: 'a fan-out of 1.25 HTTP requests per user request, measured over the step this rate was held at.' },
+  });
+  assert.match(html, /Requested and delivered/);
+  assert.match(html, /60 req\/s requested/);
+  assert.match(html, /76 req\/s arrived at the target/);
+  assert.match(html, /fan-out of 1\.25/);
+});
+
+test('a refused delivered rate is stated as a refusal, not as a missing number', () => {
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 60, requests: 900, dropped_iterations: 400,
+    generator_ok: false, target_unreachable: false,
+    failed_rate: 0, dur: { p50: 100, p95: 200, p99: 300, max: 400 },
+    delivery: { refused: true, reason: 'the generator did not hold the requested rate, so what arrived '
+      + 'measures the generator and not the mix.', fix: 'Move the generator closer.' },
+  });
+  assert.match(html, /No delivered rate from this run/);
+  assert.match(html, /measures the generator and not the mix/);
+  assert.doesNotMatch(html, /req\/s arrived at the target/);
+});
