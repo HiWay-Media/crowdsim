@@ -17,6 +17,7 @@ import { fileURLToPath } from 'node:url';
 
 import { failureModeText, deliveryText, dropDiagnosisText, RENDERED, DELIBERATELY_NOT_RENDERED }
   from '../../gui/ui/src/lib/summary-blocks.js';
+import { kneeText, stepCurve, rateAxis } from '../../gui/ui/src/lib/runs.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 
@@ -124,4 +125,59 @@ test('the blocks this release is about are in the RENDERED list, not the other o
   for (const k of ['failure_mode', 'delivery', 'drop_diagnosis', 'knee']) {
     assert.ok(RENDERED.includes(k), `${k} must be rendered, it is a verdict about the run`);
   }
+});
+
+// ── the knee plot's axis, which #78 asked for and 1.34.0 did not deliver (#83) ────────────────────────
+// `--peak` is total USER req/s and one user request becomes several HTTP requests, so the rate the target
+// had to survive is the larger one. The banners say both; the plot mapped `requested_rps` with an
+// unlabelled axis, which is the same wrong answer 1.29.0 removed from the text, moved onto the chart.
+// A chart is worse than a sentence here: a wrong scale does not throw, it draws a convincing picture.
+
+test('the curve carries both rates per point, so the plot can label its axis', () => {
+  const pts = stepCurve([
+    { step: 's1', requested_rps: 20, achieved_rps: 25, p95: 100, partial: false },
+    { step: 's2', requested_rps: 40, achieved_rps: 50, p95: 200, partial: false },
+  ]);
+  assert.deepEqual(pts.map((p) => p.rate), [20, 40]);
+  assert.deepEqual(pts.map((p) => p.delivered), [25, 50]);
+});
+
+test('a step with no delivered rate carries null, never the requested one repeated', () => {
+  const pts = stepCurve([{ step: 's1', requested_rps: 20, p95: 100, partial: false }]);
+  assert.equal(pts[0].delivered, null);
+});
+
+test('the axis label names which rate is plotted, and where it came from', () => {
+  const measured = rateAxis({ requested_rps: 60, delivered_rps: 76, fan_out: 1.25 });
+  assert.match(measured.label, /requested/);
+  assert.match(measured.title, /76/);
+  assert.match(measured.title, /1\.25/);
+
+  // A refused delivery must not silently become "requested = delivered" on the axis.
+  const refused = rateAxis({ refused: true, reason: 'the target could not absorb the requested rate.' });
+  assert.match(refused.label, /requested/);
+  assert.match(refused.title, /not measured|could not absorb/);
+  assert.equal(rateAxis(null).label, 'requested req/s');
+});
+
+test('the knee badge carries the delivered rates in its own right, not via the summary sentence', () => {
+  // Asserted with NO `summary` on purpose: the first version of this test passed because the sentence I
+  // handed it happened to contain the number. The cell stays the requested pair — it is one column of a
+  // narrow table — and the delivered pair belongs in the title, derived from the knee.
+  const t = kneeText({
+    clean: { requested_rps: 60, achieved_rps: 76 },
+    crossed: { requested_rps: 80, achieved_rps: 99 },
+  });
+  assert.equal(t.text, '60 → 80');
+  assert.match(t.title, /76/);
+  assert.match(t.title, /99/);
+  assert.match(t.title, /delivered/i);
+});
+
+test('a knee with no delivered rate reads exactly as it did before', () => {
+  // The history table is narrow and the badge is one cell: a run archived before 1.29.0 has no delivered
+  // rate, and inventing a second number for it would be worse than showing one.
+  const t = kneeText({ clean: { requested_rps: 60 }, crossed: { requested_rps: 80 } });
+  assert.equal(t.text, '60 → 80');
+  assert.doesNotMatch(t.title, /delivered/i, 'no delivered rate means no claim about one');
 });

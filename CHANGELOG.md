@@ -4,6 +4,47 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.0] — 2026-09-08
+
+The first two of milestone v1.17.0, both the same shape: **a chart is a worse place to be wrong than a
+sentence.** A wrong scale does not throw — it draws something convincing.
+
+### Fixed
+- **The knee plot's axis now says which rate it is drawing**
+  ([#83](https://github.com/HiWay-Media/crowdsim/issues/83)). This was the unmet half of
+  [#78](https://github.com/HiWay-Media/crowdsim/issues/78), which was closed with it unmet: that issue's
+  acceptance asked for it and 1.34.0 delivered the banners without touching the plot. `stepCurve()` mapped
+  `requested_rps` onto an unlabelled axis, so on a mix with a fan-out of 1.25 the page showed a knee at 60
+  while the target was taking 76 — the wrong answer 1.29.0 removed from the text, moved onto the chart.
+
+  `rateAxis()` names the rate and, in the axis title, gives the pair and the fan-out. The curve carries
+  both rates per point, so a step's tooltip reads *20 req/s requested → 25 delivered*. A run whose
+  delivered rate was **refused** says so rather than falling back to the requested rate wearing the
+  delivered label, and the knee badge's title carries the delivered pair when the run has one — derived
+  from the knee, not read out of the summary sentence, which is what an earlier version of the test
+  accidentally asserted.
+- **The drawn report says which kind of invalid a run is**
+  ([#84](https://github.com/HiWay-Media/crowdsim/issues/84)). `report --html` rendered no
+  `drop_diagnosis`, so since 1.32.0 the artefact most likely to be attached to a ticket still opened with
+  *DISCARD THIS RUN* for a target that had simply saturated — the advice 1.32.0 exists to correct. A
+  saturated target is now drawn as a finding, a starved generator as a discard, and the
+  no-latency-charts rule is unchanged either way: a rate that was not delivered was not measured.
+- **`What answered, and with what`**: the status codes per class, and across the run. p95 per class was
+  the only thing a class did on that page, so a run serving 474 × 404 on two classes drew a perfectly
+  healthy set of bars. Shown on an invalid run too — a 404 does not become untrue because the rate was
+  not delivered. A counter of zero is drawn as `0`, not as *n/a*: unlike a latency, zero is a real answer
+  for a counter.
+
+### Added
+- **A drift guard for the drawn report**, symmetric with the GUI's. `lib/report-html.mjs` exports `DRAWN`
+  and `DELIBERATELY_NOT_DRAWN`, each omission with its reason, and a unit test asks **`buildSummary`
+  itself** for its keys and fails on a block belonging to neither. The GUI accumulated six unrendered
+  blocks because nothing noticed and got a guard in 1.34.0; this page was left without one and was
+  already missing `drop_diagnosis` by then. Seven blocks stay off it on purpose — `concurrency` and
+  `think_time` (journey-only numbers, not shapes), `allocation` and `mix_target` (one arithmetic, one
+  picture), `signup` and `auth` (they name real accounts), `server_side` (its own chart, in #86), and
+  `rsc_mode` (an input, not a measurement).
+
 ## [1.34.0] — 2026-09-08
 
 Milestone v1.16.0, closed. **The page rendered `knee` and nothing else that had been added to the summary

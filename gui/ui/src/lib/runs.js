@@ -59,13 +59,60 @@ export function kneeText(knee) {
     return {
       text: `≥ ${clean.requested_rps}`,
       tone: 'ok',
-      title: 'clean at every rate this run reached: the knee is above this peak, the run did not find it',
+      title: 'clean at every rate this run reached: the knee is above this peak, the run did not find it'
+        + deliveredSuffix(clean, null),
     };
   }
   return {
     text: `${clean.requested_rps} → ${knee.crossed.requested_rps}`,
     tone: 'warn',
-    title: knee.summary || '',
+    title: (knee.summary || '') + deliveredSuffix(clean, knee.crossed),
+  };
+}
+
+/**
+ * What ARRIVED at those rates, for the title. The cell itself stays the requested pair — it is one column
+ * of a narrow table — but the number the target had to survive must be reachable without opening the run,
+ * because `--peak` is total USER req/s and one user request becomes several HTTP requests.
+ *
+ * Empty when the run does not record it: a run archived before 1.29.0 has no delivered rate, and inventing
+ * a second number for it would be worse than showing one. (#83)
+ */
+function deliveredSuffix(clean, crossed) {
+  const a = clean && clean.achieved_rps;
+  const b = crossed && crossed.achieved_rps;
+  const has = (v) => v !== null && v !== undefined && isFinite(Number(v));
+  if (!has(a) && !has(b)) return '';
+  if (has(a) && has(b)) return ` Delivered at the target: ${a} → ${b} req/s.`;
+  return ` Delivered at the target: ${has(a) ? a : b} req/s.`;
+}
+
+/**
+ * Which rate the plot's x-axis is, said out loud. (#83)
+ *
+ * The plot maps the REQUESTED rate, because that is the axis every step shares and the one `--peak` is in.
+ * An unlabelled axis on a mix with a fan-out of 1.25 shows a knee at 60 while the target was taking 76 —
+ * the wrong answer 1.29.0 removed from the text, moved onto the chart. A chart is the worse place for it:
+ * a wrong scale does not throw, it draws something convincing.
+ */
+export function rateAxis(delivery) {
+  const label = 'requested req/s';
+  if (!delivery) {
+    return { label, title: 'the rate the ramp asked for. This run does not record what arrived.' };
+  }
+  if (delivery.refused) {
+    return {
+      label,
+      title: `the rate the ramp asked for. What arrived was not measured: ${delivery.reason}`,
+    };
+  }
+  const fan = delivery.fan_out === null || delivery.fan_out === undefined ? '' :
+    ` — a fan-out of ${delivery.fan_out}× for this mix`;
+  return {
+    label,
+    title: `the rate the ramp asked for. At the top of this ramp ${delivery.requested_rps} req/s requested `
+      + `arrived as ${delivery.delivered_rps} req/s${fan}. The larger number is what the target had to `
+      + 'survive.',
   };
 }
 
@@ -81,5 +128,14 @@ export function stepCurve(perStep) {
   if (!perStep || !perStep.length) return [];
   return perStep
     .filter((r) => r && r.p95 !== null && r.p95 !== undefined && r.requested_rps)
-    .map((r) => ({ step: r.step, rate: r.requested_rps, p95: r.p95, partial: Boolean(r.partial) }));
+    .map((r) => ({
+      step: r.step,
+      rate: r.requested_rps,
+      // What arrived at that step, so the plot can label its axis and a tooltip can show both. null
+      // rather than the requested rate repeated: falling back silently is the failure `delivery()`
+      // already refuses. (#83)
+      delivered: r.achieved_rps === null || r.achieved_rps === undefined ? null : r.achieved_rps,
+      p95: r.p95,
+      partial: Boolean(r.partial),
+    }));
 }

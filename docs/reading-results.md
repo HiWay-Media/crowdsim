@@ -425,6 +425,12 @@ capacity figure in somebody else's slide. [`report`](cli.md#report) writes the r
 caveats attached to it — validity first, then what happened, then the numbers, then what they are worth. A
 run with `generator_ok: false` comes out as **DISCARD THIS RUN** with no latency table at all.
 
+Since 1.35.0 the drawn page also says **which kind of invalid** an invalid run is — a target that could
+not absorb the rate is not the same as a starved generator, and the page used to open with *DISCARD THIS
+RUN* for both — and carries **what answered, and with what**: the status codes per class. p95 per class
+was the only thing a class did on that page, so a run serving 474 × 404 on two classes drew a perfectly
+healthy set of bars.
+
 [`--html`](cli.md#--html-the-same-run-drawn) writes the same run as one self-contained page, with the ramp as
 a curve: the SLO and the read timeout as lines on it, the knee as a band between the last clean rate and the
 first crossed one. It is the same order and the same caveats — and the same refusals, which is the point of

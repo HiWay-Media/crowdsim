@@ -5,7 +5,7 @@ import CompareCard from './CompareCard.jsx';
 import { orderPair } from '../lib/compare.js';
 import { parseHash, formatHash } from '../lib/hash.js';
 import { activatesOn } from '../lib/keys.js';
-import { kneeText, stepCurve } from '../lib/runs.js';
+import { kneeText, stepCurve, rateAxis } from '../lib/runs.js';
 
 /*
  * The archive, read from out/history.tsv and out/summary-*.json — the files the driver writes. Runs
@@ -88,6 +88,7 @@ export default function HistoryPanel() {
             onPick={setSelected}
             selected={selected}
             curve={stepCurve(detail && detail.summary ? detail.summary.per_step : null)}
+            delivery={detail && detail.summary ? detail.summary.delivery : null}
           />
         ) : null}
 
@@ -169,7 +170,7 @@ export default function HistoryPanel() {
 }
 
 /** Inline SVG: no chart dependency for one scatter plot with 20 points. */
-function KneePlot({ rows, onPick, selected, curve }) {
+function KneePlot({ rows, onPick, selected, curve, delivery }) {
   const pts = rows.filter((r) => r.peak && r.p95 !== null);
   const line = curve || [];
   if (pts.length < 2 && line.length < 2) return null;
@@ -180,12 +181,19 @@ function KneePlot({ rows, onPick, selected, curve }) {
   const maxY = Math.max(...pts.map((p) => p.p95), ...line.map((p) => p.p95), 1);
   const x = (v) => pad + (v / maxX) * (W - pad * 2);
   const y = (v) => H - pad - (v / maxY) * (H - pad * 2);
+  const axis = rateAxis(delivery);
   return (
     <svg className="knee" viewBox={`0 0 ${W} ${H}`} role="img"
          aria-label="p95 against rate: one dot per run, and the selected run's per-step curve">
       <line x1={pad} y1={H - pad} x2={W - pad} y2={H - pad} className="axis" />
       <line x1={pad} y1={pad} x2={pad} y2={H - pad} className="axis" />
-      <text x={W - pad} y={H - 10} className="axis-label" textAnchor="end">rate (req/s)</text>
+      {/* WHICH rate. `--peak` is total USER req/s and one user request becomes several HTTP requests, so
+          an unlabelled axis shows a knee at 60 while the target was taking 76 — the wrong answer 1.29.0
+          removed from the text. The wording is a decision and lives in lib/runs.js. (#83) */}
+      <text x={W - pad} y={H - 10} className="axis-label" textAnchor="end">
+        {axis.label}
+        <title>{axis.title}</title>
+      </text>
       <text x={6} y={pad - 12} className="axis-label">p95 (ms)</text>
       {line.length > 1 ? (
         <polyline
@@ -197,7 +205,9 @@ function KneePlot({ rows, onPick, selected, curve }) {
       {line.map((p) => (
         <circle key={`step-${p.step}`} cx={x(p.rate)} cy={y(p.p95)} r={p.partial ? 2 : 3}
                 className={`step-pt ${p.partial ? 'partial' : ''}`}>
-          <title>{`step ${p.step} · ${p.rate} req/s · p95 ${Math.round(p.p95)} ms`
+          <title>{`step ${p.step} · ${p.rate} req/s requested`
+            + (p.delivered === null ? '' : ` → ${p.delivered} delivered`)
+            + ` · p95 ${Math.round(p.p95)} ms`
             + (p.partial ? ' · PARTIAL: the run ended inside this step' : '')}</title>
         </circle>
       ))}

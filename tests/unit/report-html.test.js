@@ -476,3 +476,94 @@ test('a refused delivered rate is stated as a refusal, not as a missing number',
   assert.match(html, /measures the generator and not the mix/);
   assert.doesNotMatch(html, /req\/s arrived at the target/);
 });
+
+// ── the drawn report says WHY the rate was not held, and cannot drift again (#84) ────────────────────
+// The GUI got two exhaustive lists and a guard in 1.34.0; the report was left without one, and by then
+// it was already missing `drop_diagnosis` — so the artefact most likely to reach a ticket still said
+// DISCARD THIS RUN for a target that had simply saturated, which is the advice 1.32.0 exists to correct.
+
+test('a saturated target is not drawn as a plain discard', () => {
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 24, requests: 19, dropped_iterations: 15,
+    generator_ok: false, target_unreachable: false,
+    failed_rate: 0, dur: { p50: 400, p95: 900, p99: 1000, max: 1100 },
+    drop_diagnosis: {
+      verdict: 'target', generator_bound: false, discard: false, retry_lower: true,
+      reason: 'the target could not absorb the requested rate: every virtual user was in flight.',
+      fix: 'Measure it properly below that rate.',
+    },
+  });
+  assert.match(html, /could not absorb/);
+  assert.match(html, /TARGET/);
+  // the run is still not a source of latency charts, but it is not a wasted window either
+  assert.doesNotMatch(html, /DISCARD THIS RUN/);
+});
+
+test('a starved generator is still drawn as a discard, in those words', () => {
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 24, requests: 900, dropped_iterations: 400,
+    generator_ok: false, target_unreachable: false,
+    failed_rate: 0, dur: { p50: 10, p95: 20, p99: 30, max: 40 },
+    drop_diagnosis: {
+      verdict: 'generator', generator_bound: true, discard: true, retry_lower: false,
+      reason: 'the generator did not keep the schedule while the target answered promptly.',
+      fix: 'Move the generator closer to the target.',
+    },
+  });
+  assert.match(html, /DISCARD THIS RUN/);
+  assert.match(html, /did not keep the schedule/);
+});
+
+test('a run that held its rate says nothing about why it did not', () => {
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 24, requests: 900, dropped_iterations: 0,
+    generator_ok: true, target_unreachable: false, drop_diagnosis: null,
+    failed_rate: 0, dur: { p50: 10, p95: 20, p99: 30, max: 40 },
+  });
+  assert.doesNotMatch(html, /could not absorb/);
+  assert.doesNotMatch(html, /DISCARD THIS RUN/);
+});
+
+test('the error counters reach the page: p95 per class is not the only thing a class did', () => {
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 24, requests: 10000, dropped_iterations: 0,
+    generator_ok: true, target_unreachable: false,
+    failed_rate: 0.0223, dur: { p50: 10, p95: 20, p99: 30, max: 40 },
+    e504: 0, e502: 2, e5xx: 2, e404: 474, denied: 7, authFail: 0,
+    per_class: { html: { reqs: 6000, failed: 0.03, p95: 20, cache: {},
+      errors: { e504: 0, e502: 1, e5xx: 1, e404: 474, denied: 7 } } },
+  });
+  assert.match(html, /474/);
+  assert.match(html, /404/);
+  assert.match(html, /401\/403|denied/i);
+});
+
+test('every block buildSummary produces is either drawn or deliberately not', async () => {
+  // The same guard the GUI has, asked of buildSummary itself rather than a fixture: six blocks
+  // accumulated in the GUI because nothing noticed, and the report had no reason to be different.
+  const { buildSummary } = await import('../../k6/lib/summary.js');
+  const { DRAWN, DELIBERATELY_NOT_DRAWN } = await import('../../lib/report-html.mjs');
+  const summary = buildSummary({
+    http_reqs: { values: { count: 100, rate: 10 } },
+    http_req_duration: { values: { med: 10, 'p(95)': 20, 'p(99)': 30, max: 40 } },
+    http_req_failed: { values: { rate: 0 } },
+    dropped_iterations: { values: { count: 0 } },
+    vus: { values: { max: 5 } },
+  }, {
+    runId: '20260908T120000Z', profileName: 'p', shape: 'mix', baseUrl: 'http://x.test',
+    rscMode: 'repeat', peakRps: 10, shares: { html: 1 }, classNames: ['html'], cacheLabels: [],
+    guillotineMs: 5000, slo: { max_p95_ms: 700, max_failed_rate: 0.05 }, classSlo: {},
+    durationMs: 60000, abortDelay: '5s',
+  });
+  const known = new Set([...DRAWN, ...DELIBERATELY_NOT_DRAWN]);
+  const unaccounted = Object.keys(summary).filter((k) => !known.has(k));
+  assert.deepEqual(unaccounted, [],
+    'these summary blocks are neither drawn nor listed as deliberately left out — add them to '
+    + 'lib/report-html.mjs, with a reason if the page should not draw them');
+  assert.deepEqual(DRAWN.filter((k) => DELIBERATELY_NOT_DRAWN.includes(k)), [],
+    'a block cannot be both drawn and not drawn');
+});

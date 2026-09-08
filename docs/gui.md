@@ -324,7 +324,11 @@ since 1.34.0 that includes the blocks it had been silently skipping:
   is the same wrong answer 1.29.0 fixed in the panel and the reports.
 - **Why the rate was not held**, when it was not: the generator (discard) or the target (a finding).
 - **Requested → delivered**, with the fan-out between them.
-- The knee, refusals included.
+- The knee, refusals included — and the plot's x-axis now **says which rate it is drawing**. It maps the
+  requested rate, because that is the axis every step shares; an unlabelled axis on a mix with a fan-out
+  of 1.25 shows a knee at 60 while the target was taking 76, which is the wrong answer 1.29.0 removed from
+  the text, moved onto the chart. Hovering the axis gives the pair and the fan-out; a run whose delivered
+  rate was refused says so instead of pretending the two are equal.
 
 `concurrency`, `think_time`, `allocation`, `signup`, `auth` and `server_side` are **deliberately** not
 shown, each for a reason written down in `gui/ui/src/lib/summary-blocks.js`. That file is exhaustive over
