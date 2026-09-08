@@ -67,9 +67,26 @@ export function failureMode(s) {
 
   // Pick the code first, then decide whether it is worth a headline: a 504 at 1% and a 404 at 1% are the
   // same share and different findings, and the choice must not depend on which one crossed a threshold.
-  var chosen = null;
+  //
+  // ⚠️ Specificity decides between codes that are BOTH THERE — never between a code that is there and one
+  // that is a rounding error. Ordering by specificity alone put *0.01% answered 502* in a headline over
+  // **474 × 404** in the same run: two requests out of 21,299 outranked the finding, which is the exact
+  // failure this line exists to prevent, arrived at from the other side. So: among the codes that clear
+  // the headline floor, the most specific wins; if none clears it, the largest does. Magnitude gates the
+  // choice, specificity orders it.
+  var present = [];
   for (var i = 0; i < CODES.length; i++) {
-    if (num(s[CODES[i].key]) > 0) { chosen = CODES[i]; break; }
+    var n = num(s[CODES[i].key]);
+    if (n > 0) present.push({ def: CODES[i], count: n, share: n / total });
+  }
+  var material = present.filter(function (c) { return c.share >= HEADLINE_SHARE; });
+  var chosen = null;
+  if (material.length) {
+    chosen = material[0].def;                       // CODES order = specificity, already applied
+  } else if (present.length) {
+    var biggest = present[0];
+    for (var j = 1; j < present.length; j++) if (present[j].count > biggest.count) biggest = present[j];
+    chosen = biggest.def;
   }
 
   var count;

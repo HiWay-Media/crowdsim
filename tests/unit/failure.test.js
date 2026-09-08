@@ -131,3 +131,58 @@ test('it reads the summary and nothing else: no counter, no line', () => {
   assert.equal(failureMode({}), null);
   assert.equal(failureMode({ requests: 0, per_class: {} }), null);
 });
+
+// ── magnitude gates the choice, specificity orders it ────────────────────────────────────────────────
+// Run 20260908T102615Z, the first real run this line ever saw: ordering by specificity alone announced
+// *0.01% answered 502* over 474 × 404 in the same run. Two requests out of 21,299 outranked the finding.
+
+test('a rounding-error 502 does not outrank 474 real 404s', () => {
+  const runH = {
+    requests: 21299, failed_rate: 0.0344, aborted: true,
+    e504: 0, e502: 2, e5xx: 2, e404: 474, denied: 0,
+    per_class: {
+      html:         { reqs: 3000, errors: { e404: 200, e502: 1 } },
+      static:       { reqs: 2000, errors: { e404: 150, e502: 1 } },
+      rsc_page:     { reqs: 2000, errors: { e404: 124 } },
+      page_ext:     { reqs: 9000, errors: {} },
+      api_behavior: { reqs: 4000, errors: {} },
+      api_other:    { reqs: 1299, errors: {} },
+    },
+  };
+  const m = failureMode(runH);
+  assert.equal(m.code, '404');
+  assert.equal(m.count, 474);
+  assert.doesNotMatch(m.line, /502/);
+});
+
+test('specificity still wins between codes that are BOTH material', () => {
+  // The case the ordering was built for: cs_5xx counts the 504s too, so the largest raw counter would
+  // report "5xx" for a run whose finding is a read timeout.
+  const m = failureMode({
+    requests: 1000, failed_rate: 0.2, aborted: false,
+    e504: 100, e502: 0, e5xx: 100, e404: 0, denied: 0,
+    per_class: { html: { reqs: 1000, errors: { e504: 100, e5xx: 100 } } },
+  });
+  assert.equal(m.code, '504');
+});
+
+test('between two codes that both cleared the floor, specificity decides — even against volume', () => {
+  // Both are above the noise floor, so specificity decides: this is the one case the old rule got right
+  // and the fix must not break.
+  const m = failureMode({
+    requests: 1000, failed_rate: 0.3, aborted: false,
+    e504: 20, e502: 0, e5xx: 20, e404: 280, denied: 0,
+    per_class: { html: { reqs: 1000, errors: { e504: 20, e5xx: 20, e404: 280 } } },
+  });
+  assert.equal(m.code, '504');
+});
+
+test('when nothing clears the floor, the largest wins rather than the most specific', () => {
+  const m = failureMode({
+    requests: 100000, failed_rate: 0.0001, aborted: true,
+    e504: 1, e502: 0, e5xx: 1, e404: 8, denied: 0,
+    per_class: { html: { reqs: 100000, errors: { e504: 1, e5xx: 1, e404: 8 } } },
+  });
+  assert.equal(m.code, '404');
+  assert.equal(m.count, 8);
+});

@@ -4,6 +4,23 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.31.1] — 2026-09-08
+
+### Fixed
+- **A rounding-error 502 outranked 474 real 404s in the failure-mode headline.** The codes are ranked
+  most-specific-first so that a 504 is not swallowed by the `cs_5xx` counter that also counts it — and
+  1.29.0 applied that ranking *unconditionally*, so two 502s out of 21,299 requests (0.01%) took the
+  headline from a 2.2% 404 concentration in the same run. That is the bug the line exists to prevent,
+  arrived at from the other side: the headline named the rounding error and buried the finding.
+
+  Specificity now decides only between codes that are **both material**. Among the codes that clear the
+  0.5% headline floor, the most specific wins; if none of them clears it — which only happens on an
+  aborted run, where any failure is material by definition — the largest does. Magnitude gates the
+  choice, specificity orders it.
+- A test in `tests/unit/failure.test.js` was named the opposite of what it asserted (*"a material 404
+  outranks a material-but-less-common 504"* while asserting `504`). The assertion was right; in a suite
+  where the test names are the documentation, a name that lies is worse than a missing test.
+
 ## [1.31.0] — 2026-09-08
 
 Milestone v1.15.0, closed. **crowdsim describes the symptom perfectly and could say nothing about the
