@@ -41,8 +41,6 @@ form, so the two claims this tool is most confident about could not be attached 
   `tests/image/smoke.sh` asserts both load inside the image: they import across directories, which is the
   shape that broke 1.20.0.
 
-## [1.37.1] — 2026-09-08
-
 ### Fixed
 - **No image published for 1.36.0 or 1.37.0: the UI build stage lacked the one file the UI imports from
   outside itself.** `gui/ui/src/lib/summary-blocks.js` imports `outcomeBands` from `k6/lib/failure.js`,
