@@ -38,6 +38,13 @@ It reports what `out/` already holds, which profiles exist and which are still d
 command to run next** — generating no traffic, writing nothing, and changing no profile. Run it whenever
 you lose your place, including on a machine somebody else set up. See [`next`](cli.md#next).
 
+Two of those steps the tool can now take by itself, both **off by default**: `--recalibrate` retries a
+ramp whose first step did not survive, and `--certify` follows a swept knee with a hold at that rate. Each
+attempt is a separate run that re-enters through both gates — see
+[the CLI reference](cli.md#two-follow-up-runs-the-tool-can-start-by-itself). They exist because on one
+six-run campaign two runs were spent on a `--start` that was too high and a third only certified a knee
+the sweep had already found.
+
 The one thing it will not do is fill anything in: `safety.allow_hosts` and `safety.safe_peak_rps` are the
 two gates above, and it reports them as the decisions they are rather than suggesting a value.
 

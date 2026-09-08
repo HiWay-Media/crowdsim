@@ -1,0 +1,51 @@
+{
+ "run_id": "20260805T101112Z",
+ "profile": "test-minimal",
+ "shape": "mix",
+ "base_url": "http://127.0.0.1:8099",
+ "rsc_mode": "repeat",
+ "peak_rps_user_target": 40,
+ "aborted": true,
+ "requests": 12000,
+ "rps_avg": 39.6,
+ "failed_rate": 0.0012,
+ "dur": {
+  "p50": 110.0,
+  "p95": 780.0,
+  "p99": 1400.0,
+  "max": 3900.0
+ },
+ "guillotine_ms": 7000,
+ "over_guillotine_rate": 0.0,
+ "dropped_iterations": 0,
+ "e504": 0,
+ "e502": 0,
+ "e5xx": 0,
+ "e404": 0,
+ "cache": {
+  "proxy": 0.81
+ },
+ "per_class": {},
+ "mix_target": {
+  "html": 28.0,
+  "proxy_only": 12.0
+ },
+ "generator_ok": true,
+ "target_unreachable": false,
+ "knee": {
+  "refused": true,
+  "reason": "no step ran to completion: the run ended inside its first one, so the ramp already starts at or above this system's capacity.",
+  "fix": "Lower --start (and --peak with it) until the first step survives, then ramp from there."
+ },
+ "failure_mode": {
+  "code": "404",
+  "count": 320,
+  "share": 0.32,
+  "classes": [
+   "rsc_page"
+  ],
+  "class_count": 3,
+  "concentrated": true,
+  "line": "32.00% of requests answered 404 (paths this target does not serve), concentrated on 1 of 3 classes: rsc_page."
+ }
+}

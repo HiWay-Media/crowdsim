@@ -286,6 +286,58 @@ it the estimate is still printed. It is a **warning and never a gate**: the esti
 weighs what that one page weighed, which is wrong in both directions, and a wrong estimate must never stop a
 run somebody needs. The one thing it must not do is stay silent.
 
+#### Two follow-up runs the tool can start by itself
+
+Both are **off by default**, and both refuse far more often than they agree. A tool that re-runs on its
+own generates load nobody typed a command for.
+
+```bash
+crowdsim load --profile p.json --peak 120 --start 40 --recalibrate   # first step died? try lower
+crowdsim load --profile p.json --peak 120 --start 10 --certify       # knee swept? hold it
+```
+
+**`--recalibrate`** — when the ramp's **first step does not survive**, the run measured nothing: there is
+no curve, and the tool already refuses to name a knee from it. Its entire output was a sentence telling
+you to halve `--start` and run it again. Now it can do that, up to three attempts, halving each time and
+keeping the ramp's shape (`--peak` comes down with `--start`, or the second step would be past capacity
+instead of the first).
+
+It refuses whenever the failure is not capacity: a **generator-bound** run, an **unreachable** target,
+steps shorter than `--abort-delay`, a run that **did** complete a step, and — the interesting one —
+a run whose failures are **404s**:
+
+```
+  ── no follow-up run ──
+     the failures in this run are 404s, not saturation: the pool names paths this target does not serve,
+     so the same run at a lower rate produces the same result.
+```
+
+`--recalibrate-floor <n>` (default 1) is where it gives up. If the system cannot serve the floor, that is
+the finding.
+
+**`--certify`** — when the knee was **swept** through on the way up rather than held, certifying it is one
+run at that rate with a `--hold`. `--certify-hold <dur>` sets how long (default `60s`). It refuses a
+**refused** knee — appending a hold there would produce a clean sustained number for a rate the run never
+established — a knee that was already sustained, a run with a transient crossing (that is a cold cache:
+use `--warmup` first), and a rate above the safe peak.
+
+**What makes this safe is the re-entry.** A follow-up run is this same driver invoked again with two
+numbers changed, so:
+
+- **both gates are re-checked by construction**, not inherited. The allowlist is matched again, and
+  `--i-know-this-breaks-production` does **not** carry over: sweeping past the ceiling is a decision taken
+  once on a command line, and holding that rate for minutes is a larger authorisation than passing
+  through it. A sweep with the override followed by `--certify` gets the sweep and refuses the hold.
+- **every attempt is its own run** — its own run id, summary, log and `history.tsv` row. The attempt that
+  failed is kept, because the fact that its `--start` was too high is itself a capacity finding.
+- **every other flag is forwarded verbatim.** The follow-up filters the original command line rather than
+  rebuilding one, so a flag this code did not think about is not silently dropped.
+- one hold, not a chain: a certification does not certify itself.
+
+Both need **node** (the decisions live in `k6/lib/recalibrate.js` and `k6/lib/certify.js`, where they are
+unit tested). Without it the run is still archived and the follow-up is simply not attempted, with a line
+saying so.
+
 ### `cache-ab`
 
 Brings up two nginx legs against the same origin, one as-is and one with your candidate config, so you can

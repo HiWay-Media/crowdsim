@@ -158,6 +158,15 @@
 #     --insecure           skip TLS verification, for a node addressed by IP
 #     --slack              post a recap to CROWDSIM_SLACK_WEBHOOK
 #     --dry-run            print the exact k6 invocation and stop. Sends nothing.
+#     --recalibrate        if the FIRST STEP does not survive, the run measured nothing — try again from
+#                          half the rate, up to 3 attempts. Off by default: a tool that re-runs on its own
+#                          generates load nobody typed a command for. Every attempt is its own run, with
+#                          its own id and history row, and re-enters through both gates. Needs node.
+#     --recalibrate-floor <n>  the rate below which recalibration gives up (default: 1)
+#     --certify            if the knee was SWEPT on the way up, follow the sweep with one hold at that
+#                          rate, as a separate run. Off by default, and refused when the knee was refused:
+#                          a hold must not turn a qualified knee into an unqualified one. Needs node.
+#     --certify-hold <dur> how long that hold lasts (default: 60s)
 #
 #   Example:
 #     CROWDSIM_ALLOW_TARGETS='www.example.test' \
@@ -389,6 +398,11 @@ except Exception:
 }
 
 CMD="${1:-}"; shift || true
+# The command line as it was typed, kept so that a follow-up run (--recalibrate, --certify) can be the
+# SAME run with two numbers changed. Rebuilding an argv from the resolved state instead would silently
+# drop any flag this code forgot to forward, and a run that is not the run somebody asked for is exactly
+# the class of wrong answer this tool exists to avoid.
+ORIGINAL_ARGV=("$@")
 # `--help` in SUBCOMMAND position: without this case it falls through to the unknown-subcommand branch
 # and exits 2 — which is the first thing anyone tries. `--version` is the second.
 case "$CMD" in
@@ -446,6 +460,10 @@ while [ $# -gt 0 ]; do
     --top) LOG_TOP="$2"; shift 2;;
     --last) HISTORY_LAST="$2"; shift 2;;
     --cols) HISTORY_COLS="$2"; shift 2;;
+    --recalibrate) RECALIBRATE=1; shift;;
+    --recalibrate-floor) RECALIBRATE_FLOOR="$2"; shift 2;;
+    --certify) CERTIFY=1; shift;;
+    --certify-hold) CERTIFY_HOLD="$2"; shift 2;;
     --access-log) ACCESS_LOG="$2"; shift 2;;
     --rsc-query) RSC_QUERY_OVERRIDE="$2"; shift 2;;
     --force) FORCE_OVERWRITE=1; shift;;
@@ -533,6 +551,24 @@ fi
 
 RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
 mkdir -p "$OUT_DIR"
+# Two runs that start in the same SECOND share a run id, and the second one overwrites the first's
+# summary, its log and its history row. Rare with a real ramp, which takes minutes — and certain with
+# --recalibrate, where the follow-up starts the instant the sweep ends. The failed attempt is the evidence
+# that its --start was too high, so losing it is losing the finding.
+#
+# The id format is load-bearing (the GUI matches ^\d{8}T\d{6}Z$, so do the completions and the tests), so
+# this waits for the next second rather than changing the shape of it. Bounded, because a frozen clock
+# must not turn into a hang.
+_id_tries=0
+while [ -e "$OUT_DIR/summary-$RUN_ID.json" ] || [ -e "$OUT_DIR/load-$RUN_ID.log" ]; do
+  _id_tries=$((_id_tries + 1))
+  if [ "$_id_tries" -gt 5 ]; then
+    die "run id $RUN_ID is already used in $OUT_DIR and the clock is not moving. Use a different
+  --out/CROWDSIM_OUT, or check the system clock: overwriting an archived run would destroy it." 2
+  fi
+  sleep 1
+  RUN_ID="$(date -u +%Y%m%dT%H%M%SZ)"
+done
 HISTORY_F="$OUT_DIR/history.tsv"
 
 # ─────────────────────────────── profile handling ───────────────────────────────────────────────────
@@ -1503,6 +1539,9 @@ print(d.get("generator_ok"), d.get("target_unreachable"))' "$summary")"
       warn "THE TARGET NEVER ANSWERED — this is a connectivity problem, not a capacity result."
       warn "Run 'crowdsim probe' against the same target before trying again."
     fi
+    # Only after this run is fully archived: a follow-up must never be able to cost the evidence for the
+    # run that proposed it.
+    followup_run "$summary"
   else
     # Exit 4, not 0. `0` means EXECUTED — a run the brake stopped is an outcome and keeps 0 — but a
     # generator that never produced a summary did not run at all: a bad journey file, a profile it refuses
@@ -1515,6 +1554,96 @@ print(d.get("generator_ok"), d.get("target_unreachable"))' "$summary")"
   a credentials CSV that parsed to no accounts." 4
   fi
   return 0
+}
+
+# ───────────────────── a follow-up run: fewer wasted windows, same gates ─────────────────────────────
+# Two runs in six on one campaign were thrown away because --start was already past capacity, and one more
+# existed only to certify a knee the sweep had found. Both were decisions the tool had already made and
+# then handed back as a sentence to act on by hand.
+#
+# THE SAFETY PROPERTY IS THE RE-ENTRY. A follow-up run is this same driver, invoked again with two numbers
+# changed — so the allowlist and the safe peak are re-checked by construction rather than by remembering
+# to, each attempt gets its own RUN_ID, its own summary and its own history row, and the safe-peak override
+# stays a decision taken once on a command line rather than something a loop inherits.
+#
+# Off by default, both of them. A tool that re-runs on its own generates load nobody typed a command for.
+followup_argv() {
+  # The original command line, minus the two rates and minus the flags that must not be inherited. Every
+  # other flag is forwarded verbatim: rebuilding the argv from resolved state would drop whatever this
+  # code forgot about, and that run would not be the run somebody asked for.
+  local drop_certify="$1"
+  FOLLOWUP_ARGV=()
+  local i=0 a
+  while [ "$i" -lt "${#ORIGINAL_ARGV[@]}" ]; do
+    a="${ORIGINAL_ARGV[$i]}"
+    case "$a" in
+      --start|--peak|--steps|--hold) i=$((i + 2)); continue;;
+      --certify-hold) i=$((i + 2)); continue;;
+      --certify) if [ "$drop_certify" = "1" ]; then i=$((i + 1)); continue; fi;;
+    esac
+    FOLLOWUP_ARGV+=("$a")
+    i=$((i + 1))
+  done
+}
+
+# Ask lib/followup-cli.mjs, then act on the one line it prints. Never both modes in one run: a
+# recalibrated attempt has no knee to certify yet, and it will be asked again when it produces one.
+followup_run() {
+  local summary="$1" mode drop_certify
+  local cli="$ROOT/lib/followup-cli.mjs"
+  local attempt="${CROWDSIM_FOLLOWUP_ATTEMPT:-1}"
+
+  if [ "${RECALIBRATE:-0}" = "1" ]; then mode=recalibrate; drop_certify=0
+  elif [ "${CERTIFY:-0}" = "1" ]; then mode=certify; drop_certify=1
+  else return 0; fi
+
+  if ! command -v node >/dev/null 2>&1 || [ ! -f "$cli" ]; then
+    warn "--${mode} needs node (18+): the decision lives in k6/lib/${mode}.js, where it is unit tested."
+    say  "     This run is complete and archived; the follow-up was not attempted."
+    return 0
+  fi
+
+  local args=("$cli" "$summary" --mode "$mode" --safe-peak "${SAFE_PEAK:-$(pf safety.safe_peak_rps)}")
+  if [ "$mode" = "recalibrate" ]; then
+    args+=(--start "$START" --peak "$PEAK" --attempt "$attempt")
+    if [ -n "${RECALIBRATE_FLOOR:-}" ]; then args+=(--floor "$RECALIBRATE_FLOOR"); fi
+  else
+    if [ -n "${CERTIFY_HOLD:-}" ]; then args+=(--hold "$CERTIFY_HOLD"); fi
+    if [ "${CROWDSIM_FOLLOWUP_CERTIFYING:-0}" = "1" ]; then args+=(--already 1); fi
+  fi
+
+  local line; line="$(node "${args[@]}" 2>&1)" || {
+    warn "the follow-up decision could not be made: $line"
+    return 0
+  }
+  local verdict="${line%%	*}"
+  local rest="${line#*	}"
+
+  say ""
+  if [ "$verdict" != "GO" ]; then
+    say "  ── no follow-up run ──"
+    say "     $rest"
+    return 0
+  fi
+
+  local frag="${rest%%	*}"
+  local why="${rest#*	}"
+  say "  ── follow-up run ──"
+  say "     $why"
+  say "     $frag"
+  say ""
+
+  followup_argv "$drop_certify"
+  # `exec` deliberately NOT used: this run is finished and archived, and the follow-up is a separate run
+  # whose exit code is the one the caller sees — a scheduler must learn about the run that produced the
+  # number, not about the sweep that preceded it.
+  local env_attempt=$((attempt + 1))
+  if [ "$mode" = "certify" ]; then
+    CROWDSIM_FOLLOWUP_CERTIFYING=1 CROWDSIM_FOLLOWUP_ATTEMPT="$env_attempt" \
+      "$0" load "${FOLLOWUP_ARGV[@]}" $frag
+  else
+    CROWDSIM_FOLLOWUP_ATTEMPT="$env_attempt" "$0" load "${FOLLOWUP_ARGV[@]}" $frag
+  fi
 }
 
 # The accounts a signup run created, collected where they can be found again.

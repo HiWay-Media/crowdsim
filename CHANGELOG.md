@@ -4,6 +4,61 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.30.0] — 2026-09-08
+
+Milestone v1.14.0, closed. Two runs in six on one campaign were thrown away because `--start` was already
+past capacity, and a third existed only to certify a knee the sweep had found. Both were decisions the
+tool had already made and then handed back as a sentence to act on by hand.
+
+These are the only flags under which crowdsim generates load nobody typed a command for, so both are
+**off by default** and both refuse far more often than they agree.
+
+### Added
+- **`--recalibrate`** ([#72](https://github.com/HiWay-Media/crowdsim/issues/72)). When the ramp's first
+  step does not survive, the run measured nothing — no curve, and the tool already refuses to name a knee
+  from it — so its whole output was *lower `--start` until the first step survives*. It now does that
+  itself, up to three attempts, halving each time and **keeping the ramp's shape** (`--peak` comes down
+  with `--start`, or the second step would be past capacity instead of the first). `--recalibrate-floor`
+  is where it gives up; if the system cannot serve the floor, that is the finding.
+
+  It refuses whenever the failure is not capacity: a generator-bound run, an unreachable target, steps
+  shorter than `--abort-delay`, a run that *did* complete a step — and a run whose failures are **404s**,
+  where the pool names paths the target does not serve and the same run at half the rate produces the
+  same result.
+- **`--certify`** ([#73](https://github.com/HiWay-Media/crowdsim/issues/73)). A knee found while climbing
+  was *swept* through, not held. Certifying it is one run at that rate with a `--hold`
+  (`--certify-hold`, default 60s), as a **separate run** — a swept number and a sustained one must never
+  end up under one label. It refuses a refused knee (a hold there would produce a clean sustained number
+  for a rate the run never established), a knee that was already sustained, a run with a transient
+  crossing (that is a cold cache: `--warmup` first), and a rate above the safe peak.
+
+**What makes this safe is the re-entry.** A follow-up run is this same driver invoked again with two
+numbers changed, so both gates are re-checked *by construction* rather than by remembering to:
+
+- **`--i-know-this-breaks-production` does not carry over.** Sweeping past the ceiling is a decision taken
+  once on a command line; holding that rate for minutes is a larger authorisation than passing through it.
+  A sweep with the override followed by `--certify` gets the sweep and refuses the hold — asserted.
+- **Every attempt is its own run**, with its own id, summary, log and `history.tsv` row. The attempt that
+  failed is kept: the fact that its `--start` was too high is itself a capacity finding.
+- **Every other flag is forwarded verbatim.** The follow-up filters the original command line rather than
+  rebuilding one from resolved state, because a flag this code did not think about would otherwise be
+  dropped in silence — and a run that is not the run somebody asked for is the class of wrong answer this
+  tool exists to avoid.
+- One hold, not a chain: a certification does not certify itself.
+
+The two policies are pure and unit tested (`k6/lib/recalibrate.js`, `k6/lib/certify.js`) because they
+decide whether this tool generates traffic; the driver only acts on the one line
+`lib/followup-cli.mjs` prints. Both need node — without it the run is still archived and the follow-up is
+not attempted, with a line saying so.
+
+### Fixed
+- **Two runs that started in the same second shared a run id**, and the second overwrote the first's
+  summary, log and history row. Rare with a real ramp, which takes minutes — and *certain* with
+  `--recalibrate`, where the follow-up starts the instant the sweep ends, which is exactly where the
+  overwritten run is the evidence. Found by a test that expected two summaries and found one. The id
+  format is load-bearing (the GUI matches `^\d{8}T\d{6}Z$`, so do the completions), so the driver waits
+  for the next second instead of changing its shape — bounded, so a frozen clock cannot become a hang.
+
 ## [1.29.0] — 2026-09-08
 
 Two of the four items of milestone v1.14.0, both from the same six-run campaign, and both the same shape
