@@ -111,6 +111,9 @@
   },
   {
    "title": "v1.17.0"
+  },
+  {
+   "title": "v1.18.0"
   }
  ],
  "issues": [
@@ -1791,6 +1794,135 @@
     "- The delta is drawn as a delta, not as two absolute curves the reader subtracts by eye.",
     "- The caveats that travel with a delta are on the page: same pool, colder than real traffic, and which of the two runs is the baseline.",
     "- `report --html`'s refusal message is updated to point here instead of implying no drawn comparison exists."
+   ]
+  },
+  {
+   "key": "tag-without-image-smoke",
+   "title": "Nothing stops a tag whose image does not build — which is how 1.36.0 and 1.37.0 shipped without one",
+   "milestone": "v1.18.0",
+   "labels": [
+    "area:release",
+    "area:ci"
+   ],
+   "body": [
+    "`scripts/new-release.sh tag` checks the working tree is clean, that the version is aligned and that the CHANGELOG section is not a placeholder. It does not check that the image builds, and `make test` cannot: the image build is not part of it.",
+    "",
+    "So the only thing between a broken Dockerfile and a red release is remembering to run `make image-smoke` — which `CLAUDE.md` requires after touching `bin/`, `k6/`, `gui/` or the Dockerfile, and which was skipped. The result was a `vite build` failure inside the image for a missing `COPY`, twice, and **no image published for 1.36.0 or 1.37.0**. Everything local was green: lint, unit, ui, gui, cli, e2e.",
+    "",
+    "v1.38.0 added a targeted guard (`tests/gui/ui-build-inputs.test.js`) for the exact mistake — the UI importing a file the `ui` stage does not copy. That closes one shape of the bug. A `COPY` omission of a different shape still reaches CI first.",
+    "",
+    "**Done when**",
+    "- Tagging a release cannot succeed while the image fails to build. Whether that is `tag` running `make image-smoke`, or refusing when no smoke run is recorded for this tree, is the design question — the property is that the gate is not a memory exercise.",
+    "- It stays usable without docker: on a machine that cannot build the image the refusal must say so and be overridable **explicitly**, the way the safe peak is. A gate nobody can satisfy gets worked around, and then it is worse than none.",
+    "- The check is fast enough to run. If `image-smoke` is too slow for every tag, then building the image alone is the gate and the smoke test stays where it is.",
+    "- `docs/development.md` says which gates run when, because the current answer is *the ones you remember*."
+   ]
+  },
+  {
+   "key": "gui-cannot-hand-over-trend-or-delta",
+   "title": "The page can hand over one run drawn, and not the trend or the delta",
+   "milestone": "v1.18.0",
+   "labels": [
+    "area:gui"
+   ],
+   "body": [
+    "`gui/server/lib/app.js` builds exactly one drawn-page argv:",
+    "",
+    "```js",
+    "const argv = format === 'html' ? ['report', runId, '--html'] : ['report', runId];",
+    "```",
+    "",
+    "So the page offers the run report and has no path to `crowdsim history --html` (the knee over time) or `crowdsim compare a b --html` (the delta), both shipped in v1.38.0. The GUI already renders a knee plot of the archive and already knows which runs are comparable — it has the data for both and can hand over neither.",
+    "",
+    "This is the fourth time this shape has come up: [#53](https://github.com/HiWay-Media/crowdsim/issues/53) (two flags), [#78](https://github.com/HiWay-Media/crowdsim/issues/78) (six summary blocks), [#79](https://github.com/HiWay-Media/crowdsim/issues/79) (six flags), and now two subcommands. The page tracks the CLI by hand, and by hand it drifts.",
+    "",
+    "**Done when**",
+    "- The archive view hands over the trend, and a comparison hands over the delta, both as the CLI's own pages — spawned, not rebuilt, the same way the run report already is.",
+    "- The trend honours whatever the view is filtered to. `history --html` reads the same filtered records as `history`, so a page drawn from *all* runs while the table shows five would be two answers to one question.",
+    "- `compare --html` keeps every refusal: the page must not offer a delta between two runs `compare` would refuse, and the refusal shown is `compare`'s own text.",
+    "- **Something makes the next drift fail a test.** The summary blocks got that in v1.34.0 and the UI's build inputs in v1.38.0; the set of drawn pages the CLI offers has no equivalent, which is why this issue exists at all."
+   ]
+  },
+  {
+   "key": "server-metrics-path-weaker-than-precedent",
+   "title": "The series path the page accepts is pattern-checked, where the profile path is resolved",
+   "milestone": "v1.18.0",
+   "labels": [
+    "area:gui",
+    "safety"
+   ],
+   "body": [
+    "Two places let a browser name a file on the server's filesystem, and they are checked to different standards.",
+    "",
+    "`gui/server/lib/profiles.js` resolves and contains:",
+    "",
+    "```js",
+    "const base = fs.realpathSync(dir);",
+    "const full = path.resolve(base, String(name));",
+    "if (path.dirname(full) !== base) throw new BadProfile('profile name must not contain a path');",
+    "```",
+    "",
+    "`gui/server/lib/args.js` matches a pattern and stops:",
+    "",
+    "```js",
+    "const SAFE_REL_PATH = /^(?!\\/)(?!.*(^|\\/)\\.\\.(\\/|$))[A-Za-z0-9_.\\/-]{1,255}$/;",
+    "```",
+    "",
+    "The pattern refuses an absolute path and any `..` segment, which is the traversal that matters most. What it does not do is what the older module does: **resolve the path and check where it lands.** A symlink under the working directory pointing anywhere on the filesystem satisfies the pattern, and the driver then reads that file and renders numbers out of it into a page. The profile module says in its own header that it allows *no traversal, no symlink*; this one allows nested paths and does not look.",
+    "",
+    "Nothing here is exploitable by a stranger — the GUI binds loopback and demands a token for anything else — and only numbers survive the parse. It is the weaker of two checks guarding the same kind of thing, in the newer code, which is the direction this repository is usually careful about.",
+    "",
+    "**Done when**",
+    "- The series path is resolved and contained, with `realpath`, against the directory it is allowed to be under — the same treatment as a profile name.",
+    "- Whether that directory is the working directory or a dedicated one is the decision to write down. A dedicated one is easier to reason about and easier to mount in the container.",
+    "- The refusal says which of the two it was: outside the allowed directory, or not a path at all.",
+    "- Tests in `tests/gui/` over a symlink that escapes, an absolute path, a `..`, and a legitimate nested path — the traversal cases the profile browser already has, applied here."
+   ]
+  },
+  {
+   "key": "charts-named-not-described",
+   "title": "Every chart has a name and none has a description: the numbers behind it are unavailable",
+   "milestone": "v1.18.0",
+   "labels": [
+    "area:cli"
+   ],
+   "body": [
+    "Each SVG in the drawn pages carries `role=\"img\"` and an `aria-label`, so a screen reader announces *what the chart is*. None of them carries a `<desc>`, and none has a text equivalent of the data — checked across `lib/report-html.mjs` (5 charts), `lib/trend-html.mjs` and `lib/compare-html.mjs` (1 each): `<desc>` appears zero times.",
+    "",
+    "So the ramp, the knee band, p95 per class, the cache per layer, the outcome bars, the trend and the delta are announced by name and are then empty. The report exists to be handed to somebody — that is its whole purpose, and it is the artefact most likely to reach people who did not run the test.",
+    "",
+    "The numbers are all already in the page: `report --html` prints the per-step table beside the ramp. What is missing is the link between the two, and a description for the charts whose data is only in the picture.",
+    "",
+    "**Done when**",
+    "- Every chart has a `<desc>` that says what it shows and where the numbers are, not a restatement of the title.",
+    "- A chart whose data is not tabulated elsewhere on the page gets a table, `<details>`-collapsed if it is long. A picture is not a source.",
+    "- The refusals stay legible without the picture: *no latency charts on this page* must reach a screen reader too, since it is the most important sentence on an invalid run's report.",
+    "- Asserted like the rest of the geometry — a unit test per chart that it has a description and that a chart without tabulated data has a table.",
+    "- Print to PDF still works: `<details>` collapsed on paper hides content, so it opens for print."
+   ]
+  },
+  {
+   "key": "docs-index-missing-drawn-pages",
+   "title": "The docs index lists one drawn page and the tool has three",
+   "milestone": "v1.18.0",
+   "labels": [
+    "documentation"
+   ],
+   "body": [
+    "`docs/index.md` §Start here has one row for a drawn page:",
+    "",
+    "```",
+    "| hand a run to somebody else, drawn | report --html |",
+    "```",
+    "",
+    "`crowdsim history --html` (the trend) and `crowdsim compare a b --html` (the delta) shipped in v1.38.0, are documented in `docs/cli.md`, and are in the README's Use block — and are absent from the index, which is the entry point.",
+    "",
+    "This repo's own rule is that a page not in `docs/index.md` and the README index *does not exist*. The rule was written about doc pages; the same reasoning covers a command whose output is a page: the index is where somebody looks to find out the tool can do it at all.",
+    "",
+    "**Done when**",
+    "- §Start here answers the two questions those commands exist for — *does the knee move over time* and *what did this change buy* — pointing at them.",
+    "- The three drawn pages are discoverable together, so it is clear that one draws a run, one an archive and one a delta.",
+    "- `make check-docs` covers it: the index is verified against the subcommands the driver dispatches, the way documented flags are already verified against the ones it parses. A checklist nobody checks is how this happened."
    ]
   }
  ]
