@@ -171,3 +171,39 @@ test('the per-class numbers of a step are carried when they were tagged', () => 
   // fast, when it is a class that never ran.
   assert.equal(rows[0].per_class.rsc_page, undefined);
 });
+
+test('every step carries its own window, which is what lets an external series line up with it', () => {
+  // A run id is the run's start in UTC, so a step that knows its offset from that start can be read
+  // against anything else that was recorded with a clock. Without these two fields a handed-in
+  // server-side series has nothing to align to. (#75)
+  const plan = stepPlan({ startRps: 10, peakRps: 30, steps: 2, stepDur: '60s', holdDur: '30s' });
+  const metrics = {};
+  for (const s of plan) {
+    metrics['http_reqs{step:' + s.tag + '}'] = { values: { count: 100 } };
+    metrics['http_req_duration{step:' + s.tag + '}'] = { values: { med: 10, 'p(95)': 20, 'p(99)': 30 } };
+  }
+  const rows = perStep(metrics, plan, { durationMs: 150000, classNames: [] });
+  assert.ok(rows.length >= 2);
+  for (const r of rows) {
+    assert.equal(typeof r.start_ms, 'number', r.step);
+    assert.equal(typeof r.end_ms, 'number', r.step);
+    assert.ok(r.end_ms > r.start_ms, r.step);
+  }
+  // contiguous, and starting at zero: the offsets are from the run's own start
+  assert.equal(rows[0].start_ms, 0);
+  for (let i = 1; i < rows.length; i++) assert.equal(rows[i].start_ms, rows[i - 1].end_ms);
+});
+
+test('a partial step ends where the run ended, not where its window would have', () => {
+  // Otherwise a series would be averaged over seconds the run never reached.
+  const plan = stepPlan({ startRps: 10, peakRps: 30, steps: 2, stepDur: '60s', holdDur: '0s' });
+  const metrics = {};
+  for (const s of plan) {
+    metrics['http_reqs{step:' + s.tag + '}'] = { values: { count: 50 } };
+    metrics['http_req_duration{step:' + s.tag + '}'] = { values: { med: 10, 'p(95)': 20, 'p(99)': 30 } };
+  }
+  const rows = perStep(metrics, plan, { durationMs: 75000, classNames: [] });
+  const last = rows[rows.length - 1];
+  assert.equal(last.partial, true);
+  assert.equal(last.end_ms, 75000, 'the run ended here');
+});

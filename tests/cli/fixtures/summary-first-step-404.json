@@ -47,5 +47,45 @@
   "class_count": 3,
   "concentrated": true,
   "line": "32.00% of requests answered 404 (paths this target does not serve), concentrated on 1 of 3 classes: rsc_page."
- }
+ },
+ "per_step": [
+  {
+   "step": "s1",
+   "index": 1,
+   "is_hold": false,
+   "requested_rps": 4,
+   "from_rps": 4,
+   "sustained": false,
+   "start_ms": 0,
+   "end_ms": 60000,
+   "achieved_rps": 4.0,
+   "requests": 240,
+   "p50": 80,
+   "p95": 120,
+   "p99": 140,
+   "failed_rate": 0.0,
+   "over_guillotine_rate": 0.0,
+   "partial": false,
+   "per_class": {}
+  },
+  {
+   "step": "s2",
+   "index": 2,
+   "is_hold": false,
+   "requested_rps": 8,
+   "from_rps": 4,
+   "sustained": false,
+   "start_ms": 60000,
+   "end_ms": 120000,
+   "achieved_rps": 8.0,
+   "requests": 480,
+   "p50": 95,
+   "p95": 180,
+   "p99": 220,
+   "failed_rate": 0.0,
+   "over_guillotine_rate": 0.0,
+   "partial": false,
+   "per_class": {}
+  }
+ ]
 }

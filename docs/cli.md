@@ -286,6 +286,60 @@ it the estimate is still printed. It is a **warning and never a gate**: the esti
 weighs what that one page weighed, which is wrong in both directions, and a wrong estimate must never stop a
 run somebody needs. The one thing it must not do is stay silent.
 
+#### A server-side series, read against the run's own steps
+
+crowdsim measures from **outside**: latency, failed rate, cache hit ratio, the knee. That is the right
+place to measure what users experience, and the wrong place to answer the question that follows
+immediately — *why*. A run ends with a defensible knee and cannot tell a saturated app tier from a CPU
+quota being throttled, and those have different fixes: one is a rewrite, the other is one line of
+configuration.
+
+```bash
+crowdsim load --profile p.json --peak 60 \
+  --server-metrics throttle.csv --server-metrics-label cpu_throttled_periods
+```
+
+```
+  ── cpu_throttled_periods, per step (handed to this run, not collected) ──
+     step  requested  samples  mean      max
+     s1            7        7         0        0
+     s2            9        7      1.14        8
+     s3           12        7        32       56
+     peak         12        5        72       88
+     This is a correlation and not a cause: the series moved during the same windows, which
+     is a reason to look and not a finding on its own.
+```
+
+Alignment works because a run id **is** the run's start time in UTC and each step records its own offsets
+from it, so any series recorded with a clock can be read against the step it belongs to. Written to
+`out/server-side-<run>.json` and included in `crowdsim report`.
+
+**crowdsim does not go and get it.** That is [a decision, not a gap](../INTENT.md) — the same one as the
+access log: collecting would mean a load generator holding credentials for a metrics backend or a cluster,
+which is a different tool with a different risk profile. `--server-metrics` takes a path; nothing in
+`lib/server-metrics-cli.mjs` speaks HTTP, and a test asserts that.
+
+**And what comes out is a correlation, said as a correlation.** A counter that rose during the same
+minutes is a reason to look, not a finding — promoting it to a cause would be the same mistake as quoting
+a knee as an absolute. A unit test asserts the caveat does not contain *caused*, *because*, *explains* or
+*due to*.
+
+| Input | Accepted |
+|---|---|
+| `timestamp,value` | CSV, TSV or `;`-separated. A header row is skipped rather than parsed as a sample. |
+| JSON | `[{"t": …, "v": …}]` or `[[t, v], …]` |
+| Timestamps | epoch **seconds** or **milliseconds**, decided by magnitude — never guessed, because guessing aligns a series to the wrong century |
+
+Refusals, none of which fail a run that already happened:
+
+- **no label** — an unnamed column of numbers cannot be read against anything;
+- **no overlap** with the run's window — reported as such, rather than as a table of zeroes that reads
+  like an idle server;
+- **a step with no samples is absent, not zero.** Zero is a measurement; *nobody recorded anything here*
+  is a different statement;
+- a missing file, an unparseable one, or **no node** — the run stays archived and the series is simply not
+  read.
+
 #### Two follow-up runs the tool can start by itself
 
 Both are **off by default**, and both refuse far more often than they agree. A tool that re-runs on its

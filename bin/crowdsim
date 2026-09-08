@@ -167,6 +167,11 @@
 #                          rate, as a separate run. Off by default, and refused when the knee was refused:
 #                          a hold must not turn a qualified knee into an unqualified one. Needs node.
 #     --certify-hold <dur> how long that hold lasts (default: 60s)
+#     --server-metrics <file>  a server-side series to read against this run's own steps: two columns
+#                          (timestamp,value) or a JSON array. crowdsim never fetches one — see INTENT.md,
+#                          same decision as the access log — and what it produces is a CORRELATION, said
+#                          as one. Needs node.
+#     --server-metrics-label <name>  what that series is (e.g. cpu_throttled_periods). Required with it.
 #
 #   Example:
 #     CROWDSIM_ALLOW_TARGETS='www.example.test' \
@@ -464,6 +469,8 @@ while [ $# -gt 0 ]; do
     --recalibrate-floor) RECALIBRATE_FLOOR="$2"; shift 2;;
     --certify) CERTIFY=1; shift;;
     --certify-hold) CERTIFY_HOLD="$2"; shift 2;;
+    --server-metrics) SERVER_METRICS="$2"; shift 2;;
+    --server-metrics-label) SERVER_METRICS_LABEL="$2"; shift 2;;
     --access-log) ACCESS_LOG="$2"; shift 2;;
     --rsc-query) RSC_QUERY_OVERRIDE="$2"; shift 2;;
     --force) FORCE_OVERWRITE=1; shift;;
@@ -1539,6 +1546,7 @@ print(d.get("generator_ok"), d.get("target_unreachable"))' "$summary")"
       warn "THE TARGET NEVER ANSWERED — this is a connectivity problem, not a capacity result."
       warn "Run 'crowdsim probe' against the same target before trying again."
     fi
+    server_metrics_report "$summary"
     # Only after this run is fully archived: a follow-up must never be able to cost the evidence for the
     # run that proposed it.
     followup_run "$summary"
@@ -1553,6 +1561,42 @@ print(d.get("generator_ok"), d.get("target_unreachable"))' "$summary")"
   A profile the generator refuses in its init context fails exactly like this: a missing journey file, or
   a credentials CSV that parsed to no accounts." 4
   fi
+  return 0
+}
+
+# ─────────────── a server-side series, read against this run's steps (never fetched) ─────────────────
+# crowdsim measures from outside, which is the right place to measure what users experience and the wrong
+# place to answer why. A run can end with a defensible knee and no way to tell a saturated app tier from a
+# CPU quota being throttled — and those have different fixes.
+#
+# The scope decision is in INTENT.md and is the same one as the access log: a series is HANDED to a run.
+# This does not fetch, does not authenticate, and does not learn a hostname. What comes out is a
+# correlation, said as a correlation.
+server_metrics_report() {
+  local summary="$1"
+  [ -n "${SERVER_METRICS:-}" ] || return 0
+  local cli="$ROOT/lib/server-metrics-cli.mjs"
+
+  if [ -z "${SERVER_METRICS_LABEL:-}" ]; then
+    warn "--server-metrics needs --server-metrics-label: an unnamed column of numbers cannot be read"
+    say  "     against anything. This run is complete and archived."
+    return 0
+  fi
+  if [ ! -f "$SERVER_METRICS" ]; then
+    warn "--server-metrics file not found: $SERVER_METRICS (the run itself is complete and archived)"
+    return 0
+  fi
+  if ! command -v node >/dev/null 2>&1 || [ ! -f "$cli" ]; then
+    warn "--server-metrics needs node (18+): the alignment lives in k6/lib/correlate.js, where it is"
+    say  "     unit tested. This run is complete and archived without it."
+    return 0
+  fi
+
+  say ""
+  # Never fatal: a series that does not line up is a reason to check a clock, not a reason to throw away a
+  # run that already happened.
+  node "$cli" "$summary" --series "$SERVER_METRICS" --label "$SERVER_METRICS_LABEL" \
+       --out-dir "$OUT_DIR" || true
   return 0
 }
 
@@ -2467,6 +2511,31 @@ if dl:
             w(f"- **Fewer arrived than were asked for.** {dl['note']}")
         w('- Both numbers answer different questions: what was driven, and what it took. Quoting the '
           'requested rate alone is wrong in the direction that gets capacity bought.')
+    w('')
+
+# 3d. A server-side series, if one was handed to this run. Read against the same steps, and reported as a
+# correlation — the same discipline as everywhere else: a counter that rose in the same windows is a
+# reason to look, not a finding. (#75)
+ss = None
+try:
+    _ss_path = os.path.join(os.path.dirname(summary_path), f"server-side-{d.get('run_id')}.json")
+    with open(_ss_path, encoding='utf-8') as fh:
+        ss = json.load(fh)
+except Exception:
+    ss = None
+if ss and ss.get('steps'):
+    w(f"## {ss['label']}, per step")
+    w('')
+    w('| step | requested req/s | samples | mean | max |')
+    w('|---|---:|---:|---:|---:|')
+    for row in ss['steps']:
+        note = ' (partial)' if row.get('partial') else ''
+        w(f"| `{row['step']}`{note} | {row.get('requested_rps')} | {row.get('samples')} "
+          f"| {row.get('mean')} | {row.get('max')} |")
+    w('')
+    w(f"- {ss['caveat']}")
+    w(f"- Source: `{ss.get('source')}`, handed to the run. crowdsim did not fetch it and has no access to "
+      'the system that recorded it.')
     w('')
 
 knee = d.get('knee')

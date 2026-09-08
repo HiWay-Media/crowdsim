@@ -4,6 +4,58 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.31.0] — 2026-09-08
+
+Milestone v1.15.0, closed. **crowdsim describes the symptom perfectly and could say nothing about the
+cause.** Every number it produces is measured from outside — latency, failed rate, cache hit ratio, the
+knee — which is the right place to measure what users experience and the wrong place to answer *why*. A
+run ended with a defensible knee and no way to tell a saturated app tier from a CPU quota being throttled,
+and those have different fixes: one is a rewrite, the other is one line of configuration.
+
+### The scope decision, made first
+[#75](https://github.com/HiWay-Media/crowdsim/issues/75) was written as unimplementable until this was
+answered, because there were two answers and one of them is a different tool: **crowdsim is handed a
+series; it does not go and collect one.** That is now a non-goal in `INTENT.md`, next to the identical
+decision about the access log — collecting would mean a load generator holding credentials for a metrics
+backend or a cluster. Nothing in `lib/server-metrics-cli.mjs` speaks HTTP, and a test asserts it.
+
+### Added
+- **`--server-metrics <file> --server-metrics-label <name>`**: a server-side series, aligned to the run's
+  own steps, so the step where latency climbed can be read against what the server was doing in it.
+
+  ```
+    ── cpu_throttled_periods, per step (handed to this run, not collected) ──
+       step  requested  samples  mean      max
+       s1            7        7         0        0
+       s2            9        7      1.14        8
+       s3           12        7        32       56
+       peak         12        5        72       88
+  ```
+
+  Written to `out/server-side-<run>.json` and included in `crowdsim report`. Accepts a two-column
+  CSV/TSV or a JSON array, with timestamps in epoch seconds **or** milliseconds — decided by magnitude
+  rather than guessed, because guessing aligns a series to the wrong century. A header row is skipped
+  rather than parsed as a sample.
+
+  **What comes out is a correlation, said as a correlation.** A counter that rose during the same minutes
+  is a reason to look, not a finding; promoting it to a cause would be the same mistake as quoting a knee
+  as an absolute. A unit test asserts the caveat contains none of *caused*, *because*, *explains* or
+  *due to*.
+
+  The refusals, none of which fail a run that already happened: no label (an unnamed column cannot be read
+  against anything), no overlap with the run's window (reported as such rather than as a table of zeroes
+  that reads like an idle server), a missing or unparseable file, and no node. And **a step with no
+  samples is absent, not zero** — zero is a measurement, *nobody recorded anything here* is a different
+  statement.
+- **Every per-step row carries its own window** (`start_ms`, `end_ms`). A run id *is* the run's start in
+  UTC, so those two fields are what let anything recorded with a clock line up with the step it belongs
+  to. A partial step ends where the **run** ended, not where its window would have: averaging a series
+  over seconds the run never reached would describe a window that did not happen.
+
+### Changed
+- `tests/cli/fixtures/summary-good.json` has the two-step ramp its knee always implied. It had no
+  `per_step` at all, which no test had needed until a series had to align to one.
+
 ## [1.30.0] — 2026-09-08
 
 Milestone v1.14.0, closed. Two runs in six on one campaign were thrown away because `--start` was already

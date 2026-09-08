@@ -138,6 +138,13 @@ export function perStep(metrics, plan, opts) {
       requested_rps: s.rateRps,
       from_rps: s.fromRps,
       sustained: Boolean(s.sustained),
+      // This step's own window, as offsets from the run's start. A run id IS that start in UTC, so these
+      // two fields are what let anything recorded with a clock — a handed-in server-side series — be read
+      // against the step it belongs to. `end_ms` is where the step actually ended, which for a partial
+      // step is where the RUN ended: averaging a series over seconds the run never reached would describe
+      // a window that did not happen. (#75)
+      start_ms: s.startMs,
+      end_ms: endedMs,
       achieved_rps: Math.round((reqs / windowS) * 10) / 10,
       requests: reqs,
       p50: val(metrics, 'http_req_duration' + tag, 'med', null),

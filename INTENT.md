@@ -75,6 +75,14 @@ None of these is a gap waiting to be filled. Each one is a decision.
 - **It does not go and get your access log.** `weights` reads a file or stdin that *you* hand it, writes
   nothing from it, and fetches nothing. A per-URL breakdown straight off your edge would mean shipping a
   container that wants credentials for a production load balancer.
+- **It does not go and get your server-side metrics either.** A run can be handed a series — CPU throttling,
+  queue depth, whatever your platform already records — and it will align it to the run's own steps so a
+  step where latency climbed can be read against what the server was doing in it. It will not reach for
+  one. Collecting would mean a load generator that holds credentials for a metrics backend or a cluster,
+  which is a different tool with a different risk profile, and this is the same decision as the access log
+  one line above. What it produces from a series it was given is a **correlation**, said as a correlation:
+  a counter that rose during the same minutes is not a cause, and promoting it to one would be the same
+  mistake as quoting a knee as an absolute.
 - **No scheduler and no user accounts in the GUI.** Recurring load against your own production belongs
   somewhere auditable: the Nomad dispatch and the Kubernetes Job carry the target, the rate and the
   override in the call, and the call is attributable. A cron button on a web page is not.

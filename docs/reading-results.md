@@ -372,6 +372,24 @@ crowdsim history --json   # the same records the GUI's own history endpoint retu
 The default table renders each knee as one `requested→delivered` cell, so both numbers travel together
 without four knee columns in an eight-column view; `--cols` and `--json` give them separately.
 
+## What the server was doing, if you hand it over
+
+A run can be given a server-side series — `--server-metrics <file> --server-metrics-label <name>` — and it
+is aligned to the run's own steps, so a step where latency climbed can be read against what the server was
+doing during it. It lands in `out/server-side-<run>.json` and in `crowdsim report`.
+
+Two things about it are deliberate and are not going to change:
+
+- **crowdsim does not fetch it.** Same decision as the access log, and it is in
+  [`INTENT.md`](../INTENT.md) as a non-goal: a load generator that collects server-side metrics is a load
+  generator that holds credentials for a metrics backend or a cluster.
+- **It is a correlation.** A counter that rose during the same windows is a reason to look, not a finding.
+  This tool measures from outside and knows nothing about how that series was recorded — promoting it to a
+  cause would be the same mistake as quoting a knee as an absolute.
+
+See [the CLI reference](cli.md#a-server-side-series-read-against-the-runs-own-steps) for the formats and
+the refusals.
+
 ## Handing a run to somebody else
 
 ```bash
