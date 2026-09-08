@@ -4,6 +4,34 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.1] — 2026-09-08
+
+### Fixed
+- **No image published for 1.36.0 or 1.37.0: the UI build stage lacked the one file the UI imports from
+  outside itself.** `gui/ui/src/lib/summary-blocks.js` imports `outcomeBands` from `k6/lib/failure.js`,
+  so the page and the drawn report share **one** band arithmetic rather than two that can disagree — the
+  right call, and it costs a line in the Dockerfile that was not there. The `ui` stage copied only
+  `gui/ui/`, so `vite build` inside the image failed with:
+
+  ```
+  Could not resolve "../../../../k6/lib/failure.js" from "src/lib/summary-blocks.js"
+  ```
+
+  A checkout has the whole repository, so `make lint`, `make test` and the UI tests all passed. The only
+  thing that could catch it was building the image — and the image build is not part of `make test`, so
+  the image workflow went red on a release, twice, while everything local was green.
+
+- **A guard inside `make test`**: `tests/gui/ui-build-inputs.test.js` reads the UI's imports that resolve
+  outside `gui/ui/` and the paths the Dockerfile's `ui` stage copies, and asserts they agree. It cannot
+  prove the image builds — `make image-smoke` does that, and it is the gate this change skipped — but it
+  fails in a second on the mistake that actually happened. A second assertion keeps the list of escaping
+  imports explicit, so reaching out of the UI stays a deliberate decision.
+
+  The same class of mistake on the server side is already covered: `gui/server` imports
+  `lib/validate.mjs`, the runtime stage copies `lib/`, and the smoke test asserts it loads. The
+  difference is that the UI is **bundled at build time** and the server runs from source at runtime, so
+  they need their imports in two different stages.
+
 ## [1.37.0] — 2026-09-08
 
 **A server-side series was a table, and the overlay it exists for was done by eye.** `--server-metrics`
