@@ -105,6 +105,9 @@
   },
   {
    "title": "v1.15.0"
+  },
+  {
+   "title": "v1.16.0"
   }
  ],
  "issues": [
@@ -1418,6 +1421,159 @@
     "- A run with no server-side series says so, and every existing number is unchanged: this is additive, and a run without it is not a lesser run.",
     "- Nothing is fetched without being asked for, nothing is stored beyond the run's own output, and no credential for a target system is ever read from a profile.",
     "- Tests over the alignment arithmetic and over the refusal to call a correlation a cause."
+   ]
+  },
+  {
+   "key": "generator-ok-conflates-two-causes",
+   "title": "`generator_ok: false` cannot tell a weak generator from a saturated target, and it decides whether a run is thrown away",
+   "milestone": "v1.16.0",
+   "labels": [
+    "area:generator",
+    "validity"
+   ],
+   "body": [
+    "`generatorHeldRate()` is one line: `dropped_iterations > 2% of requests`. k6 drops an iteration when the arrival-rate executor cannot start a new one — which happens for **two opposite reasons**:",
+    "",
+    "- the generator is starved (CPU, network, a container inside a VM) — the run is garbage and must be discarded;",
+    "- every VU is blocked waiting on a target that has stopped keeping up — the target saturated, which is *the finding*.",
+    "",
+    "The tool reports both as `generator_ok: false`, and then says *THE GENERATOR DID NOT HOLD THE RATE — discard this run* and *move the generator closer to the target*. In the second case that advice is wrong and the run was the answer.",
+    "",
+    "**Measured, not theorised.** A run at 12 req/s against a single-worker origin with a 300 ms delay — a target that cannot serve 12 req/s by construction — came back `generator_ok: false` on a completely healthy generator. The knee was refused, `--recalibrate` correctly declined (per its own spec), and the printed reason named the generator.",
+    "",
+    "This is the most consequential verdict in the tool: it is the first line of [reading a result](../docs/reading-results.md), it voids the knee, the concurrency figure and the delivered rate, and `compare` refuses on it. A verdict that decides whether a window was wasted must not be ambiguous about which of two opposite things happened.",
+    "",
+    "**Done when**",
+    "- The two are told apart, from evidence the run already has: a starved generator shows dropped iterations with the target still answering fast, while a saturated target shows latency climbing into the timeout and VUs pinned at the ceiling. Whatever the rule turns out to be, it is derived from recorded metrics and unit tested against both shapes.",
+    "- When it cannot tell, it says **it cannot tell** — and keeps the current, conservative verdict. An ambiguous case reported as a knee would be exactly the wrong direction to fail in.",
+    "- The wording follows the diagnosis: *discard this run and move the generator* only when the generator is the bottleneck. For a saturated target it is a capacity result, and the knee is not refused for the wrong reason.",
+    "- `--recalibrate` (1.30.0) refuses a starved generator and **accepts** a saturated target: the latter is precisely the case a lower `--start` measures properly.",
+    "- The e2e suite grows a leg for the case that is currently mislabelled: a target too slow to absorb the requested rate, with the generator holding.",
+    "- `docs/reading-results.md` step 1 is rewritten around the two answers."
+   ]
+  },
+  {
+   "key": "probe-checks-one-url-per-pool",
+   "title": "`probe` verifies one URL out of a pool of four hundred",
+   "milestone": "v1.16.0",
+   "labels": [
+    "area:cli",
+    "validity"
+   ],
+   "body": [
+    "`probe` reads `pools.pages[0]` and requests exactly that. The authed-premise check added in 1.24.0 does the same, `pool[0]` per class. A pool of four hundred URLs is therefore verified at one of them, and the other 399 are assumed.",
+    "",
+    "This is the trap the tool already documents everywhere else — *404s do not load the app tier, so a pool of invented paths yields a false \"it handles this beautifully\"* — surviving in the one command whose job is to check the target before a run. `discover --verify` does request every path it discovers, but only for pools it built itself: a pool written by hand, edited, or narrowed after the fact never goes through it.",
+    "",
+    "The 1.29.0 failure-mode line catches it **after** the run, from the 404 counters. Catching it before is cheaper than a window.",
+    "",
+    "**Done when**",
+    "- `probe` samples more than one entry per pool — a bounded sample, paced, and never the whole pool: a preflight must not become the load test (`discover --verify` already has this problem solved and paced by `CROWDSIM_VERIFY_DELAY`).",
+    "- It reports per pool: how many it tried, how many answered 2xx, and the paths that did not, with their codes. A pool that is mostly 404s is a refusal and not a footnote.",
+    "- The authed-premise check samples the same way: one endpoint answering 401 does not establish that the other 399 need the token.",
+    "- The sample size and the pacing are visible and settable, and the default cannot generate meaningful load against a production target.",
+    "- Tests over the sampling and over the refusal; `probe`'s exit-4 contract unchanged."
+   ]
+  },
+  {
+   "key": "gui-behind-the-summary",
+   "title": "The page shows a run without its failure mode: six summary blocks are invisible in the GUI",
+   "milestone": "v1.16.0",
+   "labels": [
+    "area:gui",
+    "validity"
+   ],
+   "body": [
+    "The GUI renders `knee` and nothing else that has been added to the summary since 1.21.0. Checked against `gui/ui/src`:",
+    "",
+    "| block | shipped in | in the GUI |",
+    "|---|---|---|",
+    "| `concurrency`, `think_time` | 1.21.0 | no |",
+    "| `allocation` | 1.22.0 | no |",
+    "| `failure_mode` | 1.29.0 | no |",
+    "| `delivery` (requested → delivered) | 1.29.0 | no |",
+    "| `server_side` | 1.31.0 | no |",
+    "",
+    "The `failure_mode` one is the same bug as [#74](https://github.com/HiWay-Media/crowdsim/issues/74), still live in the GUI: a run that completed without crossing its thresholds while serving 32% 404s on one class reads on the page as a pass. #74 was closed on the panel, the markdown report and the HTML page, and the page was not in its acceptance list — so this is a gap rather than a broken promise, but it is the same wrong answer in the place most people look.",
+    "",
+    "`delivery` matters for the same reason it did in the CLI: the page shows a knee at the requested rate, and the reader has no way to know the target was taking 25% more.",
+    "",
+    "**Done when**",
+    "- The result view leads with `failure_mode` when there is one, before the brake's reason — the same order as the panel and the report, since the point of that order is that it is the first thing read.",
+    "- `delivery` appears wherever the page shows a rate, as requested → delivered, and the knee plot's axis says which of the two it is drawing.",
+    "- `concurrency` (both methods, never averaged), `think_time`, `allocation` and `server_side` are shown or deliberately left out, and the decision is written down — a block that is absent on purpose is fine, a block that is absent because nobody noticed is not.",
+    "- The decisions go in `gui/ui/src/lib/` with tests in `tests/ui/`, and the wording that cannot be softened goes in `lib/messages.js`, per the project's own rule.",
+    "- A render-level test asserts that a summary carrying a failure mode cannot produce a page without one.",
+    "- Something stops this drifting again: a test that fails when the summary grows a top-level block the page neither renders nor explicitly ignores."
+   ]
+  },
+  {
+   "key": "gui-cannot-express-followups",
+   "title": "The GUI cannot express the three flags added in 1.30.0 and 1.31.0",
+   "milestone": "v1.16.0",
+   "labels": [
+    "area:gui"
+   ],
+   "body": [
+    "`gui/server/lib/args.js` builds argv for `load` from a known-flag allowlist, which is exactly right — and it has no entry for `--recalibrate`, `--recalibrate-floor`, `--certify`, `--certify-hold`, `--server-metrics` or `--server-metrics-label`. This is the same complaint as [#53](https://github.com/HiWay-Media/crowdsim/issues/53), which was about two flags; it is now six.",
+    "",
+    "Two of them start a second run, so they are not ordinary form fields:",
+    "",
+    "**Done when**",
+    "- `--recalibrate` and `--certify` are expressible from the page, and the page makes clear that either one can start a **further run** — a run panel that quietly launches three runs is a run panel nobody can authorise honestly.",
+    "- The one-run-at-a-time rule (409) survives: a follow-up run is a child of the driver, and the page must not treat it as a slot that is free.",
+    "- `--server-metrics` takes a path on the machine the server runs on. Either it is a path field with the same traversal refusals the profile browser already has, or it is deliberately left out — and the decision is written down.",
+    "- No `extraArgs`, no shell, no new flag reaching argv without validation: `args.js` keeps its allowlist shape.",
+    "- The argv assertion in `tests/gui/args.test.js` covers each new flag, and `tests/cli/flags.bats` still passes — the flag gate added in 1.28.0 means a typo in `args.js` now takes the whole page down rather than being ignored."
+   ]
+  },
+  {
+   "key": "e2e-leg1-flake",
+   "title": "The e2e suite's first leg fails about one run in six, and a flaky suite teaches people to ignore red",
+   "milestone": "v1.16.0",
+   "labels": [
+    "area:tests"
+   ],
+   "body": [
+    "Across six consecutive runs of `tests/e2e/run.sh` on one machine, leg 1 failed once with:",
+    "",
+    "```",
+    "  ❌ a completed run reported a partial step",
+    "```",
+    "",
+    "The failing run's compose output shows the target container still in `Starting` while the previous `docker compose down` was finishing, so the first step paid a cold start and the run ended inside a step whose window had already moved. Everything the assertion says is true; what is not true is that it indicates a regression.",
+    "",
+    "This suite's own header argues that *a red run that means \"you don't have docker\" teaches people to ignore red runs* — which is why missing docker is a skip. A leg that fails one time in six is the same problem with worse manners, and 1.24.0 has just finished removing a documented baseline of thirteen expected failures for exactly this reason.",
+    "",
+    "**Done when**",
+    "- The cause is established rather than guessed: whether `wait_for` returns before the container can actually serve at rate, whether the previous compose teardown overlaps the next bring-up, or whether the assertion is too strict about a step boundary.",
+    "- Whatever the cause, the fix makes the leg deterministic — a readiness check that reflects being able to serve, not just to answer once, and a teardown that has finished before the next run starts.",
+    "- The assertion keeps its meaning: *a completed run reported a partial step* is a real bug when it is real, so it must not be softened into never failing.",
+    "- Ten consecutive runs are green before it is closed. One green run is what made this look fine for as long as it did."
+   ]
+  },
+  {
+   "key": "customer-name-in-public-repo",
+   "title": "A customer name and its capacity figures are in this public repository",
+   "milestone": "v1.16.0",
+   "labels": [
+    "safety"
+   ],
+   "body": [
+    "The name of the campaign this tool was built against appears in six tracked files — `.github/roadmap.json`, `CHANGELOG.md`, `bin/crowdsim`, `k6/lib/auth.js`, `k6/lib/mix.js`, `k6/lib/session.js` — and from there in published GitHub Releases and in the bodies of issues #62 and #65.",
+    "",
+    "It travels with concrete numbers: the concurrent-user requirement, the rate the web tier stayed clean past, the rate at which sign-in topped out, and the number of accounts a run created in their identity provider. Together those describe a named third party's capacity.",
+    "",
+    "`CLAUDE.md` already forbids this class of content here — *zero infrastructure data: no real hostname, no internal path, in code, docs, comments, CHANGELOG or commit message* — and a customer name attached to capacity figures is the same category as a hostname, arguably a more sensitive one. It is not a leak of a credential and nothing is exploitable; it is a disclosure nobody agreed to.",
+    "",
+    "**This needs a decision before any change**, which is why it is an issue and not a patch: whether that name is considered public. If it is not:",
+    "",
+    "**Done when**",
+    "- The name is replaced by a neutral formulation that keeps every technical fact — *a real campaign in 2026-09*, which is what makes the comments worth reading — in the tracked files.",
+    "- The measured numbers stay. They are the evidence for the invariants those comments defend, and losing them would make the code less defensible, not more private. What goes is the attribution.",
+    "- The published surfaces are dealt with deliberately: GitHub Release notes are editable, issue bodies are editable, and git history is not rewritten for this — rewriting tags that are already pulled buys little and breaks every checkout.",
+    "- A check keeps it out: `scripts/` already has a doc verifier, and a name list it refuses on is a cheap addition to `make check-docs`.",
+    "- `CLAUDE.md` says explicitly that a customer or campaign name counts as infrastructure data, because the current wording enumerates hostnames and paths and this got through."
    ]
   }
  ]
