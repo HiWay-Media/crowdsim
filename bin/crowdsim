@@ -1843,7 +1843,7 @@ followup_run() {
 # The accounts a signup run created, collected where they can be found again.
 #
 # A signup class at 40/s for five minutes creates twelve thousand real accounts in a real identity
-# provider. The StreamWay+ campaign left ~2,970 behind and had to open a ticket to hunt them down. crowdsim
+# provider. One real campaign left ~2,970 behind and had to open a ticket to hunt them down. crowdsim
 # is the one thing that knows what they were, and it recorded nothing.
 #
 # The identities come out of the run log, because a k6 VU has no other channel: VUs are isolated, so there

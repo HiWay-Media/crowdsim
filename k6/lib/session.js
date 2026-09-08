@@ -3,7 +3,7 @@
  *
  * WHY THIS EXISTS — a capacity requirement arrives as *"7,000 concurrent users"* and every number this tool
  * produced was a rate. Somebody then converted one into the other in their head, with an assumption they
- * did not write down. The StreamWay+ campaign of 2026-09-04 did it properly and that is the method copied
+ * did not write down. One real campaign, in 2026-09, did it properly and that is the method copied
  * here: Little's law (sessions/s x mean session duration), cross-checked against a count of sessions in
  * flight, with the two printed side by side. They agreed, and the agreement is what made the number
  * defensible — not the number.

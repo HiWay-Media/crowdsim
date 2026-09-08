@@ -4,6 +4,37 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.1] — 2026-09-08
+
+### Fixed
+- **The e2e suite's first leg failed about one run in six**, with *a completed run reported a partial
+  step*. The cause was not the cold container it looked like: `partial` was `ranMs < step.endMs` with no
+  tolerance, so a run that finished a few tens of milliseconds before its planned total — k6's graceful
+  stop, or plain rounding — marked its **last step** a fraction of itself. Nothing was wrong with those
+  runs; a boundary of milliseconds was deciding whether a step counts as a measurement.
+
+  `PARTIAL_TOLERANCE_MS` is one second: orders of magnitude below any step this tool runs and orders
+  above that jitter. The case the flag exists for — the brake firing mid-step — is never within a second
+  of a step's end, and a test asserts both directions. A suite that fails one run in six teaches people
+  to ignore red, which 1.24.0 had just finished addressing from the other end.
+
+### Changed
+- **A customer name and its capacity figures are no longer in this repository.** The name of the campaign
+  this tool was built against appeared in six tracked files, and from there in published release notes
+  and two issue bodies, next to the concurrent-user requirement, the rate a tier stayed clean past and
+  the number of accounts a run created in somebody's identity provider. Together those describe a named
+  third party's capacity, which nobody agreed to publish.
+
+  **Every measured number stays** — they are the evidence for the invariants those comments defend, and
+  losing them would make the code less defensible rather than more private. What went is the
+  attribution. The two issue bodies are edited; git history is not rewritten, because rewriting tags
+  that are already pulled buys little and breaks every checkout.
+
+  `CLAUDE.md` and `AGENTS.md` now say explicitly that a customer, campaign or tenant **name** counts as
+  infrastructure data. It got through because the rule enumerated hostnames and paths and a name is
+  neither. `scripts/check-no-attribution.sh` (in `make check-docs`) keeps it out, with the list in
+  `scripts/attribution-denylist.txt` — verified by reintroducing the name and watching it fail.
+
 ## [1.33.0] — 2026-09-08
 
 **`probe` requested `pools.pages[0]` and assumed the other 399.** That is the trap this tool documents
@@ -545,7 +576,7 @@ load, and here the anonymous request succeeds.
 
 Milestone v1.12.0, closed. **A signup class creates real accounts in a real identity provider, and the tool
 that created them recorded nothing about them.** A class at 40/s for five minutes makes twelve thousand;
-the StreamWay+ campaign left ~2,970 behind and had to open a ticket to hunt them down, findable only
+one real campaign left ~2,970 behind and had to open a ticket to hunt them down, findable only
 because somebody had thought to use a dedicated mail domain. A run that created 2,970 accounts is not
 finished when the numbers are in.
 
@@ -617,7 +648,7 @@ for a weight by hand, in the wrong direction, every time the question changed.
 
 Milestone v1.12.0, first half: **the unit the requirement is written in.** A capacity requirement arrives
 as *"7,000 concurrent users"* and every number this tool produced was a rate, so somebody converted one
-into the other in their head with an assumption they never wrote down. The StreamWay+ campaign of
+into the other in their head with an assumption they never wrote down. A real campaign of 2026-09 of
 2026-09-04 did it properly, and that is the method here: Little's law, cross-checked against a count of
 sessions in flight, the two printed side by side. They agreed — and **the agreement is what made the
 number defensible, not the number.**
@@ -662,7 +693,7 @@ number defensible, not the number.**
 
 **The authenticated classes were run against a real target for the first time, and two of the three
 findings are about a run that looks green while measuring nothing.** The definition came from the
-generator the StreamWay+ campaign of 2026-09-04 actually used: the sign-in it saturated is not an
+generator one real campaign of 2026-09 actually used: the sign-in it saturated is not an
 identity-provider token endpoint but an application login — `POST /api/auth/login`, an
 `application/x-www-form-urlencoded` body, the token at `data.access_token`. That is why the backend
 saturated while the identity provider sat at 26%: the load never reached it directly.
@@ -745,7 +776,7 @@ zero requests produces a plausible wrong answer.
   is ES2021 and `k6/lib` stays ES2019.)
 
 ### Added
-- `.github/roadmap.json`: milestone **v1.12.0**, the four things the StreamWay+ campaign of 2026-09-04
+- `.github/roadmap.json`: milestone **v1.12.0**, the four things a real campaign of 2026-09
   needed and this tool could not say — concurrency instead of only rates, an absolute rate for one class,
   think time that can be measured rather than hard-coded, and a record of the accounts a signup run
   created. Each one is this tool answering in the unit the question was asked in; none is a new kind of

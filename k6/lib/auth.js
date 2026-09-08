@@ -277,7 +277,7 @@ export function accountSharingNote(userCount, vus) {
  * How to find, afterwards, the accounts a signup run created.
  *
  * WHY THIS EXISTS — a signup class at 40/s for five minutes creates twelve thousand real accounts in a
- * real identity provider. The StreamWay+ campaign left ~2,970 of them behind and had to open a ticket to
+ * real identity provider. One real campaign left ~2,970 of them behind and had to open a ticket to
  * hunt them down; they were findable only because somebody had thought to use a dedicated mail domain. The
  * tool that created them is the one thing that knows exactly what they were, and it recorded nothing.
  *

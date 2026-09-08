@@ -109,6 +109,12 @@ function val(metrics, name, field, dflt) {
  *
  * A step with no requests is dropped rather than reported: a row of zeros reads as a step that was fast.
  */
+/**
+ * How far short of a step's end a run may finish and still count as having completed it. See `partial`
+ * below: without this, a run that stopped 40 ms early reported its last step as a fraction of itself.
+ */
+export const PARTIAL_TOLERANCE_MS = 1000;
+
 export function perStep(metrics, plan, opts) {
   if (!plan || !plan.length) return null;
   const o = opts || {};
@@ -125,7 +131,14 @@ export function perStep(metrics, plan, opts) {
     // Partial: the run ended before this step's window closed. The brake is the usual reason, and it fires
     // when latency is already climbing — so this row is a fraction of the step, biased towards its worst
     // part. It is reported because it is evidence, and marked because it is not a result.
-    const partial = ranMs > 0 && ranMs < s.endMs;
+    // A TOLERANCE, not a bare comparison. `ranMs < s.endMs` with no slack marked the last step partial
+    // whenever a run finished a few milliseconds before its planned total — k6's graceful stop, or plain
+    // rounding — and that made the e2e suite fail about one run in six with "a completed run reported a
+    // partial step". Nothing was wrong with those runs: a boundary of milliseconds was deciding whether
+    // a step counts as a measurement. One second is orders of magnitude below any step this tool runs
+    // and orders above that jitter, and the case the flag exists for — the brake firing mid-step — is
+    // never within a second of the step's end.
+    const partial = ranMs > 0 && ranMs < s.endMs - PARTIAL_TOLERANCE_MS;
     // Over THIS step's window, not the run's. k6's `rate` on a tagged sub-metric divides the count by the
     // whole test duration, so it reports 1.7 req/s for a step that delivered 7.5 — a number that looks like
     // a catastrophic generator and is an artefact of the divisor. Measured on a real run before being fixed.

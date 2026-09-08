@@ -33,7 +33,7 @@ export function shares(classes) {
 /**
  * Where each class's peak rate comes from: an absolute rate it declares, or its share of what is left.
  *
- * WHY — a finding is usually about ONE class. The StreamWay+ campaign's answer is "the login saturates at
+ * WHY — a finding is usually about ONE class. One real campaign's answer was "the login saturates at
  * ~150 login/s", and to reproduce that with weights you set a global `--peak` and solve for the weight by
  * hand, in the wrong direction, every time the question changes. `rate_rps` says it directly.
  *

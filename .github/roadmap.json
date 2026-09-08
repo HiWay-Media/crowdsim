@@ -94,7 +94,7 @@
   },
   {
    "title": "v1.12.0",
-   "description": "The four things a real campaign needed and this tool could not say. Measured against the StreamWay+ campaign of 2026-09-04 — 7.000+ concurrent users required, the web tier clean past 8.800, the ceiling found in the login at ~150 login/s — which was run with the other generator because crowdsim cannot express half of that sentence. It answers in requests per second and the requirement is in concurrent users; it splits one peak by weight and the finding is a rate for ONE class; its think time is hard-coded where the whole method rests on measured reading pauses; and it creates real accounts it keeps no record of. None of these is a new kind of tool: each one is this tool saying what it already generates in the unit somebody asked the question in."
+   "description": "The four things a real campaign needed and this tool could not say. Measured against a real campaign of 2026-09 — 7.000+ concurrent users required, the web tier clean past 8.800, the ceiling found in the login at ~150 login/s — which was run with the other generator because crowdsim cannot express half of that sentence. It answers in requests per second and the requirement is in concurrent users; it splits one peak by weight and the finding is a rate for ONE class; its think time is hard-coded where the whole method rests on measured reading pauses; and it creates real accounts it keeps no record of. None of these is a new kind of tool: each one is this tool saying what it already generates in the unit somebody asked the question in."
   },
   {
    "title": "Backlog",
@@ -1233,7 +1233,7 @@
     "documentation"
    ],
    "body": [
-    "A capacity requirement arrives as *\"7.000 concurrent users\"*. Every number crowdsim produces is a rate — `--peak` is total user req/s, the knee is a rate, `history.tsv` is rates — so the answer has to be converted by whoever reads it, in their head, with an assumption they do not write down. The StreamWay+ campaign (2026-09-04) did the conversion properly: Little's law, sessions/s x measured mean session duration, then cross-checked against a count of sessions in flight, and the two agreed. That cross-check is what made the number defensible.",
+    "A capacity requirement arrives as *\"7.000 concurrent users\"*. Every number crowdsim produces is a rate — `--peak` is total user req/s, the knee is a rate, `history.tsv` is rates — so the answer has to be converted by whoever reads it, in their head, with an assumption they do not write down. One real campaign, in 2026-09, did the conversion properly: Little's law, sessions/s x measured mean session duration, then cross-checked against a count of sessions in flight, and the two agreed. That cross-check is what made the number defensible.",
     "",
     "crowdsim has the inputs. `requestsPerSession()` already exists for `--shape journey`, k6 knows how many iterations are in flight, and the run knows its own duration.",
     "",
@@ -1296,7 +1296,7 @@
     "documentation"
    ],
    "body": [
-    "`signupPayload()` mints a unique identity per iteration, so a registration class at 40/s for a few minutes creates thousands of real accounts in a real identity provider. The StreamWay+ campaign created ~2.970 of them and had to open a backlog ticket to hunt them down afterwards, recognisable only by a dedicated email domain.",
+    "`signupPayload()` mints a unique identity per iteration, so a registration class at 40/s for a few minutes creates thousands of real accounts in a real identity provider. One real campaign created ~2.970 of them and had to open a backlog ticket to hunt them down afterwards, recognisable only by a dedicated email domain.",
     "",
     "crowdsim writes nothing about them. The tool that created the accounts is the one thing that knows exactly which they were.",
     "",

@@ -1,0 +1,4 @@
+# Customer, campaign and tenant names that must not appear in this public repository.
+# One per line, matched case-insensitively anywhere in a tracked file. See check-no-attribution.sh:
+# the measured numbers stay, the attribution does not.
+StreamWay

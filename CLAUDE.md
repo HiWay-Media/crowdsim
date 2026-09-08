@@ -21,7 +21,14 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
   plumbing, non prodotto.
 - **MAI `git push`** — lo fa sempre l'utente. MAI `Co-Authored-By` nei commit.
 - **Repo pubblico: zero dati di infrastruttura.** Nessun hostname reale, IP privato, path interno, hash
-  di build, webhook o token in codice, doc, commenti, CHANGELOG o commit message. Negli esempi solo
+  di build, webhook o token in codice, doc, commenti, CHANGELOG o commit message. **Il nome di un
+  cliente, di una campagna o di un tenant conta come dato di infrastruttura** — un nome accanto a cifre di
+  capacità (utenti concorrenti richiesti, rate a cui un tier ha tenuto, account creati su un identity
+  provider) descrive la capacità di un terzo che non ha acconsentito a pubblicarla. È passato per anni
+  perché la regola elencava hostname e path e un nome non è nessuno dei due: ora
+  `scripts/check-no-attribution.sh` (in `make check-docs`) lo rifiuta, con la lista in
+  `scripts/attribution-denylist.txt`. **I numeri misurati restano**: sono l'evidenza degli invarianti che
+  quei commenti difendono. Quello che non viaggia è l'attribuzione. Negli esempi solo
   domini `*.test` e IP di documentazione (RFC 5737, es. `203.0.113.10`). I profili reali stanno in un
   repo **privato**: qui vive solo `profiles/example.json` (`.gitignore` blocca gli altri — non
   aggiungere eccezioni).

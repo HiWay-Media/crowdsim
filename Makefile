@@ -101,10 +101,11 @@ image-run: ## run the GUI from the image on http://127.0.0.1:8787 (token printed
 	  -v "$$PWD/profiles:/profiles" -v "$$PWD/out:/out" \
 	  $(IMAGE) crowdsim serve
 
-check-docs: ## the three claims the documentation makes about itself: versions, commands, quoted output
+check-docs: ## what this repo claims about itself: versions, commands, quoted output, no attribution
 	scripts/check-doc-versions.sh
 	scripts/check-doc-commands.sh
 	scripts/check-doc-output.sh --self-test
+	scripts/check-no-attribution.sh
 
 $(DOCS_VENV)/bin/mkdocs:
 	python3 -m venv $(DOCS_VENV)

@@ -207,3 +207,37 @@ test('a partial step ends where the run ended, not where its window would have',
   assert.equal(last.partial, true);
   assert.equal(last.end_ms, 75000, 'the run ended here');
 });
+
+test('a run that ends a hair short of its plan does not report a partial step', () => {
+  // The e2e flake, about one run in six: «a completed run reported a partial step». `partial` was
+  // `ranMs < step.endMs` with no tolerance, so a run that finished 40 ms before its planned total — k6's
+  // graceful stop, or plain rounding — marked its LAST step partial. Nothing was wrong with the run, and
+  // the assertion that caught it was right to exist: what was wrong is that a boundary of milliseconds
+  // decided whether a step counts as a measurement.
+  const plan = stepPlan({ startRps: 10, peakRps: 30, steps: 2, stepDur: '60s', holdDur: '30s' });
+  const total = plan[plan.length - 1].endMs;
+  const metrics = {};
+  for (const s of plan) {
+    metrics['http_reqs{step:' + s.tag + '}'] = { values: { count: 600 } };
+    metrics['http_req_duration{step:' + s.tag + '}'] = { values: { med: 10, 'p(95)': 20, 'p(99)': 30 } };
+  }
+  const rows = perStep(metrics, plan, { durationMs: total - 40, classNames: [] });
+  for (const r of rows) {
+    assert.equal(r.partial, false, `${r.step} was marked partial for a 40 ms shortfall`);
+  }
+});
+
+test('a step the run really ended inside is still partial', () => {
+  // The tolerance must not swallow the case the flag exists for: the brake fires mid-step, and that row
+  // is a fraction of a step biased towards its worst part.
+  const plan = stepPlan({ startRps: 10, peakRps: 30, steps: 2, stepDur: '60s', holdDur: '30s' });
+  const metrics = {};
+  for (const s of plan) {
+    metrics['http_reqs{step:' + s.tag + '}'] = { values: { count: 300 } };
+    metrics['http_req_duration{step:' + s.tag + '}'] = { values: { med: 10, 'p(95)': 20, 'p(99)': 30 } };
+  }
+  const rows = perStep(metrics, plan, { durationMs: 90000, classNames: [] });
+  const last = rows[rows.length - 1];
+  assert.equal(last.partial, true);
+  assert.match(last.note, /partial/);
+});

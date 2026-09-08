@@ -28,7 +28,11 @@ in questo repository.
   di build, webhook o token in codice, doc, commenti, CHANGELOG o commit message. Negli esempi solo
   domini `*.test` e IP di documentazione (RFC 5737, es. `203.0.113.10`). I profili reali stanno in un
   repo **privato**: qui vive solo `profiles/example.json` (`.gitignore` blocca gli altri; non aggiungere
-  eccezioni).
+  eccezioni). **Il nome di un cliente, di una campagna o di un tenant conta come dato di
+  infrastruttura**: un nome accanto a cifre di capacita descrive la capacita di un terzo che non ha
+  acconsentito a pubblicarla. E passato perche la regola elencava hostname e path e un nome non e nessuno
+  dei due; ora `scripts/check-no-attribution.sh` (dentro `make check-docs`) lo rifiuta. I numeri misurati
+  restano, sono l'evidenza: quello che non viaggia e l'attribuzione.
 - **Lingua**: chat in italiano, ma tutto cio che finisce nel repo e in inglese (README, CHANGELOG,
   commenti, messaggi a schermo, commit message).
 - **Allineare tutto**: ogni modifica fattuale va propagata a `README.md`, header di `bin/crowdsim`
