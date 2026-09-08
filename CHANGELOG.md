@@ -4,6 +4,43 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.0] — 2026-09-08
+
+Milestone v1.17.0, closed. The two commands that read the **archive** rather than one run had no drawn
+form, so the two claims this tool is most confident about could not be attached to anything.
+
+### Added
+- **`crowdsim history --html`** ([#87](https://github.com/HiWay-Media/crowdsim/issues/87)): the knee over
+  time. *Does the knee move* is the only question this subcommand exists to answer, and it answered it as
+  a table — the GUI plotted it, `report --html` draws exactly one run, and there was nothing to hand over.
+  The trend is the only claim here that survives its own caveat about absolutes being optimistic, and it
+  was the one thing that could not go in a ticket.
+
+  **One line per experiment.** Runs at a different profile, target, shape or fan-out are separated rather
+  than averaged, because they are not points on one line; the fan-out rule is `comparableFanOut` from
+  `k6/lib/delivery.js` and not a second copy. A discard never joins a line and is listed under *Left out,
+  and why*, with its run id. A run whose knee was refused is a **gap**, not a zero — a knee of 0 req/s
+  would be a claim about the system. And **one run is not a trend**: the page says so instead of drawing a
+  line through a single point, which is the same refusal that stops a knee being read off one step.
+
+  The records go through the same `--json` view the table is built from, so the page and the terminal
+  cannot disagree about what a run was.
+- **`crowdsim compare a b --html`** ([#88](https://github.com/HiWay-Media/crowdsim/issues/88)): the delta,
+  drawn **as a delta** — the bar is the change, centred on zero, left better and right worse. Two absolute
+  bars would leave the reader subtracting by eye, and that subtraction is the one number this tool is
+  confident about: the absolutes come from a synthetic pool of cold URLs and travel badly.
+
+  It is drawn from what `compare --json` prints, which is what makes it allowable at all. `report --html`
+  declines to draw two runs and is right for the reason it gives — *two runs on one pair of axes without
+  compare's refusals is a picture of two different experiments* — and this page has those refusals
+  because it has no second opinion to have: **a refusal stops the drawing**, and adding one to `compare`
+  cannot leave the picture behind. That refusal message now points here instead of implying no drawn
+  comparison exists.
+- Both pages reuse the run report's shell, stylesheet and geometry (`page()`, `W`/`H`/`PAD`, now
+  exported), so a second page cannot drift from the first on what *self-contained* means. And
+  `tests/image/smoke.sh` asserts both load inside the image: they import across directories, which is the
+  shape that broke 1.20.0.
+
 ## [1.37.1] — 2026-09-08
 
 ### Fixed

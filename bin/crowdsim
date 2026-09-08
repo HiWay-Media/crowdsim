@@ -216,6 +216,9 @@
 #     --profile <name>  only runs of this profile
 #     --cols a,b,c      exactly these columns, by their names in history.tsv
 #     --json            the same records the GUI's own history endpoint returns
+#     --html            the trend as a self-contained page: the knee per run over time, with runs that
+#                       are not the same experiment separated rather than averaged (needs node)
+#     --out <file>      where to write that page (default: out/trend-<run>.html)
 #
 #   A filtered or truncated view says so on its last line, with the total. A subset of runs that
 #   looks like all of them is the same class of mistake as a p95 for a rate that never happened.
@@ -231,9 +234,12 @@
 #   measurement, not about the system.
 #
 #     --json   machine-readable output
+#     --html   the delta as a self-contained page, drawn from that same JSON so the refusals are this
+#              command's own (needs node) · --out <file> says where
 #
 #   Example:
 #     crowdsim compare 20260901T101500Z 20260901T121500Z
+#     crowdsim compare previous latest --html
 #
 #@ report
 #   crowdsim report <run-id> [--compare <run-id>] [--out <file.md>] [--html]
@@ -1948,6 +1954,29 @@ PY
 # Still python3 and still no node: `column(1)` is not in busybox, and neither is anything else clever.
 cmd_history() {
   if [ ! -f "$HISTORY_F" ]; then say "no runs yet ($HISTORY_F)"; return 0; fi
+
+  # ── --html: the trend, as a page ─────────────────────────────────────────────────────────────────
+  # "Does the knee move" is the only question this subcommand exists to answer, and it could only be
+  # answered as a table: the GUI plots it, `report --html` draws one run, and there was nothing to hand
+  # over. The records go through the SAME --json view the table is built from, so the page and the
+  # terminal cannot disagree about what a run was. (#87)
+  if [ "${REPORT_HTML:-0}" = "1" ]; then
+    local cli="$ROOT/lib/trend-html-cli.mjs"
+    if ! command -v node >/dev/null 2>&1 || [ ! -f "$cli" ]; then
+      die "crowdsim history --html needs node (18+): the geometry lives in lib/trend-html.mjs, where it
+  is unit tested. Without it, 'crowdsim history' still prints the table." 5
+    fi
+    local dest="${REPORT_OUT:-$OUT_DIR/trend-$RUN_ID.html}"
+    COMPARE_JSON=1 cmd_history_records | node "$cli" --out "$dest" \
+      --version "$(crowdsim_version)"
+    return 0
+  fi
+  cmd_history_records
+}
+
+# The records, printed as a table or as JSON. One reader of history.tsv, so `--html`, `--json` and the
+# table are three views of one parse rather than three parsers.
+cmd_history_records() {
   python3 - "$HISTORY_F" "${HISTORY_LAST:-}" "${TARGET:-}" "${PROFILE_F:-}" "${HISTORY_COLS:-}" \
            "${COMPARE_JSON:-0}" <<'PY'
 import json, sys
@@ -2505,8 +2534,9 @@ cmd_report() {
   # report stays exactly as it was: it is the right thing for a ticket, and it needs no node.
   if [ "${REPORT_HTML:-0}" = "1" ]; then
     if [ -n "${REPORT_COMPARE:-}" ]; then
-      die "--html reports one run. A delta between two runs is \`crowdsim compare\` (and the markdown
-  report embeds it with --compare): drawing two runs on one pair of axes without compare's refusals
+      die "--html reports one run. A delta between two runs is \`crowdsim compare $run $REPORT_COMPARE --html\`,
+  which draws it with compare's own refusals in place (and the markdown report embeds it with --compare):
+  drawing two runs on one pair of axes without those refusals
   would put a confident picture behind two different experiments." 2
     fi
     if ! command -v node >/dev/null 2>&1; then
@@ -2833,6 +2863,31 @@ cmd_compare() {
   # Resolved BEFORE anything else, and every refusal compare already has still applies to the result: a
   # resolved id is checked for a matching pool, profile and generator_ok exactly like a typed one.
   a="$(resolve_run_id "$a")"; b="$(resolve_run_id "$b")"
+  # ── --html: the delta, drawn ─────────────────────────────────────────────────────────────────────
+  # The refusals must be compare's own, so the page is drawn from what `--json` prints rather than from a
+  # second implementation of "are these two comparable": adding a refusal here cannot leave the picture
+  # behind, because there is no picture-side copy to leave behind. (#88)
+  if [ "${REPORT_HTML:-0}" = "1" ]; then
+    local cli="$ROOT/lib/compare-html-cli.mjs"
+    if ! command -v node >/dev/null 2>&1 || [ ! -f "$cli" ]; then
+      die "crowdsim compare --html needs node (18+): the geometry lives in lib/compare-html.mjs, where it
+  is unit tested. Without it, 'crowdsim compare $a $b' still prints the delta." 5
+    fi
+    local dest="${REPORT_OUT:-$OUT_DIR/compare-$a-$b.html}"
+    local crc=0
+    COMPARE_JSON=1 cmd_compare_json "$a" "$b" | node "$cli" --out "$dest" \
+      --version "$(crowdsim_version)" || crc=$?
+    say "     open it in a browser, attach it, or print it to PDF — it fetches nothing and renders offline"
+    return "$crc"
+  fi
+
+  cmd_compare_json "$a" "$b"
+}
+
+# compare's own computation, printed as prose or as JSON. One implementation, three consumers: the
+# terminal, `--json`, and the drawn page.
+cmd_compare_json() {
+  local a="$1" b="$2"
   local rc=0
   python3 - "$OUT_DIR" "$a" "$b" "${COMPARE_JSON:-0}" <<'PY' || rc=$?
 import json, os, sys

@@ -413,6 +413,18 @@ Two things about it are deliberate and are not going to change:
 See [the CLI reference](cli.md#a-server-side-series-read-against-the-runs-own-steps) for the formats and
 the refusals.
 
+## Handing the trend to somebody else
+
+```bash
+crowdsim history --html                    # does the knee move? — one line per experiment
+crowdsim compare previous latest --html    # the delta, drawn as a delta
+```
+
+The trend is the only claim here that survives the caveat about absolutes being optimistic, and until
+1.38.0 it was the one thing that could not be attached to a ticket: `history` was a table, the GUI plotted
+it, and `report --html` draws one run. Both pages carry the refusals — runs that are not the same
+experiment are separated rather than averaged, and a comparison `compare` declines is not drawn at all.
+
 ## Handing a run to somebody else
 
 ```bash

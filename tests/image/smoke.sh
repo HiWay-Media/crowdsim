@@ -140,6 +140,17 @@ set -e
 # lib/report-html.mjs imports ../k6/lib/failure.js — a cross-directory import in a file the image ships,
 # which is exactly the shape that broke 1.20.0 (lib/validate.mjs → k6/lib/auth.js, ESM in a checkout and
 # CommonJS in the container). Asserted by loading it and calling the export the report is built from.
+# The two pages that read the archive rather than one run. Both import from lib/ and from k6/lib/, so
+# both are the cross-directory shape that broke 1.20.0 — asserted by name, like report-html.mjs. (#87 #88)
+for mod in trend-html compare-html; do
+  if run "$IMAGE" node -e "import('/crowdsim/lib/$mod.mjs').then(() => process.exit(0))\
+    .catch((e) => { console.error(String(e && e.message)); process.exit(1); })" >/dev/null 2>&1; then
+    ok "lib/$mod.mjs loads in the image"
+  else
+    bad "lib/$mod.mjs does not load in the image"
+  fi
+done
+
 if run "$IMAGE" node -e 'import("/crowdsim/lib/report-html.mjs").then(m => {
   if (typeof m.outcomeChart !== "function" || typeof m.buildReport !== "function") {
     console.error("report-html.mjs loaded without its exports"); process.exit(1);

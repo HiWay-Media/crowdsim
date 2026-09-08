@@ -698,6 +698,16 @@ only the mix is still a guess) and the command exits with the parser's own code.
   — that is the one that gets committed, and a profile names real routes on a real host.
 - An unverified pool is carried across with the warning attached, in the file.
 
+**`compare --html` draws the delta as a delta** — the bar is the *change*, centred on zero, left better
+and right worse. Two absolute bars would leave the reader subtracting by eye, and the delta is the one
+number this tool is confident about: the absolutes come from a synthetic pool of cold URLs and travel
+badly.
+
+It is drawn from what `--json` prints, which is why it is allowed to exist at all. `report --html` refuses
+to draw two runs, rightly — *two runs on one pair of axes without compare's refusals is a picture of two
+different experiments* — and this page has those refusals because it has no second opinion: **a refusal
+stops the drawing**, and adding one to `compare` cannot leave the picture behind.
+
 ### `report`
 
 ```bash
@@ -795,7 +805,7 @@ picture behind two different experiments. The markdown report embeds the compari
 ### `history`
 
 ```bash
-crowdsim history [--last N] [--target <host>] [--profile <name>] [--cols a,b,c] [--json]
+crowdsim history [--last N] [--target <host>] [--profile <name>] [--cols a,b,c] [--json] [--html]
 ```
 
 `out/history.tsv` as a table: one line per run. What it is for is watching whether the knee moves after a
@@ -826,6 +836,17 @@ result is worse than no row at all.
 **A filtered or truncated view says so, on its last line, with the total** — `showing 2 of 3 runs · --last
 2`. A subset of runs that looks like all of them is the same class of mistake as a p95 quoted for a rate
 that never happened.
+
+**`--html` draws the question this subcommand exists for.** One line per *experiment*: runs at a
+different profile, target, shape or fan-out are separated rather than averaged, because they are not
+points on one line. The fan-out rule is `comparableFanOut` from `k6/lib/delivery.js`, not a second copy. A
+discard (`generator_ok: false`) never joins a line and is listed under **Left out, and why**, with the run
+id. A run whose knee was refused is a **gap** in the line, not a zero — a knee of 0 req/s would be a claim
+about the system. And one run is not a trend: the page says so rather than drawing a line through a single
+point, which is the same refusal that stops a knee being read off one step.
+
+The records go through the same `--json` view the table is built from, so the page and the terminal cannot
+disagree about what a run was. `--out <file>` says where it goes (default `out/trend-<run>.html`).
 
 The parser stays **header-keyed**, so rows written before a column existed keep working and a missing cell
 prints empty rather than `0`. The knee columns (`knee_clean`, `knee_crossed`) are empty rather than `0`

@@ -66,8 +66,10 @@ subcommands() { sed -n 's/^#@ \([a-z-][a-z-]*\)$/\1/p' "$CROWDSIM"; }
   [ "$status" -eq 2 ]
   [[ "$output" == *"--touch-and-go"* ]]
 
-  run "$CROWDSIM" history --html
+  # `history --html` became real in 1.38.0, so this asks about one it still does not take.
+  run "$CROWDSIM" history --insecure
   [ "$status" -eq 2 ]
+  [[ "$output" == *"--insecure"* ]]
 }
 
 @test "an unknown flag is still an unknown flag, and says so differently" {
