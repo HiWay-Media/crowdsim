@@ -4,6 +4,45 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.33.0] — 2026-09-08
+
+**`probe` requested `pools.pages[0]` and assumed the other 399.** That is the trap this tool documents
+everywhere else — *404s do not load the app tier, so a pool of invented paths yields a false "it handles
+this beautifully"* — surviving inside the one command whose entire job is to catch it before a run.
+`discover --verify` does request every path it builds, but only for pools it built itself: a pool written
+by hand, edited, or narrowed later never went through it, and the 1.29.0 failure-mode line only catches
+it *after* the window.
+
+### Added
+- **`--pool-sample <n>`** (default **5**): how many URLs per pool `probe` checks. A **sample**, never the
+  whole pool, and **spread across it** rather than the first n — the first entries of a sitemap-derived
+  pool are the shallowest pages, which are also the most likely to exist. Paced by
+  `CROWDSIM_VERIFY_DELAY`, the same knob discovery uses, because a preflight must not become the load
+  test. Only pools a class actually draws from are checked.
+
+  A pool where more than half the sample is unserved exits **4**; below half it warns and says the real
+  share may be higher, because this is a sample and not a census.
+- **The premise check samples too.** One endpoint answering 401 does not establish that the other 399
+  require the token, so `authedTargets()` takes the same sample and one public path among several now
+  refuses the class instead of being invisible behind a verified first entry.
+
+### Fixed
+Two defects found by running this against a real target, both introduced by the change itself:
+
+- **A 401 is not a broken path.** Counting only 2xx/3xx as served reported a correctly configured
+  `authed` pool as mostly-404 and made `probe` exit **4 on a healthy profile** — a false refusal, which
+  for this tool is the worst direction to fail in. A 401/403 means the route exists and wants a token;
+  whether it *should* is the premise check's question, a few lines further down the same output.
+- **The pool check killed the rest of the probe.** Its python exits 4 to signal a broken pool, and under
+  `set -eo pipefail` that took down the subshell the whole probe body runs in — so the authed-premise
+  section simply never ran. Wrapped in `|| rc=$?`, the same way the k6 invocation is, and for the same
+  reason.
+
+### Changed
+- The two samplers now pick the same indices. Python's `round()` rounds 2.5 down and JavaScript's
+  `Math.round` rounds it up, so `probe` was checking one set of URLs and the premise check another for
+  the same pool.
+
 ## [1.32.0] — 2026-09-08
 
 **`generator_ok: false` covered two opposite causes, and it is the verdict that decides whether a window

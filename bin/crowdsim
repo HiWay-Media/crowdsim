@@ -120,6 +120,9 @@
 #     --profile <f.json>   the profile to preflight  (required)
 #     --target <name>      a named target from the profile (default: targets.default)
 #     --insecure           skip TLS verification, for a node addressed by IP
+#     --pool-sample <n>    how many URLs to check PER POOL (default 5, spread across the pool, not the
+#                          first n). It used to check exactly one and assume the other 399. Paced by
+#                          CROWDSIM_VERIFY_DELAY: a preflight must not become the load test.
 #
 #   Exits 4 if the target answers >=400, or if an authed class turns out not to need its token.
 #
@@ -471,6 +474,7 @@ while [ $# -gt 0 ]; do
     --certify-hold) CERTIFY_HOLD="$2"; shift 2;;
     --server-metrics) SERVER_METRICS="$2"; shift 2;;
     --server-metrics-label) SERVER_METRICS_LABEL="$2"; shift 2;;
+    --pool-sample) POOL_SAMPLE="$2"; shift 2;;
     --access-log) ACCESS_LOG="$2"; shift 2;;
     --rsc-query) RSC_QUERY_OVERRIDE="$2"; shift 2;;
     --force) FORCE_OVERWRITE=1; shift;;
@@ -1080,6 +1084,122 @@ PY
 }
 
 # ─────────────────────────────── probe ──────────────────────────────────────────────────────────────
+# ───────────────────── how much of a pool does a preflight actually check? ───────────────────────────
+# It checked `pools.pages[0]` and assumed the other 399. That is the trap this tool documents everywhere
+# else — *404s do not load the app tier, so a pool of invented paths yields a false "it handles this
+# beautifully"* — surviving inside the one command whose job is to catch it before a run.
+#
+# `discover --verify` does request every path it builds, but only for pools it built itself: a pool
+# written by hand, edited, or narrowed after the fact never goes through it. The 1.29.0 failure-mode line
+# catches it after the run, from the 404 counters. Catching it before is cheaper than a window.
+#
+# A SAMPLE, never the whole pool, spread across it rather than the first n: the first entries of a
+# sitemap-derived pool are the shallowest pages, which are also the most likely to exist. Paced by the
+# same CROWDSIM_VERIFY_DELAY as discovery, because a preflight must not become the load test.
+pool_sample_check() {
+  local n="${POOL_SAMPLE:-5}"
+  case "$n" in ''|*[!0-9]*) say ""; say "  ⛔ --pool-sample takes a number of URLs per pool"; return 0;; esac
+  [ "$n" -ge 1 ] || return 0
+
+  local plan; plan="$(python3 - "$RESOLVED" "$n" <<'PY'
+import json, sys
+try:
+    d = json.load(open(sys.argv[1], encoding='utf-8'))
+except Exception:
+    raise SystemExit(0)
+want = max(1, int(sys.argv[2]))
+pools = d.get('pools') or {}
+# Only pools a class actually draws from: a pool nothing references is not part of this run.
+used = set()
+for c in (d.get('classes') or []):
+    if isinstance(c, dict) and c.get('pool'):
+        used.add(c['pool'])
+for name in sorted(used):
+    urls = pools.get(name)
+    if not isinstance(urls, list) or not urls:
+        continue
+    n = min(want, len(urls))
+    if n == 1:
+        idx = [0]
+    else:
+        # int(x + 0.5), not round(): python rounds 2.5 down (banker's) and JS Math.round rounds it up,
+        # so the two samplers would pick different indices for the same pool. lib/premise.mjs does the
+        # same arithmetic and they have to agree, or `probe` checks one set of URLs and the premise
+        # check another.
+        idx = sorted({int(i * (len(urls) - 1) / (n - 1) + 0.5) for i in range(n)})
+    for i in idx:
+        print('%s\t%s\t%s' % (name, len(urls), urls[i]))
+PY
+)"
+  [ -n "$plan" ] || return 0
+
+  say ""
+  say "── how much of each pool answers (a sample, paced — not the whole pool) ──"
+  local obs="$OUT_DIR/.pool-sample"
+  : > "$obs"
+  local pool total path code
+  while IFS="$(printf '\t')" read -r pool total path; do
+    code="$(curl "${curl_opts[@]}" -D /dev/null -o /dev/null -w '%{http_code}' \
+            "$BASE_URL$path" 2>/dev/null || echo 0)"
+    printf '%s\t%s\t%s\t%s\n' "$pool" "$total" "$path" "${code:-0}" >> "$obs"
+    sleep "$VERIFY_DELAY" 2>/dev/null || true
+  done <<< "$plan"
+
+  # `|| rc=$?`, not a bare call: this python exits 4 to signal a broken pool, and under `set -e` that
+  # killed the subshell the whole probe body runs in — so the authed-premise section below simply never
+  # ran. Same trap as the k6 invocation, which is why that one is wrapped too.
+  local rc=0
+  python3 - "$obs" <<'PY' || rc=$?
+import sys
+from collections import OrderedDict
+rows = []
+for line in open(sys.argv[1], encoding='utf-8'):
+    parts = line.rstrip('\n').split('\t')
+    if len(parts) == 4:
+        rows.append((parts[0], int(parts[1]), parts[2], int(parts[3] or 0)))
+pools = OrderedDict()
+for pool, total, path, code in rows:
+    pools.setdefault(pool, {'total': total, 'tried': 0, 'ok': 0, 'auth': 0, 'bad': []})
+    p = pools[pool]
+    p['tried'] += 1
+    if 200 <= code < 400:
+        p['ok'] += 1
+    elif code in (401, 403):
+        # A 401 means the ROUTE EXISTS and wants a token. Counting it as a broken path reported a
+        # correctly configured `authed` pool as mostly-404 and made `probe` exit 4 on a healthy profile —
+        # caught by the existing premise tests the moment sampling was added. Whether those endpoints
+        # SHOULD require the token is the premise check's question, a few lines below.
+        p['auth'] += 1
+    else:
+        p['bad'].append((path, code))
+worst = 0.0
+width = max([len(k) for k in pools] + [4])
+for name, p in pools.items():
+    served = p['ok'] + p['auth']
+    share = served / p['tried'] if p['tried'] else 0
+    worst = max(worst, 1 - share)
+    mark = '✅' if share == 1 else ('⛔' if share < 0.5 else '⚠️ ')
+    extra = '' if not p['auth'] else ' (%d of them 401/403: the route exists and wants a token)' % p['auth']
+    print('  %s %-*s  %d of %d sampled (pool has %d) are served%s'
+          % (mark, width, name, served, p['tried'], p['total'], extra))
+    for path, code in p['bad'][:5]:
+        print('       %s → %s' % (path, code or 'no answer'))
+    if len(p['bad']) > 5:
+        print('       … and %d more' % (len(p['bad']) - 5))
+if worst >= 0.5:
+    print('  ⛔ at least one pool is mostly paths this target does not serve. A class drawing from it')
+    print('     would be ~100% failed, the brake would stop the run at a few req/s, and the numbers')
+    print('     would describe a 404 handler. Fix the pool: `crowdsim discover --verify`.')
+    sys.exit(4)
+elif worst > 0:
+    print('  ⚠️  some sampled paths do not answer. A pool is a sample here, so the real share may be')
+    print('     higher — run `crowdsim discover --verify` to rebuild it from what renders.')
+PY
+  rm -f "$obs"
+  if [ "$rc" = "4" ]; then echo 4 > "$OUT_DIR/.pool-rc"; fi
+  return 0
+}
+
 # ─────────────────── does an authed class actually measure an authenticated read? ───────────────────
 # One request per `authed` class, sent WITHOUT the token, before any load. An endpoint that answers 200
 # without an `Authorization` header turns the whole class into an anonymous GET wearing a bearer token —
@@ -1108,7 +1228,8 @@ print(1 if any((c or {}).get("kind")=="authed" for c in (d.get("classes") or [])
     return 0
   fi
 
-  node "$cli" plan "$RESOLVED" > "$plan_f" 2>/dev/null || { rm -f "$plan_f"; return 0; }
+  node "$cli" plan "$RESOLVED" --sample "${POOL_SAMPLE:-5}" > "$plan_f" 2>/dev/null \
+    || { rm -f "$plan_f"; return 0; }
   [ -s "$plan_f" ] || { rm -f "$plan_f"; return 0; }
   : > "$obs_f"
   local tag a b st
@@ -1138,7 +1259,7 @@ cmd_probe() {
   if [ "$INSECURE" = "1" ]; then curl_opts+=(-k); fi
   if [ -n "$HOST_HEADER" ]; then curl_opts+=(-H "Host: $HOST_HEADER"); fi
   if [ -n "$BYPASS" ]; then curl_opts+=(--resolve "${BYPASS/=/:443:}"); fi
-  rm -f "$OUT_DIR/.premise-rc"
+  rm -f "$OUT_DIR/.premise-rc" "$OUT_DIR/.pool-rc"
 
   local first; first="$(python3 -c '
 import json,sys
@@ -1240,6 +1361,7 @@ if absent:
     print("     profile rather than a cold cache — and a layer that never speaks is reported as unknown,")
     print("     never as a miss, so it cannot quietly drag a hit ratio to zero.")
 PY
+    pool_sample_check
     authed_premise
   } | tee "$log"
   rm -f "$OUT_DIR/.probe-hdr"
@@ -1248,6 +1370,13 @@ PY
   # An authed class that cannot measure an authenticated read makes the authenticated half of every run
   # from this profile meaningless, so it is an exit code and not a line somebody may scroll past. 4 is
   # probe's existing "this profile and this target do not go together".
+  if [ -f "$OUT_DIR/.pool-rc" ]; then
+    rm -f "$OUT_DIR/.pool-rc"
+    say ""
+    say "  ⛔ a pool is mostly paths this target does not serve (see above)"
+    ok "probe log: $log"
+    exit 4
+  fi
   if [ -f "$OUT_DIR/.premise-rc" ]; then
     rm -f "$OUT_DIR/.premise-rc"
     say ""

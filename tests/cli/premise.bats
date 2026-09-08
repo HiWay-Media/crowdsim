@@ -23,6 +23,8 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path.startswith('/api/me') and 'Authorization' not in self.headers:
             self.send_response(401); self.end_headers(); self.wfile.write(b'no'); return
+        if self.path.startswith('/api/public-open'):
+            self.send_response(200); self.end_headers(); self.wfile.write(b'open'); return
         if self.path.startswith('/api/gone'):
             self.send_response(404); self.end_headers(); self.wfile.write(b'nope'); return
         self.send_response(200); self.send_header('Content-Type', 'text/html')
@@ -123,4 +125,67 @@ JSON
   [ "$status" -ne 0 ]
   [[ "$output" == *"authed_api"* ]]
   [[ "$output" == *"names no pool"* ]]
+}
+
+# ── how much of a pool a preflight checks (#77) ──────────────────────────────────────────────────────
+
+@test "a pool whose first entry answers but whose rest do not is caught, not assumed" {
+  # The blind spot: probe read pools.pages[0] and assumed the other 399. This pool answers at [0] and
+  # 404s everywhere else, which is exactly the shape that used to pass.
+  local f="$BATS_TEST_TMPDIR/liar.json"
+  python3 - "$f" "$PORT" <<'PY'
+import json, sys
+pages = ["/"] + ["/api/gone"] * 9
+json.dump({"name": "liar",
+  "targets": {"default": "local", "list": {"local": {"base_url": "http://127.0.0.1:%s" % sys.argv[2]}}},
+  "safety": {"allow_hosts": ["127.0.0.1"], "safe_peak_rps": 100},
+  "pools": {"pages": pages},
+  "classes": [{"name": "html", "kind": "plain", "pool": "pages", "weight": 100}]},
+  open(sys.argv[1], "w"), indent=1)
+PY
+  run "$CROWDSIM" probe --profile "$f"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"how much of each pool answers"* ]]
+  [[ "$output" == *"mostly paths this target does not serve"* ]]
+  [[ "$output" == *"discover --verify"* ]]
+}
+
+@test "a healthy pool is reported as healthy, and the probe still exits 0" {
+  run "$CROWDSIM" probe --profile "$(profile_with good /api/me)"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"sampled"* ]]
+  [[ "$output" == *"are served"* ]]
+}
+
+@test "--pool-sample 1 is the old behaviour, and says how big the pool was anyway" {
+  run "$CROWDSIM" probe --profile "$(profile_with good /api/me)" --pool-sample 1
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"1 of 1 sampled"* || "$output" == *"of 1 sampled"* ]]
+}
+
+@test "the sample is paced, so a preflight cannot become the load test" {
+  # Not a timing assertion — those are flaky. The pacing is the same knob discovery uses, and the point
+  # is that it is honoured rather than that it takes a particular number of milliseconds.
+  run grep -c 'VERIFY_DELAY' "$CROWDSIM"
+  [ "$output" -ge 2 ]
+}
+
+@test "the premise check samples the pool too: one 401 does not speak for the rest" {
+  local f="$BATS_TEST_TMPDIR/mixed.json"
+  python3 - "$f" "$PORT" <<'PY'
+import json, sys
+# /api/me needs the token; /api/public-open does not. A one-URL check on [0] would call this verified.
+json.dump({"name": "mixed",
+  "targets": {"default": "local", "list": {"local": {"base_url": "http://127.0.0.1:%s" % sys.argv[2]}}},
+  "safety": {"allow_hosts": ["127.0.0.1"], "safe_peak_rps": 100},
+  "pools": {"pages": ["/"], "api": ["/api/me", "/api/me", "/api/public-open"]},
+  "classes": [{"name": "html", "kind": "plain", "pool": "pages", "weight": 97},
+              {"name": "login", "kind": "login", "weight": 2},
+              {"name": "authed_api", "kind": "authed", "pool": "api", "weight": 1}]},
+  open(sys.argv[1], "w"), indent=1)
+PY
+  run "$CROWDSIM" probe --profile "$f"
+  [ "$status" -eq 4 ]
+  [[ "$output" == *"/api/public-open"* ]]
+  [[ "$output" == *"does not require the token"* ]]
 }

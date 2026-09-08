@@ -198,10 +198,39 @@ generator's own classification (`k6/lib/classify.js`), so the two cannot disagre
 Only cache-relevant headers are stored in the JSON. A probe against a real site can come back with
 `Set-Cookie`, and a run archive is not the place for somebody's session.
 
+#### How much of a pool it checks
+
+```
+── how much of each pool answers (a sample, paced — not the whole pool) ──
+  ✅ api    1 of 1 sampled (pool has 1) are served (1 of them 401/403: the route exists and wants a token)
+  ✅ pages  2 of 2 sampled (pool has 2) are served
+```
+
+Until 1.33.0 `probe` requested `pools.pages[0]` and assumed the other 399. That is the trap this tool
+documents everywhere else — *404s do not load the app tier, so a pool of invented paths yields a false
+"it handles this beautifully"* — surviving inside the one command whose job is to catch it before a run.
+`discover --verify` does request every path it builds, but only for pools it built itself: a pool written
+by hand, edited, or narrowed later never went through it.
+
+`--pool-sample <n>` (default **5**) is how many URLs per pool it checks. A **sample**, never the whole
+pool, and **spread across it** rather than the first n — the first entries of a sitemap-derived pool are
+the shallowest pages, which are also the most likely to exist. Paced by `CROWDSIM_VERIFY_DELAY`, the same
+knob discovery uses: a preflight must not become the load test. Only pools a class actually draws from
+are checked.
+
+A pool where **more than half** the sample is unserved exits **4**: a class drawing from it would be
+~100% failed, the brake would stop the run at a few req/s, and the numbers would describe a 404 handler.
+Below half it warns, and says the real share may be higher because this is a sample.
+
+**A 401 or 403 counts as served** — the route exists and wants a token. Whether it *should* is the
+premise check's question, below; counting it as a broken path reported a correctly configured `authed`
+pool as mostly-404 and made `probe` refuse a healthy profile.
+
 #### The premise of an `authed` class
 
-If the profile has an `authed` class, `probe` sends **one request per class, without the token**, and says
-what came back. A 401 or a 403 is the only thing that proves the class measures an authenticated read:
+If the profile has an `authed` class, `probe` sends **a request per sampled path, without the token**
+(the same `--pool-sample`, since one endpoint answering 401 does not establish that the other 399 require
+the token), and says what came back. A 401 or a 403 is the only thing that proves the class measures an authenticated read:
 
 ```
 ── the premise of every authed class (one request, sent without the token) ──

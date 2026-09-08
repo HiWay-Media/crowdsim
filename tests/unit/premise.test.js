@@ -136,3 +136,44 @@ test('a skipped class appears in the section even though nothing was requested f
   assert.equal(r.refused, true);
   assert.match(r.text, /no_pool/);
 });
+
+// ── one endpoint answering 401 does not speak for the other 399 (#77) ────────────────────────────────
+
+test('the premise is checked at a sample of each pool, spread across it', () => {
+  const profile = {
+    pools: { api: ['/api/a', '/api/b', '/api/c', '/api/d', '/api/e', '/api/f'] },
+    classes: [{ name: 'login', kind: 'login' }, { name: 'authed', kind: 'authed', pool: 'api' }],
+  };
+  const { targets } = authedTargets(profile, { sample: 3 });
+  assert.equal(targets.length, 3);
+  // spread across the pool, not the first three: the first entries are the ones most likely to exist
+  assert.deepEqual(targets.map((t) => t.path), ['/api/a', '/api/d', '/api/f']);
+  for (const t of targets) assert.equal(t.class, 'authed');
+});
+
+test('a sample larger than the pool checks the pool, not the sample size', () => {
+  const { targets } = authedTargets({
+    pools: { api: ['/api/only'] },
+    classes: [{ name: 'login', kind: 'login' }, { name: 'a', kind: 'authed', pool: 'api' }],
+  }, { sample: 5 });
+  assert.equal(targets.length, 1);
+});
+
+test('no sample given keeps the original behaviour: one path per class', () => {
+  const { targets } = authedTargets(PROFILE);
+  assert.equal(targets.length, 1);
+  assert.equal(targets[0].path, '/api/me');
+});
+
+test('one public endpoint among several refuses the class, and names the path', () => {
+  // The whole point of sampling: the class is unusable if ANY of its paths is public, and reporting only
+  // the first would have called this verified.
+  const r = renderPremise([
+    { class: 'authed', path: '/api/a', status: 401 },
+    { class: 'authed', path: '/api/c', status: 200 },
+    { class: 'authed', path: '/api/f', status: 401 },
+  ]);
+  assert.equal(r.refused, true);
+  assert.match(r.text, /\/api\/c/);
+  assert.match(r.text, /does not require the token/);
+});
