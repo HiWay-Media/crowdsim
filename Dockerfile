@@ -42,6 +42,12 @@ COPY gui/server/package.json gui/server/
 COPY gui/ui/package.json gui/ui/
 RUN npm ci
 COPY gui/ui/ gui/ui/
+# k6/lib/ because the UI imports one function from it: `outcomeBands` in k6/lib/failure.js, so the page
+# and the drawn report share ONE band arithmetic instead of two that can disagree. Without this line vite
+# cannot resolve it and the image build fails — which is what happened, on a release, twice, while
+# `make lint`, `make test` and the UI tests all passed: a checkout has the whole repository and this stage
+# does not. tests/gui/ui-build-inputs.test.js now asserts the two agree.
+COPY k6/lib/ k6/lib/
 RUN npm run build --workspace gui/ui
 
 # ─── stage 2: runtime dependencies only (express and its tree; no vite, no react, no bats) ────────────
