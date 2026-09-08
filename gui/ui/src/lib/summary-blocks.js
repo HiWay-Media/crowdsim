@@ -16,6 +16,9 @@
  * disagree while somebody is deciding something.
  */
 
+// The band arithmetic is shared with the drawn report — see classOutcomes below.
+import { outcomeBands } from '../../../../k6/lib/failure.js';
+
 /** Blocks the result view shows. */
 export const RENDERED = [
   'run_id', 'profile', 'base_url', 'shape', 'rsc_mode', 'peak_rps_user_target',
@@ -52,6 +55,30 @@ export const DELIBERATELY_NOT_RENDERED = [
   // Listed here so that offering the flag and forgetting the panel cannot pass silently.
   'server_side',
 ];
+
+/**
+ * Outcomes per class, for the page. (#85)
+ *
+ * The band arithmetic comes from `k6/lib/failure.js` — the same function the drawn report uses — because
+ * "cs_5xx counts the 502s and 504s too" in two places is two places to get it wrong, and this page and
+ * that report end up side by side in the same conversation.
+ *
+ * A class that never ran has no row, and a run where nothing failed has no rows at all: six full-width
+ * bars say nothing the p95 chart does not already say better.
+ */
+export function classOutcomes(perClass) {
+  const names = Object.keys(perClass || {}).filter((c) => perClass[c] && Number(perClass[c].reqs) > 0);
+  const rows = names.map((c) => {
+    const bands = outcomeBands(perClass[c]);
+    return {
+      class: c,
+      bands,
+      failed: bands.filter((b) => b.key !== 'ok').reduce((n, b) => n + b.n, 0),
+      total: bands.reduce((n, b) => n + b.n, 0),
+    };
+  });
+  return rows.some((r) => r.failed > 0) ? rows : [];
+}
 
 /** The headline: which class, which code, what share. Null when nothing failed. */
 export function failureModeText(fm) {

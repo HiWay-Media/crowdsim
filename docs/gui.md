@@ -324,6 +324,12 @@ since 1.34.0 that includes the blocks it had been silently skipping:
   is the same wrong answer 1.29.0 fixed in the panel and the reports.
 - **Why the rate was not held**, when it was not: the generator (discard) or the target (a finding).
 - **Requested → delivered**, with the fan-out between them.
+- **What answered, and with what** — one bar per class, split by outcome. p95 per class was the only
+  thing a class did on this page, so a run serving 474 × 404 on two classes showed a healthy card. The
+  band arithmetic is the same function the drawn report uses (`outcomeBands` in `k6/lib/failure.js`),
+  because *`cs_5xx` counts the 502s and 504s too* in two places is two places to get it wrong — and the
+  page and the report end up side by side in the same conversation. A class that never ran has no row; a
+  run where nothing failed has none at all.
 - The knee, refusals included — and the plot's x-axis now **says which rate it is drawing**. It maps the
   requested rate, because that is the axis every step shares; an unlabelled axis on a mix with a fan-out
   of 1.25 shows a knee at 60 while the target was taking 76, which is the wrong answer 1.29.0 removed from

@@ -11,7 +11,7 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { failureMode, HEADLINE_SHARE } from '../../k6/lib/failure.js';
+import { failureMode, outcomeBands, HEADLINE_SHARE } from '../../k6/lib/failure.js';
 
 // The run that produced this issue: a 4xx concentration whose p95 crossed the SLO.
 const CONCENTRATED = {
@@ -185,4 +185,37 @@ test('when nothing clears the floor, the largest wins rather than the most speci
   });
   assert.equal(m.code, '404');
   assert.equal(m.count, 8);
+});
+
+// ── the bands, in one place (#85) ────────────────────────────────────────────────────────────────────
+// The outcome chart needs this arithmetic and so does the page. Two copies of "cs_5xx is the superset"
+// is exactly the duplication this project keeps paying for, so it lives here — where the code list
+// already is — and both renderers import it.
+
+test('the bands split a class total into outcomes that add up to it', () => {
+  const b = outcomeBands({ reqs: 100, errors: { e404: 10, e5xx: 30, e502: 10, e504: 5, denied: 5 } });
+  const total = b.reduce((n, x) => n + x.n, 0);
+  assert.equal(total, 100, 'the bands are a partition of the class total');
+  const by = Object.fromEntries(b.map((x) => [x.key, x.n]));
+  assert.equal(by.e404, 10);
+  assert.equal(by.e504, 5);
+  assert.equal(by.e502, 10);
+  assert.equal(by.e5xx, 15, 'other 5xx is the superset minus the two specific ones');
+  assert.equal(by.denied, 5);
+  assert.equal(by.ok, 55);
+});
+
+test('a counter larger than the class total cannot make a negative band', () => {
+  const b = outcomeBands({ reqs: 10, errors: { e404: 99, e5xx: 0, e502: 0, e504: 0, denied: 0 } });
+  for (const x of b) assert.ok(x.n >= 0, `${x.key} = ${x.n}`);
+});
+
+test('a 5xx total below its own parts does not produce a negative other-5xx', () => {
+  const b = outcomeBands({ reqs: 100, errors: { e404: 0, e5xx: 2, e502: 5, e504: 5, denied: 0 } });
+  assert.equal(b.find((x) => x.key === 'e5xx').n, 0);
+});
+
+test('a class with no requests has no bands at all', () => {
+  assert.deepEqual(outcomeBands({ reqs: 0, errors: {} }), []);
+  assert.deepEqual(outcomeBands(null), []);
 });

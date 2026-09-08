@@ -150,3 +150,37 @@ export function failureMode(s) {
     line: line,
   };
 }
+
+/**
+ * One class's requests, split into outcomes that ADD UP TO ITS TOTAL. (#85)
+ *
+ * Here rather than in a renderer because two renderers need it — the drawn report and the GUI — and two
+ * copies of "cs_5xx is the superset" is the duplication this project keeps paying for. The rules:
+ *
+ *  · `cs_5xx` counts the 502s and 504s too, so the bands are 504, 502 and *other* 5xx. Stacking the raw
+ *    counters would draw more failures than the class had.
+ *  · nothing is negative, whatever the counters say: a metric tagged oddly must not produce a band past
+ *    the axis, which looks like a scale bug in the page rather than an odd metric.
+ *  · a class with no requests gets NO bands. A band of zero reads as a class that was fine; a class that
+ *    never ran is a different statement.
+ */
+export function outcomeBands(cls) {
+  const c = cls || {};
+  const total = num(c.reqs);
+  if (total <= 0) return [];
+  const e = c.errors || {};
+  const e504 = num(e.e504);
+  const e502 = num(e.e502);
+  const other5xx = Math.max(0, num(e.e5xx) - e504 - e502);
+  const e404 = num(e.e404);
+  const denied = num(e.denied);
+  const failed = Math.min(total, e504 + e502 + other5xx + e404 + denied);
+  return [
+    { key: 'ok', label: '2xx/3xx', n: Math.max(0, total - failed) },
+    { key: 'e404', label: '404', n: Math.min(e404, total) },
+    { key: 'e504', label: '504', n: Math.min(e504, total) },
+    { key: 'e502', label: '502', n: Math.min(e502, total) },
+    { key: 'e5xx', label: 'other 5xx', n: Math.min(other5xx, total) },
+    { key: 'denied', label: '401/403', n: Math.min(denied, total) },
+  ];
+}

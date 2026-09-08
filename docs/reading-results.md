@@ -427,7 +427,7 @@ run with `generator_ok: false` comes out as **DISCARD THIS RUN** with no latency
 
 Since 1.35.0 the drawn page also says **which kind of invalid** an invalid run is — a target that could
 not absorb the rate is not the same as a starved generator, and the page used to open with *DISCARD THIS
-RUN* for both — and carries **what answered, and with what**: the status codes per class. p95 per class
+RUN* for both — and carries **what answered, and with what**: the status codes per class, as a stacked bar and a table. p95 per class
 was the only thing a class did on that page, so a run serving 474 × 404 on two classes drew a perfectly
 healthy set of bars.
 

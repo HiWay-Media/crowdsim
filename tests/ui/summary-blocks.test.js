@@ -181,3 +181,29 @@ test('a knee with no delivered rate reads exactly as it did before', () => {
   assert.equal(t.text, '60 → 80');
   assert.doesNotMatch(t.title, /delivered/i, 'no delivered rate means no claim about one');
 });
+
+// ── the outcomes on the page share the report's arithmetic (#85) ─────────────────────────────────────
+
+test('the page derives its outcome rows from the same function the report draws', async () => {
+  const { classOutcomes } = await import('../../gui/ui/src/lib/summary-blocks.js');
+  const { outcomeBands } = await import('../../k6/lib/failure.js');
+  const perClass = {
+    html:   { reqs: 100, errors: { e404: 10, e5xx: 30, e502: 10, e504: 5, denied: 5 } },
+    static: { reqs: 100, errors: { e404: 0, e5xx: 0, e502: 0, e504: 0, denied: 0 } },
+    ghost:  { reqs: 0, errors: {} },
+  };
+  const rows = classOutcomes(perClass);
+  // one row per class that RAN, and the bands are the shared ones
+  assert.deepEqual(rows.map((r) => r.class), ['html', 'static']);
+  assert.deepEqual(rows[0].bands, outcomeBands(perClass.html));
+  assert.equal(rows[0].failed, 45);
+  assert.equal(rows[1].failed, 0);
+});
+
+test('a run where nothing failed gets no outcome rows: the p95 chart already says it', async () => {
+  const { classOutcomes } = await import('../../gui/ui/src/lib/summary-blocks.js');
+  assert.deepEqual(classOutcomes({
+    html: { reqs: 100, errors: { e404: 0, e5xx: 0, e502: 0, e504: 0, denied: 0 } },
+  }), []);
+  assert.deepEqual(classOutcomes(null), []);
+});

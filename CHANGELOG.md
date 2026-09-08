@@ -4,6 +4,39 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.36.0] — 2026-09-08
+
+**«Concentrated on 2 of 5 classes» was prose next to a chart of something else.** That claim is the whole
+distinction the failure-mode line makes — the same code on some classes and not others points at a pool or
+a route, spread evenly it points at the system — and it is exactly what a chart is for. `classChart` drew
+p95, so a run serving 474 × 404 on two classes drew a perfectly healthy set of bars.
+
+### Added
+- **`outcomeChart()`**: one stacked bar per class, split by outcome, in `report --html`
+  ([#85](https://github.com/HiWay-Media/crowdsim/issues/85)) — and the same rows on the GUI's result
+  card. Three rules that are not decoration:
+
+  - **A class with no requests is absent**, not a band of width zero. A zero bar reads as a class that
+    was fine; a class that never ran is a different statement, and this project has been caught by that
+    conversion more than once.
+  - **`cs_5xx` counts the 502s and 504s too**, so the bands are 504, 502 and *other* 5xx. Stacking the
+    raw counters would draw more failures than the class had, and a stack past its own total is a chart
+    nobody can read.
+  - **Counts, never shares recomputed at the drawing site.** `failure_mode.share` and these bands come
+    from the same numbers, or they disagree on one page.
+
+  A run where nothing failed gets no chart at all: six full-width bars say nothing the p95 chart does not
+  already say better. Every band carries a CSS class and a `<title>`, and the failure bands are hatched
+  as well as coloured — the page's whole point is that it travels, and it gets printed.
+- **`outcomeBands()` lives in `k6/lib/failure.js`**, next to the code list, and *both* renderers import
+  it — the drawn report and the browser bundle. Two copies of "cs_5xx is the superset" is the duplication
+  this project keeps paying for, and the page and the report end up side by side in the same
+  conversation.
+- **`tests/image/smoke.sh` asserts `lib/report-html.mjs` loads inside the image.** That file now imports
+  `../k6/lib/failure.js` — a cross-directory import in a file the image ships, which is exactly the shape
+  that broke 1.20.0 (`lib/validate.mjs` → `k6/lib/auth.js`, ESM in a checkout and CommonJS in the
+  container). Asserted by name rather than assumed.
+
 ## [1.35.0] — 2026-09-08
 
 The first two of milestone v1.17.0, both the same shape: **a chart is a worse place to be wrong than a

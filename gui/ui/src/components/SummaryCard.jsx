@@ -9,7 +9,7 @@ import React, { useState } from 'react';
  */
 import { abortDetail } from '../lib/messages.js';
 import { kneeText } from '../lib/runs.js';
-import { failureModeText, deliveryText, dropDiagnosisText } from '../lib/summary-blocks.js';
+import { failureModeText, deliveryText, dropDiagnosisText, classOutcomes } from '../lib/summary-blocks.js';
 import { api } from '../api.js';
 
 const pct = (x) => (x === null || x === undefined ? 'n/a' : `${(x * 100).toFixed(2)}%`);
@@ -128,6 +128,34 @@ export default function SummaryCard({ summary, compare }) {
             <strong>{dl.headline}.</strong>{dl.detail ? <> {dl.detail}</> : null}
           </div>
         ) : null;
+      })()}
+
+      {/* WHICH class answered what. p95 per class was the only thing a class did here, so a run serving
+          474 × 404 on two classes showed a perfectly healthy card. The bands come from the same function
+          the drawn report uses. A class that never ran has no row; a run where nothing failed has none at
+          all, because the p95 chart already says that better. (#85) */}
+      {(() => {
+        const rows = classOutcomes(s.per_class);
+        if (!rows.length) return null;
+        return (
+          <div className="outcomes">
+            <h3>What answered, and with what</h3>
+            {rows.map((r) => (
+              <div className="outcome-row" key={r.class}>
+                <span className="outcome-name">{r.class}</span>
+                <span className="outcome-bar" role="img"
+                      aria-label={`${r.class}: ` + r.bands.filter((b) => b.n > 0)
+                        .map((b) => `${b.n} ${b.label}`).join(', ')}>
+                  {r.bands.filter((b) => b.n > 0).map((b) => (
+                    <span key={b.key} className={`band ${b.key}`}
+                          style={{ flexGrow: b.n }} title={`${b.n} ${b.label} of ${r.total}`} />
+                  ))}
+                </span>
+                <span className="outcome-failed">{r.failed || ''}</span>
+              </div>
+            ))}
+          </div>
+        );
       })()}
 
       {/* The knee: the only rate in this card that was measured rather than requested. A refusal is shown

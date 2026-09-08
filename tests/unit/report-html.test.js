@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildReport, rampChart, rampDomain, rateChart, classChart, cacheChart,
+  buildReport, rampChart, rampDomain, rateChart, classChart, cacheChart, outcomeChart,
   niceCeil, ticks, linear, stepLabel, esc,
 } from '../../lib/report-html.mjs';
 
@@ -566,4 +566,84 @@ test('every block buildSummary produces is either drawn or deliberately not', as
     + 'lib/report-html.mjs, with a reason if the page should not draw them');
   assert.deepEqual(DRAWN.filter((k) => DELIBERATELY_NOT_DRAWN.includes(k)), [],
     'a block cannot be both drawn and not drawn');
+});
+
+// ── the outcome chart: which class answered what (#85) ───────────────────────────────────────────────
+// «Concentrated on 2 of 5 classes» is the whole distinction the failure-mode line makes — the same code
+// on some classes and not others points at a pool or a route, spread evenly it points at the system — and
+// it was prose next to a chart of p95. This is the one thing a chart is actually for.
+
+test('each class gets a bar per outcome, from counts', () => {
+  const svg = outcomeChart({
+    html:   { reqs: 1000, errors: { e404: 200, e5xx: 0, e502: 0, e504: 0, denied: 0 } },
+    static: { reqs: 1000, errors: { e404: 0, e5xx: 0, e502: 0, e504: 0, denied: 0 } },
+  });
+  assert.match(svg, /<svg/);
+  assert.match(svg, /html/);
+  assert.match(svg, /static/);
+  // the counts, not a share recomputed here: failure_mode.share and these bars must not disagree
+  assert.match(svg, /200/);
+  assert.match(svg, /800/, 'the 2xx remainder is requests minus the coded failures');
+});
+
+test('a class with no requests stays absent, not a bar of height zero', () => {
+  // A zero bar reads as a class that was fine. A class that never ran is a different statement, and this
+  // project has been caught by that conversion more than once.
+  const svg = outcomeChart({
+    ran:     { reqs: 10, errors: { e404: 1, e5xx: 0, e502: 0, e504: 0, denied: 0 } },
+    skipped: { reqs: 0, errors: { e404: 0, e5xx: 0, e502: 0, e504: 0, denied: 0 } },
+  });
+  assert.match(svg, /ran/);
+  assert.doesNotMatch(svg, /skipped/);
+});
+
+test('a run where nothing failed draws no outcome chart at all', () => {
+  assert.equal(outcomeChart({
+    html: { reqs: 1000, errors: { e404: 0, e5xx: 0, e502: 0, e504: 0, denied: 0 } },
+  }), '');
+  assert.equal(outcomeChart({}), '');
+  assert.equal(outcomeChart(null), '');
+});
+
+test('a 504 is not double-counted inside 5xx', () => {
+  // cs_5xx counts the 504s and 502s too. Stacking the raw counters would draw more failures than the
+  // class had, and a stack that exceeds its own total is a chart that cannot be read.
+  const svg = outcomeChart({
+    api: { reqs: 100, errors: { e404: 0, e5xx: 30, e502: 10, e504: 20, denied: 0 } },
+  });
+  // 30 total 5xx of which 10 are 502 and 20 are 504, so the "other 5xx" band is 0 and the total failed
+  // is 30 — never 60.
+  assert.doesNotMatch(svg, /\b60\b/);
+  assert.match(svg, /70/, 'the 2xx remainder is 100 - 30');
+});
+
+test('the stack never exceeds the class total, whatever the counters say', () => {
+  // A counter can be larger than the request count if a metric is tagged oddly. The chart must clamp
+  // rather than draw a bar past its own axis, which would look like a scale problem in the page.
+  const svg = outcomeChart({
+    odd: { reqs: 10, errors: { e404: 99, e5xx: 0, e502: 0, e504: 0, denied: 0 } },
+  });
+  assert.match(svg, /<svg/);
+  assert.doesNotMatch(svg, /width="-/, 'no negative widths');
+});
+
+test('the bands are distinguishable without colour, because the page gets printed', () => {
+  // e5xx is the superset, so "other 5xx" needs a total above the 502s and 504s to exist at all.
+  const svg = outcomeChart({
+    html: { reqs: 100, errors: { e404: 10, e5xx: 10, e502: 0, e504: 5, denied: 5 } },
+  });
+  // each band carries its own class so the stylesheet can hatch it, and its own <title> for a reader
+  for (const band of ['ok', 'e404', 'e5xx', 'e504', 'denied']) {
+    assert.match(svg, new RegExp(`band ${band}`), band);
+  }
+  assert.match(svg, /<title>/);
+});
+
+test('the chart names what it is, for a reader who cannot see it', () => {
+  const svg = outcomeChart({
+    html: { reqs: 100, errors: { e404: 10, e5xx: 0, e502: 0, e504: 0, denied: 0 } },
+  });
+  assert.match(svg, /role="img"/);
+  assert.match(svg, /<desc[^>]*>/);
+  assert.match(svg, /html/);
 });

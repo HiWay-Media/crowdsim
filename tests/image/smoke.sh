@@ -136,6 +136,23 @@ set -e
 [ "$rc" = "3" ] && ok "a peak above the safe ceiling is refused (exit 3)" \
                 || bad "a peak of 5000 exited $rc, expected 3"
 
+# ── the drawn report resolves its imports inside the image ───────────────────────────────────────────
+# lib/report-html.mjs imports ../k6/lib/failure.js — a cross-directory import in a file the image ships,
+# which is exactly the shape that broke 1.20.0 (lib/validate.mjs → k6/lib/auth.js, ESM in a checkout and
+# CommonJS in the container). Asserted by loading it and calling the export the report is built from.
+if run "$IMAGE" node -e 'import("/crowdsim/lib/report-html.mjs").then(m => {
+  if (typeof m.outcomeChart !== "function" || typeof m.buildReport !== "function") {
+    console.error("report-html.mjs loaded without its exports"); process.exit(1);
+  }
+  process.exit(0);
+}).catch((e) => { console.error(String(e && e.message)); process.exit(1); })' >/dev/null 2>&1; then
+  ok "lib/report-html.mjs loads in the image, k6/lib import included"
+else
+  bad "lib/report-html.mjs does not load in the image — a cross-directory import is unresolved"
+  run "$IMAGE" node -e 'import("/crowdsim/lib/report-html.mjs").catch(e => console.error(e.message))' 2>&1 \
+    | sed 's/^/      /' | head -4
+fi
+
 # ── the help answers for one subcommand, and the completions are there ───────────────────────────────
 # `crowdsim load --help` inside the image is how somebody in a container finds a flag: there is no README
 # next to them and no man page. It reads the same comment header the global help comes from, so this also
