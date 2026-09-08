@@ -341,7 +341,11 @@ crowdsim load --profile p.json --peak 60 \
 
 Alignment works because a run id **is** the run's start time in UTC and each step records its own offsets
 from it, so any series recorded with a clock can be read against the step it belongs to. Written to
-`out/server-side-<run>.json` and included in `crowdsim report`.
+`out/server-side-<run>.json`, included in `crowdsim report`, and since 1.37.0 **drawn** by
+`report --html` on the ramp's own step axis with p95 beside it — two scales, both named, because one
+shared axis would make two different quantities look like one. A step with no samples is a **gap**: the
+line breaks rather than spanning a window nobody recorded. The caveat is on the chart itself, since a
+chart travels further than the paragraph next to it.
 
 **crowdsim does not go and get it.** That is [a decision, not a gap](../INTENT.md) — the same one as the
 access log: collecting would mean a load generator holding credentials for a metrics backend or a cluster,

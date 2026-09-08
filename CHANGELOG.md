@@ -4,6 +4,34 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.0] — 2026-09-08
+
+**A server-side series was a table, and the overlay it exists for was done by eye.** `--server-metrics`
+(1.31.0) aligns a handed-in series to the run's own steps — reading it *against* latency is the entire
+reason for aligning it — and reported it as mean and max per step, so doing that meant putting two tables
+side by side and comparing rows.
+
+### Added
+- **`seriesChart()`** ([#86](https://github.com/HiWay-Media/crowdsim/issues/86)): the series on the
+  ramp's own step axis, with p95 beside it, in `report --html`. The artefact is read from beside the
+  summary rather than passed as a flag — the driver already wrote it there, and a report should not need
+  to be told what its own run produced.
+
+  Four things it must not do, and does not:
+
+  - **Two scales, both named.** The series keeps its own units and its own axis; one shared axis would
+    make two different quantities look like one.
+  - **No trend line through both, and no smoothing.** The shape is the shape that was recorded.
+  - **A step with no samples is a gap** — the line breaks into segments rather than spanning a window
+    nobody recorded, which would draw data that does not exist. Asserted by counting the segments.
+  - **The caveat is on the chart**, not only in the prose above it: a chart travels further than the
+    paragraph next to it, and the word is *correlation*. A unit test asserts the SVG contains none of
+    *caused*, *because*, *explains* or *due to*.
+
+  On an invalid run the series is drawn **without** the latency line, for the same reason the failure mode
+  is still shown there: a counter that rose is not a latency claim, while latency from a run that did not
+  deliver its rate describes the generator or the target rather than the system.
+
 ## [1.36.0] — 2026-09-08
 
 **«Concentrated on 2 of 5 classes» was prose next to a chart of something else.** That claim is the whole

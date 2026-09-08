@@ -10,7 +10,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  buildReport, rampChart, rampDomain, rateChart, classChart, cacheChart, outcomeChart,
+  buildReport, rampChart, rampDomain, rateChart, classChart, cacheChart, outcomeChart, seriesChart,
   niceCeil, ticks, linear, stepLabel, esc,
 } from '../../lib/report-html.mjs';
 
@@ -646,4 +646,100 @@ test('the chart names what it is, for a reader who cannot see it', () => {
   assert.match(svg, /role="img"/);
   assert.match(svg, /<desc[^>]*>/);
   assert.match(svg, /html/);
+});
+
+// ── the server-side series, on the same axis as the ramp (#86) ───────────────────────────────────────
+// `--server-metrics` aligned a handed-in series to the run's steps and reported it as a table of mean and
+// max. Reading it against latency — the entire reason for aligning it — meant putting two tables side by
+// side and comparing rows by eye. Both halves already share an axis, and nothing drew it.
+
+const series = (steps) => ({ run_id: 'r', label: 'cpu_throttled_periods', source: 't.csv', steps });
+
+test('the series is drawn against the steps, on its own scale', () => {
+  const svg = seriesChart(series([
+    { step: 's1', requested_rps: 20, samples: 6, mean: 0, max: 0, partial: false },
+    { step: 's2', requested_rps: 40, samples: 6, mean: 12, max: 30, partial: false },
+    { step: 's3', requested_rps: 60, samples: 6, mean: 61, max: 95, partial: false },
+  ]), { perStep: [
+    { step: 's1', requested_rps: 20, p95: 100, partial: false },
+    { step: 's2', requested_rps: 40, p95: 220, partial: false },
+    { step: 's3', requested_rps: 60, p95: 900, partial: false },
+  ] });
+  assert.match(svg, /<svg/);
+  assert.match(svg, /cpu_throttled_periods/);
+  // two scales, named, so nobody reads one unit as the other
+  assert.match(svg, /p95/);
+  assert.match(svg, /95/);
+});
+
+test('a step with no samples is a GAP, not a zero: the line breaks', () => {
+  // Interpolating across a window nobody recorded draws data that does not exist.
+  const svg = seriesChart(series([
+    { step: 's1', requested_rps: 20, samples: 6, mean: 5, max: 9, partial: false },
+    { step: 's3', requested_rps: 60, samples: 6, mean: 61, max: 95, partial: false },
+  ]), { perStep: [
+    { step: 's1', requested_rps: 20, p95: 100, partial: false },
+    { step: 's2', requested_rps: 40, p95: 220, partial: false },
+    { step: 's3', requested_rps: 60, p95: 900, partial: false },
+  ] });
+  // the series polyline must not span the missing middle as one segment
+  const polys = svg.match(/class="series-line"[^>]*points="([^"]+)"/g) || [];
+  assert.ok(polys.length >= 2, `expected the line to break into segments, got ${polys.length}`);
+});
+
+test('the caveat is on the chart, not only in the prose above it', () => {
+  const svg = seriesChart(series([
+    { step: 's1', requested_rps: 20, samples: 6, mean: 5, max: 9, partial: false },
+    { step: 's2', requested_rps: 40, samples: 6, mean: 50, max: 80, partial: false },
+  ]), { perStep: [
+    { step: 's1', requested_rps: 20, p95: 100, partial: false },
+    { step: 's2', requested_rps: 40, p95: 220, partial: false },
+  ] });
+  assert.match(svg, /correlation/i);
+  for (const word of [/\bcaused\b/i, /\bbecause\b/i, /explains/i, /due to/i]) {
+    assert.doesNotMatch(svg, word);
+  }
+});
+
+test('nothing to draw returns nothing', () => {
+  assert.equal(seriesChart(null, { perStep: [] }), '');
+  assert.equal(seriesChart(series([]), { perStep: [] }), '');
+  assert.equal(seriesChart(series([{ step: 's1', samples: 1, mean: 1, max: 1 }]), { perStep: null }), '');
+});
+
+test('an invalid run gets the series and no latency line', () => {
+  // Same rule as the failure mode: a counter that rose is not a latency claim, and the latency from a
+  // run that did not hold its rate describes the generator.
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 60, requests: 900, dropped_iterations: 400,
+    generator_ok: false, target_unreachable: false,
+    failed_rate: 0, dur: { p50: 10, p95: 20, p99: 30, max: 40 },
+    per_step: [{ step: 's1', requested_rps: 20, p95: 100, partial: false, start_ms: 0, end_ms: 60000 }],
+  }, {
+    serverSide: series([{ step: 's1', requested_rps: 20, samples: 6, mean: 40, max: 90, partial: false }]),
+  });
+  assert.match(html, /cpu_throttled_periods/);
+  assert.doesNotMatch(html, /class="series-p95"/, 'no latency line on an invalid run');
+});
+
+test('a valid run draws both, and the page names the source it was handed', () => {
+  const html = buildReport({
+    run_id: '20260908T101500Z', profile: 'p', base_url: 'https://x.test', shape: 'mix',
+    peak_rps_user_target: 60, requests: 9000, dropped_iterations: 0,
+    generator_ok: true, target_unreachable: false,
+    failed_rate: 0, dur: { p50: 10, p95: 20, p99: 30, max: 40 },
+    per_step: [
+      { step: 's1', requested_rps: 20, p95: 100, partial: false, start_ms: 0, end_ms: 60000 },
+      { step: 's2', requested_rps: 40, p95: 300, partial: false, start_ms: 60000, end_ms: 120000 },
+    ],
+  }, {
+    serverSide: series([
+      { step: 's1', requested_rps: 20, samples: 6, mean: 0, max: 0, partial: false },
+      { step: 's2', requested_rps: 40, samples: 6, mean: 40, max: 90, partial: false },
+    ]),
+  });
+  assert.match(html, /cpu_throttled_periods/);
+  assert.match(html, /class="series-p95"/);
+  assert.match(html, /t\.csv/, 'the page says which file it was handed');
 });
