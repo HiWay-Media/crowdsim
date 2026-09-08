@@ -84,6 +84,16 @@ export function knee(rows, opts) {
       'A journey run does not ramp in steps. For a knee, use --shape mix with --steps.');
   }
   if (o.generatorOk === false) {
+    // `generator_ok: false` covers two opposite causes. Saying "the generator did not hold the rate" for
+    // a target that saturated put two contradictory sentences on one screen — the panel said the target,
+    // the knee said the generator. Both refuse (no step delivered its rate either way); only the reason
+    // and the next step differ. See k6/lib/validity.js. (#76)
+    const diag = o.dropDiagnosis;
+    if (diag && diag.verdict === 'target') {
+      return refuse('the target could not absorb the requested rate, so no step measured the rate it '
+        + 'claims — which is a finding about the target, not a wasted run.',
+        'Measure it properly below that rate: lower --start and --peak, or let --recalibrate do it.');
+    }
     return refuse('the generator did not hold the requested rate, so no step measured the rate it claims.',
       'Move the generator closer to the target — a generator-bound run has no numbers to correct.');
   }

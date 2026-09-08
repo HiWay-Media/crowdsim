@@ -1476,6 +1476,11 @@ PY
     env+=("JOURNEY=$jpath")
   fi
 
+  # Whether this generator is a container inside a VM. The driver can see that (/.dockerenv plus the host
+  # kernel) and the k6 runtime cannot, and it changes the ADVICE when the generator turns out to be the
+  # bottleneck — not the verdict. See k6/lib/validity.js. (#76)
+  if virtualised_generator; then env+=("VIRTUALISED=1"); fi
+
   # The warm-up: its own k6 invocation, its own summary file, no brake. Two runs rather than one filtered
   # one, because filtering is where a caveat gets lost — nothing here can fold priming traffic into the
   # measurement, since the measurement is a different process reading a different file.
@@ -1539,8 +1544,24 @@ PY
 d=json.load(open(sys.argv[1]))
 print(d.get("generator_ok"), d.get("target_unreachable"))' "$summary")"
     if [ "${flags% *}" != "True" ]; then
-      warn "THE GENERATOR DID NOT HOLD THE RATE — discard this run, do not interpret it."
-      warn "Move the generator closer to the target (or onto a bigger host) and repeat."
+      # WHICH of the two opposite causes, not just that the rate was not held. Telling somebody to move
+      # the generator closer when the target is what saturated is wrong advice on the run that was the
+      # answer — measured. The diagnosis is in the summary; see k6/lib/validity.js. (#76)
+      local diag
+      diag="$(python3 -c 'import json,sys
+d=(json.load(open(sys.argv[1])).get("drop_diagnosis") or {})
+print(d.get("verdict",""), "|", d.get("reason",""), "|", d.get("fix",""))' "$summary" 2>/dev/null || true)"
+      case "$diag" in
+        target*)
+          warn "THE TARGET COULD NOT ABSORB THE REQUESTED RATE — that is a finding, not a wasted run."
+          say  "     ${diag#* | }" ;;
+        generator*)
+          warn "THE GENERATOR WAS THE BOTTLENECK — discard this run, do not interpret it."
+          say  "     ${diag#* | }" ;;
+        *)
+          warn "THE GENERATOR DID NOT HOLD THE RATE — discard this run, do not interpret it."
+          warn "Move the generator closer to the target (or onto a bigger host) and repeat." ;;
+      esac
     fi
     if [ "${flags#* }" = "True" ]; then
       warn "THE TARGET NEVER ANSWERED — this is a connectivity problem, not a capacity result."

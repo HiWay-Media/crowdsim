@@ -196,3 +196,21 @@ test('the tolerance in `compare` is the same one this module defines', () => {
   assert.ok(m, 'compare no longer names a fan-out tolerance');
   assert.equal(Number(m[1]), FAN_OUT_TOLERANCE);
 });
+
+test('a delivered rate refused for a saturated target does not blame the generator either', () => {
+  const d = delivery(ROWS, {
+    generatorOk: false,
+    dropDiagnosis: { verdict: 'target', discard: false, retry_lower: true },
+  });
+  assert.equal(d.refused, true);
+  assert.match(d.reason, /target could not absorb/);
+  assert.doesNotMatch(d.reason, /measures the generator/);
+});
+
+test('and for a starved generator it says what it always said', () => {
+  const d = delivery(ROWS, {
+    generatorOk: false,
+    dropDiagnosis: { verdict: 'generator', discard: true },
+  });
+  assert.match(d.reason, /did not hold the requested rate/);
+});

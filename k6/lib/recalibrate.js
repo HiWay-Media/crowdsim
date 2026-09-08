@@ -69,7 +69,14 @@ export function recalibrate(opts) {
   if (!knee.refused) {
     return no('this run has a knee, or a curve to read one from: there is nothing to recalibrate.');
   }
-  if (!FIRST_STEP.test(String(knee.reason || ''))) {
+  // `generator_ok: false` covers two OPPOSITE causes, and a knee refused for it says only the first
+  // half. When the diagnosis says the TARGET could not absorb the rate, a lower --start is exactly the
+  // right response — that was the one retry worth doing, and this file used to refuse it. With no
+  // diagnosis (an older summary) the old conservative refusal stands. See k6/lib/validity.js. (#76)
+  const diag = o.dropDiagnosis;
+  const targetSaturated = Boolean(diag && diag.verdict === 'target' && diag.retry_lower);
+
+  if (!FIRST_STEP.test(String(knee.reason || '')) && !targetSaturated) {
     for (var i = 0; i < NOT_CAPACITY.length; i++) {
       if (NOT_CAPACITY[i].re.test(String(knee.reason))) return no(NOT_CAPACITY[i].why);
     }
@@ -118,7 +125,10 @@ export function recalibrate(opts) {
     retry: true,
     start: nextStart,
     peak: nextPeak,
-    why: 'the first step did not survive, so this ramp starts at or above this system\'s capacity. '
+    why: (targetSaturated
+      ? 'the target could not absorb the requested rate, which is a finding and not a wasted window — '
+        + 'and it is measured properly below that rate. '
+      : 'the first step did not survive, so this ramp starts at or above this system\'s capacity. ')
       + 'Attempt ' + (attempt + 1) + ' of ' + MAX_ATTEMPTS + ': --start ' + nextStart + ' --peak '
       + nextPeak + ', which keeps the same shape at half the rate.',
   };

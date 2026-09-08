@@ -41,10 +41,12 @@ import { knee } from './knee.js';
 import { concurrency, concurrencyCaveat } from './session.js';
 import { failureMode } from './failure.js';
 import { delivery } from './delivery.js';
+import { dropDiagnosis } from './validity.js';
 
 export { abortedBy } from './brake.js';
 export { failureMode } from './failure.js';
 export { delivery } from './delivery.js';
+export { dropDiagnosis } from './validity.js';
 
 export function brakeTripped(metrics) {
   return Object.keys(metrics || {}).some((key) => {
@@ -210,6 +212,23 @@ export function buildSummary(metrics, ctx) {
   out.generator_ok = generatorHeldRate(out.dropped_iterations, out.requests);
   out.target_unreachable = targetUnreachable(out.failed_rate, out.dur.p95);
 
+  // WHY the rate was not held, which is not always the generator. `generator_ok` keeps its meaning — the
+  // generator did not deliver the requested rate, true either way — and this says which of the two
+  // opposite causes it was, or `unknown` when the run does not record enough to tell. A run at 12 req/s
+  // against a target that cannot serve 12 req/s used to be reported as a starved generator, with advice
+  // to move it closer. See k6/lib/validity.js. (#76)
+  out.drop_diagnosis = dropDiagnosis({
+    dropped: out.dropped_iterations,
+    requests: out.requests,
+    p95: out.dur.p95,
+    maxP95: (ctx.slo && ctx.slo.max_p95_ms) || null,
+    guillotineMs: ctx.guillotineMs,
+    vusMax: g('vus', 'max', 0),
+    vuCeiling: ctx.vuCeilingTotal || ctx.vuCeiling || 0,
+    targetUnreachable: out.target_unreachable,
+    virtualisedGenerator: Boolean(ctx.virtualisedGenerator),
+  });
+
   // WHAT BROKE, before what stopped the run. Derived from the summary above and nothing else; null when
   // nothing failed, so a clean run gets no heading at all. See k6/lib/failure.js. (#74)
   out.failure_mode = failureMode(out);
@@ -223,6 +242,7 @@ export function buildSummary(metrics, ctx) {
   out.delivery = delivery(out.per_step, {
     generatorOk: out.generator_ok,
     targetUnreachable: out.target_unreachable,
+    dropDiagnosis: out.drop_diagnosis,
   });
 
   // The sentence people came for: the highest rate this run measured the system surviving, and the rate at
@@ -234,6 +254,7 @@ export function buildSummary(metrics, ctx) {
     classSlo: ctx.classSlo || {},
     generatorOk: out.generator_ok,
     targetUnreachable: out.target_unreachable,
+    dropDiagnosis: out.drop_diagnosis,
     stepDur: ctx.ramp.stepDur,
     abortDelay: ctx.abortDelay,
   }) : null;
@@ -340,6 +361,7 @@ export function renderSummaryText(out, ctx) {
       : (out.aborted ? '⛔ ABORTED by the brake (knee exceeded)' + abortAttribution(out.aborted_by)
                      : '✅ completed without crossing the thresholds')}
 ${renderFailureMode(out)}  volume        ${out.requests} requests · ${out.rps_avg.toFixed(1)} req/s avg
+${renderDropDiagnosis(out)}
 ${renderDelivery(out)}  latency       p50 ${ms(out.dur.p50)} · p95 ${ms(out.dur.p95)} · p99 ${ms(out.dur.p99)} · max ${ms(out.dur.max)}
   over ${out.guillotine_ms} ms  ${pct(out.over_guillotine_rate)}   ← the proxy read timeout, i.e. where 504s come from
   errors        504: ${out.e504}   502: ${out.e502}   5xx total: ${out.e5xx}   404: ${out.e404}   401/403: ${out.denied || 0}   no token: ${out.authFail || 0}
@@ -355,6 +377,34 @@ ${tbl}${renderStepTable(out)}${renderKnee(out)}${renderConcurrency(out)}`;
  * Concurrent users, printed as two numbers or as a refusal. Never one figure: the agreement between the two
  * methods is what makes either of them worth quoting, and their disagreement is the finding.
  */
+/**
+ * Why the rate was not held. Only when it was not: a clean run says nothing here. The wording follows the
+ * verdict, because *discard this and move the generator closer* is wrong advice for a target that simply
+ * could not absorb the rate — and that was the more common of the two. (#76)
+ */
+function renderDropDiagnosis(out) {
+  const d = out.drop_diagnosis;
+  if (!d) return '';
+  const head = d.verdict === 'target' ? '  rate not held  the TARGET could not absorb it'
+    : (d.verdict === 'generator' ? '  rate not held  the GENERATOR was the bottleneck — DISCARD this run'
+      : (d.verdict === 'unreachable' ? '  rate not held  the target never answered'
+        : '  rate not held  cause unknown — treat as a discard'));
+  const wrap = function (text, indent) {
+    const words = String(text).split(/\s+/);
+    const lines = [];
+    var line = '';
+    for (var i = 0; i < words.length; i++) {
+      if (line && (line + ' ' + words[i]).length > 76) { lines.push(line); line = words[i]; }
+      else line = line ? line + ' ' + words[i] : words[i];
+    }
+    if (line) lines.push(line);
+    var out2 = '';
+    for (var j = 0; j < lines.length; j++) out2 += indent + lines[j] + '\n';
+    return out2;
+  };
+  return head + '\n' + wrap(d.reason, '                 ') + wrap('→ ' + d.fix, '                 ');
+}
+
 /**
  * WHAT BROKE, at the top of the panel, wrapped to the panel's own width: the sentence runs to a couple of
  * hundred characters on a real run, and one unwrapped line destroys a table of aligned columns. (#74)

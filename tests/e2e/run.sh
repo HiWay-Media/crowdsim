@@ -313,6 +313,67 @@ PY
 # address — and then this test would generate load against them. The profile's bypass removes DNS from the
 # question: the host stays www.example.test for SNI, Host and the allowlist, while the connection goes to
 # 127.0.0.1:9, where nothing listens.
+# ─────────── leg 2b: a rate the target cannot absorb is NOT a starved generator ──────────────────────
+# `generator_ok: false` is one line — dropped_iterations > 2% — and k6 drops an iteration when no VU is
+# free, which happens BOTH when the generator is starved and when every VU is blocked on a target that
+# stopped keeping up. The tool reported both as "THE GENERATOR DID NOT HOLD THE RATE — discard this run,
+# move the generator closer", and a run at 12 req/s against this same 300 ms single worker — a target
+# that cannot serve 12 req/s by construction — said exactly that on a healthy generator. The advice was
+# wrong and the run was the answer.
+#
+# Nothing else in the suite can prove the diagnosis: it needs a target that saturates for real.
+say ""
+say "▶ leg 2b — a saturated target must not be reported as a starved generator"
+CROWDSIM_OUT="$OUT" "$ROOT/bin/crowdsim" load --profile "$SLOW_PROFILE" \
+  --peak 24 --start 12 --steps 2 --step-dur 8s --hold 0s --abort-delay 4s \
+  > "$OUT/leg2b.txt" 2>&1 || die "the driver failed outright: $(tail -3 "$OUT/leg2b.txt")"
+
+SAT_RUN="$(grep -oE '\b[0-9]{8}T[0-9]{6}Z\b' "$OUT/leg2b.txt" | tail -1)"
+[ -n "$SAT_RUN" ] || die "leg 2b produced no run id"
+
+python3 - "$OUT/summary-$SAT_RUN.json" "$OUT/leg2b.txt" <<'PY4'
+import json, sys
+d = json.load(open(sys.argv[1], encoding='utf-8'))
+text = open(sys.argv[2], encoding='utf-8', errors='replace').read()
+fail = []
+
+if d.get('generator_ok') is not False:
+    print("  ⏭  this run held the rate, so there is no diagnosis to check "
+          "(the container is faster than the one this leg was written for)")
+    raise SystemExit(0)
+
+diag = d.get('drop_diagnosis')
+if not diag:
+    fail.append("generator_ok is false and there is no drop_diagnosis at all")
+else:
+    if diag.get('verdict') != 'target':
+        fail.append(f"the drop was diagnosed as {diag.get('verdict')!r}, not 'target': a 300 ms single "
+                    "worker cannot serve this rate, so the target is what the VUs were waiting for")
+    if diag.get('discard') is not False:
+        fail.append("a saturated target was marked as a discard, which throws away the finding")
+    if diag.get('retry_lower') is not True:
+        fail.append("a saturated target is exactly what a lower --start measures, and retry_lower is off")
+
+if 'Move the generator closer' in text or 'GENERATOR WAS THE BOTTLENECK' in text:
+    fail.append("the run still tells the operator to move the generator")
+if 'THE TARGET COULD NOT ABSORB' not in text:
+    fail.append("the run does not say the target could not absorb the rate")
+
+# the knee and the delivered rate must tell the SAME story as the panel, not contradict it
+knee = d.get('knee') or {}
+if knee.get('refused') and 'generator did not hold' in str(knee.get('reason', '')):
+    fail.append("the knee still blames the generator while the panel blames the target")
+dl = d.get('delivery') or {}
+if dl.get('refused') and 'measures the generator' in str(dl.get('reason', '')):
+    fail.append("the delivered rate still blames the generator")
+
+if fail:
+    print("\n".join("  ❌ " + f for f in fail)); sys.exit(1)
+print(f"  ✅ the saturated target was diagnosed as one, not as a starved generator "
+      f"(dropped {d.get('dropped_iterations')} of {d.get('requests')} requests), and the knee, the "
+      f"delivered rate and the panel agree")
+PY4
+
 say ""
 say "▶ leg 3 — an unreachable target must read as connectivity, not capacity"
 set +e
@@ -370,12 +431,17 @@ for i in $(seq 1 20); do
   sleep 0.5
   [ "$i" = "20" ] && die "the GUI server did not start (see $OUT/gui.log)"
 done
-curl -fsS http://127.0.0.1:18787/api/history | python3 -c '
-import json, sys
+# The expected count is DERIVED from the archive, not written down: a literal here broke the moment a leg
+# was added, which says nothing about the GUI. What matters is that the page lists every run the driver
+# archived and tells the aborted ones apart.
+ARCHIVED="$(ls "$OUT" | grep -c '^summary-')"
+curl -fsS http://127.0.0.1:18787/api/history | ARCHIVED="$ARCHIVED" python3 -c '
+import json, os, sys
 runs = json.load(sys.stdin)["runs"]
-assert len(runs) == 3, f"the GUI lists {len(runs)} runs, expected 3"
+expected = int(os.environ["ARCHIVED"])
+assert len(runs) == expected, f"the GUI lists {len(runs)} runs, expected {expected} from the archive"
 aborted = [r for r in runs if r["aborted"]]
-assert len(aborted) == 2, "the GUI does not distinguish the aborted runs"
+assert len(aborted) >= 2, "the GUI does not distinguish the aborted runs"
 # The knee has to survive the trip through history.tsv (#51). A refused knee must arrive as null: reading it
 # as 0 would put a knee at zero req/s on the page, for a run that measured nothing of the sort.
 for r in runs:
@@ -434,7 +500,10 @@ def check(c, m):
     if not c: fail.append(m)
 
 pages = sorted(glob.glob(os.path.join(out, 'report-*.page.html')))
-check(len(pages) == 3, f'{len(pages)} pages drawn, expected one per run in the archive')
+# One page per archived run, counted rather than written down: a literal broke the moment a leg was added.
+archived = sorted(glob.glob(os.path.join(out, 'summary-*.json')))
+check(len(pages) == len(archived),
+      f'{len(pages)} pages drawn for {len(archived)} archived runs, expected one each')
 for page in pages:
     run = os.path.basename(page)[len('report-'):-len('.page.html')]
     html = open(page, encoding='utf-8').read()

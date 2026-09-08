@@ -40,6 +40,13 @@ function refuse(reason, fix) {
 export function delivery(rows, opts) {
   const o = opts || {};
   if (o.generatorOk === false) {
+    // Same two causes, same rule as the knee: refuse either way, but never blame the generator for a
+    // target that saturated. (#76)
+    if (o.dropDiagnosis && o.dropDiagnosis.verdict === 'target') {
+      return refuse('the target could not absorb the requested rate, so what arrived is what the target '
+        + 'would serve and not what this mix asks for.',
+        'Measure the fan-out below that rate, where the target keeps up.');
+    }
     return refuse('the generator did not hold the requested rate, so what arrived measures the generator '
       + 'and not the mix.',
       'Move the generator closer to the target, or onto a bigger host, and repeat.');

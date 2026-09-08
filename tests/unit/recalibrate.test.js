@@ -116,3 +116,50 @@ test('the safe peak is never exceeded by a recalibration, in either direction', 
   assert.ok(r.peak <= 100);
   assert.ok(r.start < 40);
 });
+
+// ── the case #76 unblocked ───────────────────────────────────────────────────────────────────────────
+// `generator_ok: false` covers two opposite causes, and until the diagnosis existed this file had to
+// refuse both. A target that could not absorb the requested rate is exactly what a lower --start
+// measures properly — refusing it meant refusing the one retry worth doing.
+
+test('a run whose TARGET could not absorb the rate is retried lower', () => {
+  const r = recalibrate({
+    knee: kneeRefused('the generator did not hold the requested rate, so no step measured the rate it '
+      + 'claims.'),
+    dropDiagnosis: { verdict: 'target', retry_lower: true, discard: false },
+    start: 12, peak: 24, attempt: 1,
+  });
+  assert.equal(r.retry, true);
+  assert.equal(r.start, 6);
+  assert.match(r.why, /target/);
+});
+
+test('a run whose GENERATOR was starved is still refused, for the same reason as before', () => {
+  const r = recalibrate({
+    knee: kneeRefused('the generator did not hold the requested rate, so no step measured the rate it '
+      + 'claims.'),
+    dropDiagnosis: { verdict: 'generator', retry_lower: false, discard: true },
+    start: 12, peak: 24, attempt: 1,
+  });
+  assert.equal(r.retry, false);
+  assert.match(r.reason, /generator/);
+});
+
+test('an unknown cause is not retried: guessing is what #76 was about', () => {
+  const r = recalibrate({
+    knee: kneeRefused('the generator did not hold the requested rate.'),
+    dropDiagnosis: { verdict: 'unknown', retry_lower: false, discard: true },
+    start: 12, peak: 24, attempt: 1,
+  });
+  assert.equal(r.retry, false);
+});
+
+test('with no diagnosis at all the old, conservative refusal stands', () => {
+  // An older summary has no drop_diagnosis. It must behave exactly as it did before this existed.
+  const r = recalibrate({
+    knee: kneeRefused('the generator did not hold the requested rate.'),
+    start: 12, peak: 24, attempt: 1,
+  });
+  assert.equal(r.retry, false);
+  assert.match(r.reason, /generator/);
+});

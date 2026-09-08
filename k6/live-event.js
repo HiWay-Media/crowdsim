@@ -220,9 +220,15 @@ if (SHARING_NOTE) console.warn('crowdsim: ' + SHARING_NOTE);
 const scenarios = {};
 let JOURNEY_VU_CEILING = 0;
 let JOURNEY_SESSION_RATE = 0;
+// Every VU this run provisioned, across all scenarios. Not the same number as JOURNEY_VU_CEILING, which
+// is journey-only and feeds the concurrency figure: this one exists so the drop diagnosis can tell "every
+// VU was in flight and we were still dropping" (the target holding them) from "there were VUs to spare"
+// (the generator not keeping the schedule). See k6/lib/validity.js. (#76)
+let VU_CEILING_TOTAL = 0;
 if (SHAPE === 'mix') {
   for (const c of CLASS_DEFS) {
     const v = vus(SHARE[c.name]);
+    VU_CEILING_TOTAL += v.max;
     scenarios[c.name] = {
       executor: 'ramping-arrival-rate',
       exec: 'run_class',
@@ -242,6 +248,7 @@ if (SHAPE === 'mix') {
   // Kept for the summary: sessions in flight against the ceiling we provisioned. If they meet, the
   // observed concurrency is our own configuration and not a measurement — see k6/lib/session.js.
   JOURNEY_VU_CEILING = plan.max;
+  VU_CEILING_TOTAL = plan.max;
   JOURNEY_SESSION_RATE = plan.sessRate;
   scenarios.journey = {
     executor: 'ramping-arrival-rate',
@@ -541,6 +548,11 @@ export function handleSummary(data) {
     // Both needed to turn a rate into concurrent users, and to say whether that number is a measurement.
     thinkTime: THINK,
     vuCeiling: JOURNEY_VU_CEILING,
+    vuCeilingTotal: VU_CEILING_TOTAL,
+    // The driver knows whether it is a container inside a VM (measured: the Docker network layer on
+    // macOS and Windows saturates before the target does). Passed in rather than detected here, because
+    // the k6 runtime cannot see /.dockerenv or the host kernel.
+    virtualisedGenerator: __ENV.VIRTUALISED === '1',
     sessionRate: JOURNEY_SESSION_RATE,
     slo: { max_p95_ms: MAX_P95_MS, max_failed_rate: MAX_5XX },
     // Recorded rather than only logged: how many accounts the run had, and whether they were shared. A

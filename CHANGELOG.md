@@ -4,6 +4,57 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.32.0] — 2026-09-08
+
+**`generator_ok: false` covered two opposite causes, and it is the verdict that decides whether a window
+was wasted.** `generatorHeldRate()` is one line — `dropped_iterations > 2% of requests` — and k6 drops an
+iteration when no virtual user is free to start it. That happens both when the generator is starved *and*
+when every VU is blocked on a target that stopped keeping up. The tool reported both as *THE GENERATOR DID
+NOT HOLD THE RATE — discard this run* and told the operator to move the generator closer to the target.
+
+Measured, while building the follow-up runs of 1.30.0: a run at 12 req/s against a single-worker origin
+with a 300 ms delay — a target that cannot serve 12 req/s by construction — said exactly that, on a
+completely healthy generator. The advice was wrong and the run was the answer. It is the first line of
+[reading a result](docs/reading-results.md), and it voids the knee, the concurrency figure, the delivered
+rate and `compare`.
+
+### Added
+- **`summary.drop_diagnosis`** (`k6/lib/validity.js`): which of the two, from evidence the run already
+  records. A starved generator leaves the target answering promptly with VUs to spare; a saturated target
+  has every VU in flight and latency climbing. Either signal is enough for the `target` verdict — a queue
+  is a queue whether or not it has crossed a threshold somebody wrote down.
+
+  | verdict | meaning | discard? |
+  |---|---|---|
+  | `generator` | starved on this side of the wire | yes |
+  | `target` | the target could not absorb the rate | **no — that is the finding** |
+  | `unreachable` | connectivity, not capacity | yes |
+  | `unknown` | the run does not record enough to tell | yes, the safe direction |
+
+  **`generator_ok` keeps its meaning exactly** — the generator did not deliver the requested rate, true
+  either way — because `history.tsv`, the GUI and `compare` all read it. What changed is the diagnosis
+  and everything that follows from it.
+- **Every scenario's VU ceiling is summed** (`VU_CEILING_TOTAL`), which is what makes *every VU was in
+  flight and we were still dropping* observable in `mix` shape; and the driver passes its own
+  container-inside-a-VM detection to the generator, because the driver can see `/.dockerenv` and the
+  host kernel and the k6 runtime cannot. It changes the **advice** on a `generator` verdict, never the
+  verdict.
+- **e2e leg 2b**: a rate the target cannot absorb, asserted not to be reported as a starved generator —
+  including that the knee, the delivered rate and the panel agree with each other. Nothing else in the
+  suite can prove it, because it needs a target that saturates for real.
+
+### Changed
+- **The whole screen tells one story.** The panel said *the TARGET could not absorb it* while the knee
+  said *the generator did not hold the requested rate* and the delivered rate said *what arrived measures
+  the generator* — three sentences from one fact, two of them wrong. `knee()` and `delivery()` now take
+  the diagnosis: both still refuse, and neither blames the generator for a target that saturated.
+- **`--recalibrate` accepts a saturated target.** That was the one retry worth doing, and 1.30.0 refused
+  it along with the starved generator, because a knee refused for `generator_ok` said only the first half.
+  Verified end to end: 12 → 6 → 3, three archived runs.
+- `docs/reading-results.md` step 1 is rewritten around the two answers rather than around one.
+- The e2e GUI assertions derive the expected run count from the archive instead of a literal `3`, which
+  broke the moment a leg was added and said nothing about the GUI.
+
 ## [1.31.1] — 2026-09-08
 
 ### Fixed

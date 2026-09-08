@@ -289,3 +289,29 @@ test('a step with no delivered rate says so rather than repeating the requested 
   assert.match(k.summary, /nothing was measured arriving/);
   assert.doesNotMatch(k.summary, /20 delivered/);
 });
+
+test('a knee refused for a saturated target does not blame the generator', () => {
+  // Same screen, same run: the panel said "the TARGET could not absorb it" while the knee said "the
+  // generator did not hold the requested rate". Both came from the same fact and only one was right.
+  const k = knee([{ step: 's1', requested_rps: 12, achieved_rps: 4, p95: 900, failed_rate: 0, partial: true, per_class: {} }], {
+    generatorOk: false,
+    dropDiagnosis: { verdict: 'target', discard: false, retry_lower: true },
+  });
+  assert.equal(k.refused, true);
+  assert.match(k.reason, /target could not absorb/);
+  assert.doesNotMatch(k.reason, /generator did not hold/);
+  assert.match(k.fix, /below|lower|--recalibrate/);
+});
+
+test('a knee refused for a starved generator still says exactly what it said before', () => {
+  const k = knee([{ step: 's1', requested_rps: 12, achieved_rps: 4, p95: 900, failed_rate: 0, partial: true, per_class: {} }], {
+    generatorOk: false,
+    dropDiagnosis: { verdict: 'generator', discard: true, retry_lower: false },
+  });
+  assert.match(k.reason, /generator did not hold/);
+});
+
+test('with no diagnosis the knee keeps its original wording', () => {
+  const k = knee([{ step: 's1', requested_rps: 12, achieved_rps: 4, p95: 900, failed_rate: 0, partial: true, per_class: {} }], { generatorOk: false });
+  assert.match(k.reason, /generator did not hold/);
+});

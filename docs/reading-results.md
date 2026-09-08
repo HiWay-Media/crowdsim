@@ -17,19 +17,42 @@ in which a run must be read, and what every field means.
 9. only then: the overall latency, errors, cache
 ```
 
-### 1. `generator_ok: false` → discard the run
+### 1. `generator_ok: false` → **read `drop_diagnosis` before you throw anything away**
 
-More than 2% of iterations were dropped: k6 could not start them at the requested rate, so the bottleneck
-was the **generator or its network**, not the system under test.
+More than 2% of iterations were dropped: k6 could not start them at the requested rate. That is what
+`generator_ok: false` means, and it is true — but it does **not** on its own say who the bottleneck was.
+
+k6 drops an iteration when no virtual user is free to start it, and that happens for two **opposite**
+reasons:
+
+| `drop_diagnosis.verdict` | What happened | What to do |
+|---|---|---|
+| `generator` | The generator was starved — CPU, network, a container inside a VM — while the target was still answering promptly with VUs to spare. | **Discard the run.** Move the generator closer, or onto a bigger host. |
+| `target` | Every VU was in flight and latency was climbing: the sessions were waiting on the **target**. | **Keep it.** The system refused to be driven this fast, which is the finding. Measure it below that rate. |
+| `unreachable` | The target never really answered. | Connectivity, not capacity — see step 2. |
+| `unknown` | The run does not record the latency and VU counts that separate the two. | Treat as a discard: that is the safe direction. |
+
+Until 1.32.0 the tool reported all of these as *THE GENERATOR DID NOT HOLD THE RATE — discard this run*
+and told you to move the generator closer. Measured: a run at 12 req/s against a single-worker origin with
+a 300 ms delay — a target that **cannot** serve 12 req/s by construction — said exactly that, on a
+perfectly healthy generator. The advice was wrong and the run was the answer.
+
+Now the whole screen tells one story:
 
 ```
-generator     ⛔ DID NOT hold: 4213 iterations dropped → RESULT INVALID
+  rate not held  the TARGET could not absorb it
+  delivered     not measured: the target could not absorb the requested rate, so what arrived is what the target would serve and not what this mix asks for.
 ```
 
-This is the single most common way to get a confidently wrong answer out of a load test, because such a run
-looks *exactly* like a healthy system absorbing the load: low latency, no errors, a rate that seems fine.
-It is not a threshold to tune. Move the generator closer to the target, or onto a bigger host, and repeat —
-and if you were running through Docker on a macOS or Windows laptop, that is the cause.
+The `generator` verdict is still the single most common way to get a confidently wrong answer out of a load
+test, because such a run looks *exactly* like a healthy system absorbing the load: low latency, no errors,
+a rate that seems fine. It is not a threshold to tune — and if you were running through Docker on a macOS
+or Windows laptop, the tool now says so in the fix line, because the driver can see that and the generator
+cannot.
+
+The `target` verdict is what [`--recalibrate`](cli.md#two-follow-up-runs-the-tool-can-start-by-itself)
+acts on: it is precisely the case a lower `--start` measures properly, and it used to be refused along
+with the starved generator.
 
 ### 2. `target_unreachable: true` → connectivity
 
