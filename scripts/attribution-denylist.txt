@@ -1,4 +1,8 @@
 # Customer, campaign and tenant names that must not appear in this public repository.
 # One per line, matched case-insensitively anywhere in a tracked file. See check-no-attribution.sh:
 # the measured numbers stay, the attribution does not.
+#
+# This file is excluded from its own search — it is the one place these names appear by necessity. If that
+# is still too much for a public repository, keep the list in a private one and point
+# CROWDSIM_ATTRIBUTION_DENYLIST at it: a missing list skips the check rather than failing it.
 StreamWay

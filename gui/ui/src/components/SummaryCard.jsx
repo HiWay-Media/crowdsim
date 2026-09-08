@@ -9,6 +9,7 @@ import React, { useState } from 'react';
  */
 import { abortDetail } from '../lib/messages.js';
 import { kneeText } from '../lib/runs.js';
+import { failureModeText, deliveryText, dropDiagnosisText } from '../lib/summary-blocks.js';
 import { api } from '../api.js';
 
 const pct = (x) => (x === null || x === undefined ? 'n/a' : `${(x * 100).toFixed(2)}%`);
@@ -91,6 +92,43 @@ export default function SummaryCard({ summary, compare }) {
       ) : (
         <div className="banner ok">Completed without crossing the thresholds.</div>
       )}
+
+      {/* WHAT BROKE, before what stopped the run. A page that opened on "aborted by the brake" sent its
+          reader looking for a slow renderer while the finding was 404s on one class — and the page was
+          the last place still doing it after 1.29.0 fixed the panel and the reports. The sentence is the
+          summary's own: four renderings of one verdict is four chances to disagree. */}
+      {(() => {
+        const fm = failureModeText(s.failure_mode);
+        return fm ? (
+          <div className={`banner ${fm.tone}`}>
+            <strong>{fm.headline}.</strong> {fm.detail}
+          </div>
+        ) : null;
+      })()}
+
+      {/* WHY the rate was not held, when it was not: the generator, or the target. Telling somebody to
+          discard a run whose target simply saturated throws away the finding they booked the window
+          for. */}
+      {(() => {
+        const dd = dropDiagnosisText(s.drop_diagnosis);
+        return dd ? (
+          <div className={`banner ${dd.tone}`}>
+            <strong>{dd.headline}.</strong> {dd.detail}
+          </div>
+        ) : null;
+      })()}
+
+      {/* Requested versus delivered. `--peak` is the total USER rate and one user request becomes several
+          HTTP requests, so the number the target had to survive is the larger one — and the page used to
+          show only the first, leaving the arithmetic to the reader. */}
+      {(() => {
+        const dl = deliveryText(s.delivery);
+        return dl ? (
+          <div className={`banner ${dl.tone}`}>
+            <strong>{dl.headline}.</strong>{dl.detail ? <> {dl.detail}</> : null}
+          </div>
+        ) : null;
+      })()}
 
       {/* The knee: the only rate in this card that was measured rather than requested. A refusal is shown
           with the same weight as a claim would have been — a quiet absence is read as "no knee found", and

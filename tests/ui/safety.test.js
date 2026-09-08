@@ -12,10 +12,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { SAFE_PEAK, REFUSAL, LAYER, layerVerdict, abortDetail } from '../../gui/ui/src/lib/messages.js';
+import { SAFE_PEAK, REFUSAL, LAYER, FOLLOW_UP, layerVerdict, abortDetail } from '../../gui/ui/src/lib/messages.js';
 import { mayRenderNumbers } from '../../gui/ui/src/lib/compare.js';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -115,4 +116,29 @@ test('an overall threshold is named as itself, not as a class', () => {
   const t = abortDetail({ metric: 'http_req_failed', class: null, threshold: 'rate<0.05', value: 0.12 });
   assert.match(t, /http_req_failed/);
   assert.doesNotMatch(t, /class/);
+});
+
+// ── the follow-up runs are announced (#79) ───────────────────────────────────────────────────────────
+// These are the only two controls on the page under which crowdsim starts a run nobody pressed a button
+// for. The sentence that says so is the difference between a form field and a surprise, which is why it
+// lives in messages.js with the safe-peak wording rather than inline in the component.
+
+test('the page says a further run may happen, and that the gates are not inherited', () => {
+  assert.match(FOLLOW_UP.warning, /FURTHER run/);
+  assert.match(FOLLOW_UP.warning, /its own id/);
+  assert.match(FOLLOW_UP.warning, /never inherited/);
+});
+
+test('the series wording says crowdsim does not fetch it, and that it is a correlation', () => {
+  assert.match(FOLLOW_UP.seriesWhy, /never fetches/);
+  assert.match(FOLLOW_UP.seriesWhy, /correlation, not a cause/);
+});
+
+test('the panel renders the warning only when a follow-up is actually asked for', () => {
+  const src = readFileSync(new URL('../../gui/ui/src/components/RunPanel.jsx', import.meta.url), 'utf8');
+  assert.match(src, /form\.recalibrate \|\| form\.certify \? \(/,
+    'the warning must be conditional on one of them being on, not always there');
+  assert.match(src, /FOLLOW_UP\.warning/);
+  // and the two are mutually exclusive in the form, because the driver takes the first
+  assert.match(src, /checked=\{form\.recalibrate\}[\s\S]{0,140}disabled=\{form\.certify\}/);
 });

@@ -24,6 +24,13 @@ export class InvalidRun extends Error {
 
 const DURATION = /^\d+(ms|s|m|h)?$/;
 const CLASS_LIST = /^[A-Za-z0-9_,-]*$/;
+// A metric name, not a sentence: this string is passed to the driver and then rendered on the page and
+// in a report, so it stays in the shape of an identifier.
+const METRIC_LABEL = /^[A-Za-z0-9_.:-]{1,64}$/;
+// A relative path with no traversal and no absolute root. The series lives on the machine the server runs
+// on, and the page is a form: `../../etc/passwd` must not become an argument. The driver resolves what is
+// left against its own working directory, which is where a run's files already live.
+const SAFE_REL_PATH = /^(?!\/)(?!.*(^|\/)\.\.(\/|$))[A-Za-z0-9_.\/-]{1,255}$/;
 export const SHAPES = ['mix', 'journey'];
 export const RSC_MODES = ['repeat', 'random'];
 
@@ -119,6 +126,57 @@ export function buildLoadArgs(run, profilePath, profileName, opts) {
     }
     args.push('--warmup-peak', int(r.warmupPeak, 'warmupPeak', 1, 100000));
   }
+  // ── the two follow-up runs (1.30.0) ────────────────────────────────────────────────────────────────
+  // These are not ordinary form fields: either one can start a FURTHER run. The driver keeps both gates
+  // on every attempt and does not inherit the safe-peak override, so nothing about safety is decided
+  // here — what is decided here is that the page cannot ask for a combination that will not happen.
+  if (r.recalibrate && r.certify) {
+    throw new InvalidRun('recalibrate',
+      'recalibrate and certify are two different follow-up runs and the driver takes the first: choose '
+      + 'one. Recalibrate retries a ramp that started too high; certify holds a knee that was swept.');
+  }
+  if (r.recalibrate) args.push('--recalibrate');
+  if (r.recalibrateFloor !== undefined && r.recalibrateFloor !== '') {
+    if (!r.recalibrate) {
+      throw new InvalidRun('recalibrateFloor',
+        'a recalibration floor without --recalibrate would do nothing: set both, or neither');
+    }
+    args.push('--recalibrate-floor', int(r.recalibrateFloor, 'recalibrateFloor', 1, 100000));
+  }
+  if (r.certify) args.push('--certify');
+  if (r.certifyHold !== undefined && r.certifyHold !== '') {
+    if (!r.certify) {
+      throw new InvalidRun('certifyHold',
+        'a certification hold without --certify would do nothing: set both, or neither');
+    }
+    args.push('--certify-hold', duration(r.certifyHold, 'certifyHold'));
+  }
+
+  // ── a server-side series (1.31.0) ──────────────────────────────────────────────────────────────────
+  // The DECISION, written down because the issue asked for one: the page may name a file, and the file
+  // must be a relative path under the server's working directory. crowdsim never fetches a series (see
+  // INTENT.md), so there is no URL to accept here, and a form field that could name any absolute path on
+  // the server is a file-read primitive with a text box in front of it.
+  if (r.serverMetrics !== undefined && r.serverMetrics !== '') {
+    if (!SAFE_REL_PATH.test(String(r.serverMetrics))) {
+      throw new InvalidRun('serverMetrics',
+        'the series must be a relative path under the server\'s working directory, with no ".." in it');
+    }
+    if (!r.serverMetricsLabel) {
+      throw new InvalidRun('serverMetricsLabel',
+        'a series needs a label: an unnamed column of numbers cannot be read against anything');
+    }
+    if (!METRIC_LABEL.test(String(r.serverMetricsLabel))) {
+      throw new InvalidRun('serverMetricsLabel',
+        'the label must look like a metric name (letters, digits, _ . : -), because it is rendered');
+    }
+    args.push('--server-metrics', String(r.serverMetrics));
+    args.push('--server-metrics-label', String(r.serverMetricsLabel));
+  } else if (r.serverMetricsLabel) {
+    throw new InvalidRun('serverMetrics',
+      'a label with no series file would do nothing: set both, or neither');
+  }
+
   if (r.touchAndGo) args.push('--touch-and-go');
   if (r.insecure) args.push('--insecure');
   if (r.slack) args.push('--slack');

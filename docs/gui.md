@@ -314,6 +314,51 @@ at the summary.
 
 ---
 
+## What the result view shows
+
+The result card reads the summary in the order [reading a result](reading-results.md) prescribes, and
+since 1.34.0 that includes the blocks it had been silently skipping:
+
+- **Failure mode** first — which class, which status code, what share. A run that *completed without
+  crossing its thresholds* while serving 32% 404s on one class used to read on this page as a pass, which
+  is the same wrong answer 1.29.0 fixed in the panel and the reports.
+- **Why the rate was not held**, when it was not: the generator (discard) or the target (a finding).
+- **Requested → delivered**, with the fan-out between them.
+- The knee, refusals included.
+
+`concurrency`, `think_time`, `allocation`, `signup`, `auth` and `server_side` are **deliberately** not
+shown, each for a reason written down in `gui/ui/src/lib/summary-blocks.js`. That file is exhaustive over
+what the generator produces, and `tests/ui/summary-blocks.test.js` fails when a new block belongs to
+neither list — six of them had accumulated because nothing noticed.
+
+## Two follow-up runs, and a server-side series
+
+Since 1.34.0 the run form can express the flags added in 1.30.0 and 1.31.0. Two of them are **not
+ordinary form fields**: either one starts a **further run** when this one finishes.
+
+| Control | What it does |
+|---|---|
+| *recalibrate if the first step dies* | The ramp started above capacity, so the run measured nothing. Retry from half the rate, up to three attempts. |
+| *certify a swept knee* | The knee was crossed on the way up. Follow it with one hold at that rate, as a separate run. |
+| *Server-side series* + label | A file on the machine this server runs on, read against the run's own steps. |
+
+The page says so, and only when one of them is on:
+
+> Either of these can start a FURTHER run when this one finishes. Each attempt is its own run with its own
+> id and history row, and goes through both gates again — the safe-peak override is never inherited.
+
+That last clause is the important one. Sweeping past the safe peak takes the override typed for **this**
+run; holding that rate for minutes is a larger authorisation, so the driver re-evaluates the gate and the
+certification is refused rather than inheriting a decision somebody took once. The two checkboxes are
+mutually exclusive because the driver takes the first — a page that let both be ticked would describe a
+run that does not happen.
+
+**The series is a path, never a URL.** crowdsim does not fetch server-side metrics — that is
+[a decision, not a gap](../INTENT.md) — so there is nothing here to point at a metrics backend. The field
+takes a **relative** path under the server's working directory: no absolute root and no `..`, because a
+form field that could name any file on the server is a file-read primitive with a text box in front of
+it. The label must look like a metric name, since it is rendered.
+
 ## Safety
 
 The gates live in the CLI and the GUI cannot weaken them. Concretely:

@@ -78,3 +78,23 @@ export function layerVerdict(hit) {
   if (hit === null || hit === undefined) return { text: LAYER.unknown, tone: 'warn' };
   return hit ? { text: LAYER.hit, tone: 'ok' } : { text: LAYER.miss, tone: 'note' };
 }
+
+/**
+ * The follow-up runs. This wording cannot be softened: these are the only two controls on the page under
+ * which crowdsim starts a run nobody pressed a button for, and the sentence that says so is the whole
+ * difference between a form field and a surprise. The gates are re-checked on every attempt by the
+ * driver — including that the safe-peak override is NOT inherited — but a page that did not say a second
+ * run may happen would be a page nobody can authorise honestly.
+ */
+export const FOLLOW_UP = {
+  warning: 'Either of these can start a FURTHER run when this one finishes. Each attempt is its own run '
+    + 'with its own id and history row, and goes through both gates again — the safe-peak override is '
+    + 'never inherited.',
+  recalibrate: 'If the first step does not survive, this run measured nothing. Retry from half the rate, '
+    + 'up to 3 attempts.',
+  certify: 'If the knee was swept through on the way up, follow it with one hold at that rate — as a '
+    + 'separate run, so a swept number and a sustained one never share a label.',
+  exclusive: 'Recalibrate and certify are two different follow-up runs: choose one.',
+  seriesWhy: 'A server-side series to read against this run\'s steps. crowdsim never fetches one — a '
+    + 'relative path on the machine this server runs on. What comes out is a correlation, not a cause.',
+};

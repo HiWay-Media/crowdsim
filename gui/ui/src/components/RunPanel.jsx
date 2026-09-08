@@ -7,7 +7,7 @@ import { ProbeTable, DiscoverTable } from './PreflightTables.jsx';
 import HostPanel from './HostPanel.jsx';
 import { runToShow, shouldClearResult } from '../lib/runs.js';
 import { allowlistVerdict } from '../lib/allowlist.js';
-import { SAFE_PEAK, WARMUP } from '../lib/messages.js';
+import { SAFE_PEAK, WARMUP, FOLLOW_UP } from '../lib/messages.js';
 import { warmupRate, pastSafeCeiling } from '../lib/warmup.js';
 import { LineBuffer } from '../lib/logbuffer.js';
 import { streamState, describeStream } from '../lib/stream.js';
@@ -25,6 +25,8 @@ const DEFAULTS = {
   // to make rather than a default to discover afterwards.
   warmup: '', warmupPeak: '',
   touchAndGo: false, insecure: false, slack: false,
+  recalibrate: false, recalibrateFloor: '', certify: false, certifyHold: '',
+  serverMetrics: '', serverMetricsLabel: '',
 };
 
 export default function RunPanel({ env, profiles, onActiveRun }) {
@@ -153,6 +155,12 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
       warmup: form.warmup === '' ? undefined : form.warmup,
       warmupPeak: form.warmupPeak === '' ? undefined : Number(form.warmupPeak),
       touchAndGo: form.touchAndGo,
+      recalibrate: form.recalibrate,
+      recalibrateFloor: form.recalibrateFloor === '' ? undefined : Number(form.recalibrateFloor),
+      certify: form.certify,
+      certifyHold: form.certifyHold === '' ? undefined : form.certifyHold,
+      serverMetrics: form.serverMetrics === '' ? undefined : form.serverMetrics,
+      serverMetricsLabel: form.serverMetricsLabel === '' ? undefined : form.serverMetricsLabel,
       insecure: form.insecure,
       slack: form.slack,
       force,
@@ -297,6 +305,43 @@ export default function RunPanel({ env, profiles, onActiveRun }) {
             {WARMUP.why}
             {form.warmup ? <> {WARMUP.rateDefault(warmRate === null ? form.start : warmRate)}</> : null}
           </span>
+        </div>
+        {/* The follow-up runs. Not ordinary form fields: either one can start a FURTHER run, and the page
+            has to say so — the driver keeps both gates on every attempt, but an unannounced second run is
+            a run nobody authorised. The two are mutually exclusive because the driver takes the first. */}
+        <div className="row checks">
+          <label className="check">
+            <input type="checkbox" checked={form.recalibrate} onChange={set('recalibrate')}
+                   disabled={form.certify} /> recalibrate if the first step dies
+            <span className="note">{FOLLOW_UP.recalibrate}</span>
+          </label>
+          <label>Recalibration floor (req/s)
+            <input type="number" min="1" value={form.recalibrateFloor} onChange={set('recalibrateFloor')}
+                   placeholder="1" disabled={!form.recalibrate} />
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={form.certify} onChange={set('certify')}
+                   disabled={form.recalibrate} /> certify a swept knee
+            <span className="note">{FOLLOW_UP.certify}</span>
+          </label>
+          <label>Certification hold
+            <input value={form.certifyHold} onChange={set('certifyHold')} placeholder="60s"
+                   disabled={!form.certify} />
+          </label>
+        </div>
+        {form.recalibrate || form.certify ? (
+          <div className="banner warn">{FOLLOW_UP.warning}</div>
+        ) : null}
+        <div className="row">
+          <label>Server-side series
+            <input value={form.serverMetrics} onChange={set('serverMetrics')}
+                   placeholder="off — e.g. out/throttle.csv" />
+          </label>
+          <label>Series label
+            <input value={form.serverMetricsLabel} onChange={set('serverMetricsLabel')}
+                   placeholder="cpu_throttled_periods" disabled={!form.serverMetrics} />
+          </label>
+          <span className="note grow">{FOLLOW_UP.seriesWhy}</span>
         </div>
         <div className="row checks">
           <label className="check"><input type="checkbox" checked={form.touchAndGo} onChange={set('touchAndGo')} /> touch and go

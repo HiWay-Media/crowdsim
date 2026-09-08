@@ -17,15 +17,19 @@ set -eo pipefail
 cd "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 # One name per line. Case-insensitive, matched anywhere in a tracked file.
-NAMES_FILE="${1:-scripts/attribution-denylist.txt}"
+# The list itself is the one place these names appear by necessity, so it is excluded from the search
+# below — without that this check failed on its own denylist the first time it ran after being committed.
+# If even that is too much for a public repository, point CROWDSIM_ATTRIBUTION_DENYLIST at a file in a
+# private one: a missing list is a skip, not a failure, and CI can supply it.
+NAMES_FILE="${1:-${CROWDSIM_ATTRIBUTION_DENYLIST:-scripts/attribution-denylist.txt}}"
 [ -f "$NAMES_FILE" ] || { printf '  ⚠️  no denylist at %s — nothing to check\n' "$NAMES_FILE"; exit 0; }
 
 found=0
 while IFS= read -r name; do
   case "$name" in ''|'#'*) continue;; esac
-  if git grep -In -i -- "$name" -- . >/dev/null 2>&1; then
+  if git grep -In -i -- "$name" -- . ':!scripts/attribution-denylist.txt' >/dev/null 2>&1; then
     printf '❌ "%s" appears in tracked files:\n' "$name"
-    git grep -In -i -- "$name" -- . | sed 's/^/     /' | head -10
+    git grep -In -i -- "$name" -- . ':!scripts/attribution-denylist.txt' | sed 's/^/     /' | head -10
     found=1
   fi
 done < "$NAMES_FILE"

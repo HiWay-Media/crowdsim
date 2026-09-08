@@ -139,3 +139,61 @@ test('a warm-up does not arm the override, and the override still needs the type
   assert.throws(() => buildLoadArgs({ peak: 60, warmup: '30s', warmupPeak: 900, force: true }, P, NAME),
     (e) => e instanceof InvalidRun && e.field === 'confirm');
 });
+
+// ── the follow-up flags, which are not ordinary form fields (#79) ────────────────────────────────────
+// Two of these start a SECOND run. `args.js` had no entry for any of the six added in 1.30.0 and
+// 1.31.0, which is the same complaint as #53 — that one was about two flags.
+
+test('--recalibrate and its floor are expressible, and validated', () => {
+  const a = buildLoadArgs({ peak: 10, recalibrate: true, recalibrateFloor: 4 }, P, NAME);
+  assert.ok(a.includes('--recalibrate'));
+  assert.deepEqual(a.slice(a.indexOf('--recalibrate-floor'), a.indexOf('--recalibrate-floor') + 2),
+    ['--recalibrate-floor', '4']);
+});
+
+test('a floor without --recalibrate would do nothing, so it is refused', () => {
+  assert.throws(() => buildLoadArgs({ peak: 10, recalibrateFloor: 4 }, P, NAME), /recalibrate/i);
+});
+
+test('--certify and its hold are expressible, and the hold is a duration', () => {
+  const a = buildLoadArgs({ peak: 10, certify: true, certifyHold: '90s' }, P, NAME);
+  assert.ok(a.includes('--certify'));
+  assert.deepEqual(a.slice(a.indexOf('--certify-hold'), a.indexOf('--certify-hold') + 2),
+    ['--certify-hold', '90s']);
+  assert.throws(() => buildLoadArgs({ peak: 10, certify: true, certifyHold: 'soon' }, P, NAME), /certifyHold/);
+});
+
+test('the two follow-up flags cannot be combined: one is a retry, the other a certification', () => {
+  // The driver picks recalibrate over certify silently. A page that lets both be ticked describes a run
+  // that will not happen.
+  assert.throws(() => buildLoadArgs({ peak: 10, recalibrate: true, certify: true }, P, NAME), /recalibrate|certify/i);
+});
+
+test('--server-metrics needs a label, and the path goes through the same traversal refusal', () => {
+  const a = buildLoadArgs({ peak: 10, serverMetrics: 'throttle.csv',
+    serverMetricsLabel: 'cpu_throttled_periods' }, P, NAME);
+  assert.ok(a.includes('--server-metrics'));
+  assert.ok(a.includes('--server-metrics-label'));
+
+  assert.throws(() => buildLoadArgs({ peak: 10, serverMetrics: 'throttle.csv' }, P, NAME),
+    (e) => e.field === 'serverMetricsLabel');
+  for (const bad of ['../etc/passwd', '/etc/passwd', 'a/../../b']) {
+    assert.throws(() => buildLoadArgs({ peak: 10, serverMetrics: bad,
+      serverMetricsLabel: 'x' }, P, NAME),
+      (e) => e.field === 'serverMetrics', bad);
+  }
+});
+
+test('a label must look like a metric name, not a sentence the page renders', () => {
+  assert.throws(() => buildLoadArgs({ peak: 10, serverMetrics: 'a.csv',
+    serverMetricsLabel: 'oh no <script>' }, P, NAME),
+    (e) => e.field === 'serverMetricsLabel');
+});
+
+test('none of them appear when the page did not ask for them', () => {
+  const a = buildLoadArgs({ peak: 10 }, P, NAME);
+  for (const f of ['--recalibrate', '--recalibrate-floor', '--certify', '--certify-hold',
+    '--server-metrics', '--server-metrics-label']) {
+    assert.ok(!a.includes(f), f);
+  }
+});

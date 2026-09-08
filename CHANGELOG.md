@@ -4,6 +4,58 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.0] — 2026-09-08
+
+Milestone v1.16.0, closed. **The page rendered `knee` and nothing else that had been added to the summary
+since 1.21.0.** Six blocks had accumulated — `concurrency`, `think_time`, `allocation`, `failure_mode`,
+`delivery`, `server_side` — because nothing noticed, and the `failure_mode` one meant #74's wrong answer
+was still live in the place most people look: a run that *completed without crossing its thresholds*
+while serving 32% 404s on one class read as a pass.
+
+### Added
+- **The result view shows what the summary says** ([#78](https://github.com/HiWay-Media/crowdsim/issues/78)):
+  the failure mode **first**, then why the rate was not held (the generator — discard — or the target — a
+  finding), then requested → delivered with its fan-out, then the knee. The sentences are the summary's
+  own: the panel, the markdown report, the HTML page and the card all quote one verdict rather than each
+  rebuilding it, because four renderings are four chances to disagree while somebody decides something.
+- **A drift guard.** `gui/ui/src/lib/summary-blocks.js` holds two exhaustive lists — what the page
+  renders, and what it deliberately does not, each with the reason — and
+  `tests/ui/summary-blocks.test.js` fails when a block belongs to neither. It asks **`buildSummary`
+  itself**, not a stored fixture: a fixture is a snapshot of what the summary looked like when somebody
+  last updated it, and this drift is exactly what a stale snapshot cannot see. Verified by dropping a
+  block from the list and watching the test name it.
+
+  Six blocks stay off the page on purpose: `concurrency` and `think_time` are journey-shape only and the
+  page cannot launch a journey run; `allocation` duplicates the `mix_target` table already rendered;
+  `signup` names real accounts and belongs in `out/`; `auth` needs a credentials file the page cannot
+  express; `server_side` is its own artefact. A block left out on purpose is a decision — one left out
+  because nobody looked is the bug.
+- **The six flags of 1.30.0 and 1.31.0 are expressible from the page**
+  ([#79](https://github.com/HiWay-Media/crowdsim/issues/79)), which is the same complaint as #53 when it
+  was two. Two of them are not ordinary form fields: either starts a **further run**, so the page says
+  so — and only when one is on. The wording is in `lib/messages.js` with the safe-peak text, because it
+  cannot be softened:
+
+  > Either of these can start a FURTHER run when this one finishes. Each attempt is its own run with its
+  > own id and history row, and goes through both gates again — the safe-peak override is never inherited.
+
+  The two checkboxes are mutually exclusive because the driver takes the first: a page that let both be
+  ticked would describe a run that does not happen. `args.js` keeps its allowlist shape — no `extraArgs`,
+  no shell — and refuses a floor without a recalibration, a hold without a certification, and a label
+  without a series.
+- **The series field is a path, never a URL.** crowdsim does not fetch server-side metrics, so there is
+  nothing to point at a backend; the field takes a **relative** path under the server's working
+  directory, with no absolute root and no `..`, because a form field that could name any file on the
+  server is a file-read primitive with a text box in front of it. The label must look like a metric name,
+  since it is rendered.
+
+### Fixed
+- **`check-no-attribution.sh` failed on its own denylist.** 1.33.1 shipped a check that passed while the
+  list was untracked and failed the first time it ran after being committed — the list necessarily
+  contains the names it forbids. It is now excluded from its own search, and
+  `CROWDSIM_ATTRIBUTION_DENYLIST` points the check at a file in a private repository for anyone who
+  would rather the list not live here at all (a missing list skips, it does not fail).
+
 ## [1.33.1] — 2026-09-08
 
 ### Fixed
