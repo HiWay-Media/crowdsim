@@ -301,6 +301,9 @@
 #   Every rule at once, before anything runs: structure, pool references, class kinds, the auth
 #   block, the brake class, the SLO. Needs node. Generates nothing. Exits 2 on a bad profile.
 #
+#     --profile <f.json>   the same thing as the positional argument, for scripts that pass it
+#                          the way every other subcommand does
+#
 #   Without node, `crowdsim doctor --profile <f>` still does the structural checks and says which
 #   ones did not run — rather than printing nothing and letting you believe it passed.
 #
@@ -401,7 +404,14 @@ case "$CMD" in
   "") usage; exit 2;;
 esac
 
+# What was actually typed, so `reject_foreign_flags` can check it against the subcommand's own help.
+# --help and --version are not subcommand flags: they answer for the tool.
+SEEN_FLAGS=()
 while [ $# -gt 0 ]; do
+  case "$1" in
+    --help|--version) ;;
+    --*) SEEN_FLAGS+=("$1");;
+  esac
   case "$1" in
     --profile) PROFILE_F="$2"; shift 2;;
     --target) TARGET="$2"; shift 2;;
@@ -461,6 +471,58 @@ while [ $# -gt 0 ]; do
        else die "unknown option: $1" 2; fi;;
   esac
 done
+
+# ─────────────────── a flag the subcommand does not use is an ERROR, not a no-op ─────────────────────
+# `crowdsim probe --profile p.json --out /tmp/elsewhere` exited 0 and wrote its output to $CROWDSIM_OUT.
+# Somebody asked for a directory and got a different one, in silence. `--out` is a real flag, just not
+# one `probe` has — and the parse loop above is one flat case over every flag the tool understands, so
+# every flag was accepted by every subcommand and then ignored by most of them.
+#
+# That is the same class of mistake this tool already refuses for an unknown flag (exit 2 rather than
+# ignored): you believe you asked for something, and you did not.
+#
+# The accepted set comes from the `#@ <name>` help blocks — the lines that DECLARE a flag, not the prose
+# that mentions one. So a flag cannot be accepted without being documented, and cannot be documented
+# without being accepted; tests/cli/flags.bats holds both directions.
+subcommand_flags() {
+  awk -v want="$1" '
+    $0 == "#@ " want { inblock = 1; next }
+    /^#@/ && inblock  { exit }
+    inblock && !/^#/  { exit }
+    inblock { sub(/^# ?/, ""); if ($1 ~ /^--[a-z0-9]/) { sub(/,$/, "", $1); print $1 } }
+  ' "$0"
+}
+
+# Which subcommands DO take this flag. A refusal that does not say where to go is a refusal that makes
+# somebody read the whole help.
+flag_owners() {
+  local c out=""
+  for c in $(sed -n 's/^#@ \([a-z-][a-z-]*\)$/\1/p' "$0"); do
+    if subcommand_flags "$c" | grep -qx -- "$1"; then out="$out, $c"; fi
+  done
+  printf '%s' "${out#, }"
+}
+
+reject_foreign_flags() {
+  [ -n "${CMD:-}" ] || return 0
+  [ "${#SEEN_FLAGS[@]}" -gt 0 ] || return 0
+  local allowed; allowed="$(subcommand_flags "$CMD")"
+  local f owners
+  for f in "${SEEN_FLAGS[@]}"; do
+    if printf '%s\n' "$allowed" | grep -qx -- "$f"; then continue; fi
+    owners="$(flag_owners "$f")"
+    if [ -n "$owners" ]; then
+      die "$f is not a flag of \`$CMD\`. These subcommands take it:
+     $owners
+  It was accepted and then ignored before, which is worse: you asked for something and did not get it.
+  See: crowdsim $CMD --help" 2
+    else
+      die "$f is not a flag of \`$CMD\`. See: crowdsim $CMD --help" 2
+    fi
+  done
+}
+
+reject_foreign_flags
 
 if [ "$TOUCH_AND_GO" = "1" ]; then
   # ⚠️ "just a few seconds" does not produce 504s: a 504 needs a QUEUE, and a queue needs time to build.

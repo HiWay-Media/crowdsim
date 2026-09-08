@@ -29,13 +29,16 @@ help_blocks() {
   sed -n 's/^#@ \([a-z-][a-z-]*\)$/\1/p' "$SCRIPT"
 }
 
-# Every long flag named anywhere inside one block.
+# Every long flag one block DECLARES — a line whose first token is a long option. Not the prose that
+# mentions one: `record`'s text says "a journey file for --shape journey", and reading that as a flag
+# `record` accepts is how the gate in flags.bats would let one through.
 block_flags() {
   awk -v want="$1" '
     $0 == "#@ " want { b = 1; next }
     /^#@/ && b { exit }
-    b { print }
-  ' "$SCRIPT" | grep -oE -- '--[a-z0-9][a-z0-9-]*' | sort -u
+    b && !/^#/ { exit }
+    b { sub(/^# ?/, ""); if ($1 ~ /^--[a-z0-9]/) { sub(/,$/, "", $1); print $1 } }
+  ' "$SCRIPT" | sort -u
 }
 
 # ── the global help ──────────────────────────────────────────────────────────────────────────────────

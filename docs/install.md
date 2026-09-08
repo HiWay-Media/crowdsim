@@ -95,7 +95,8 @@ cp completions/crowdsim.zsh ~/.zsh/completions/_crowdsim
 echo 'fpath=(~/.zsh/completions $fpath); autoload -Uz compinit && compinit' >> ~/.zshrc
 ```
 
-Then `crowdsim load --<TAB>` offers `load`'s own flags, `crowdsim report <TAB>` offers your run ids plus
+Each subcommand's own flags, and only those — the same set the driver refuses anything outside of, read
+from the same place. Then `crowdsim load --<TAB>` offers `load`'s own flags, `crowdsim report <TAB>` offers your run ids plus
 `latest` and `previous`, and `--profile <TAB>` offers what is in `$CROWDSIM_PROFILES`.
 `--i-know-this-breaks-production` completes like every other flag: hiding it would make nobody safer, it
 would only make the gate look like a secret instead of a decision somebody takes.
@@ -103,7 +104,7 @@ would only make the gate look like a secret instead of a decision somebody takes
 In the container the files are at `/crowdsim/completions/`, so a shell opened in the image gets them too:
 
 ```bash
-docker run --rm -it --entrypoint sh ghcr.io/hiway-media/crowdsim:1.27.0 \
+docker run --rm -it --entrypoint sh ghcr.io/hiway-media/crowdsim:1.28.0 \
   -c '. /crowdsim/completions/crowdsim.bash; bash'
 ```
 

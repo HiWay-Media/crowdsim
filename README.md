@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.27.0        # or :1.27, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.28.0        # or :1.28, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.27.0 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.28.0 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.27.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.28.0 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -201,6 +201,9 @@ launched from the page are the same kind of object, and appear in the same histo
 - **`probe` and `discover` come back as tables, not terminal output.** Per declared cache layer: the header,
   what it said, and whether that counts as a hit — with *the header never appeared* kept distinct from
   *miss*, because the first is a wrong header name in your profile and the second is a cold cache.
+- **A flag the subcommand does not take is refused** (exit 2), naming the subcommands that do. It used to
+  be accepted and ignored: `probe --out /tmp/elsewhere` exited 0 and wrote somewhere else. Asking for
+  something and not getting it is the same mistake as a typo, so it is the same refusal.
 - **Loopback by default.** A page that can generate 500 req/s at your production has no business on a
   shared network. Another bind address is allowed, but only with `CROWDSIM_GUI_TOKEN` set.
 - **Stop is a SIGINT**, so k6 winds down and still writes the summary. A killed run is a burned window.

@@ -757,7 +757,27 @@ address without `CROWDSIM_GUI_TOKEN`. See [GUI](gui.md).
 
 ## Flags
 
-Only `load` uses most of them; unknown flags are an error (exit 2) rather than being ignored.
+Only `load` uses most of them. **A flag the subcommand does not take is an error (exit 2)**, and so is a
+flag the tool does not know at all — neither is ever ignored:
+
+```
+❌ --out is not a flag of `probe`. These subcommands take it:
+     report, init, record
+  It was accepted and then ignored before, which is worse: you asked for something and did not get it.
+  See: crowdsim probe --help
+```
+
+Until 1.28.0 the argument parser was one flat `case` over every flag the tool understands, so every flag
+was accepted by every subcommand and then ignored by most of them. `crowdsim probe --profile p.json --out
+/tmp/elsewhere` exited **0** and wrote its output to `$CROWDSIM_OUT`: a directory was asked for and a
+different one was used, silently. That is the same class of mistake as an unknown flag, and it is now the
+same refusal.
+
+The accepted set per subcommand comes from the **same `#@ <name>` help blocks** that `crowdsim <sub>
+--help` and the [completions](install.md#optional-shell-completion) read — specifically the lines that
+*declare* a flag, not the prose that mentions one. So a flag cannot be accepted without being documented,
+and cannot be documented without being accepted; `tests/cli/flags.bats` holds both directions, and asserts
+that every argv the GUI builds stays inside them.
 
 | Flag | Default | Applies to | What it does |
 |---|---|---|---|
@@ -818,7 +838,7 @@ They are an API: the Nomad job, CI and the GUI all branch on them.
 | Code | Meaning | Typical cause |
 |---|---|---|
 | `0` | Executed | Also when the brake tripped — that is an outcome, not an error |
-| `2` | Usage | Unknown flag or subcommand, missing/unparseable profile, unknown target, `--shape journey` without `journey.file` |
+| `2` | Usage | Unknown flag or subcommand, missing/unparseable profile, unknown target, `--shape journey` without `journey.file` · since 1.28.0 also a flag that belongs to a different subcommand |
 | `3` | A safety gate refused it | No allowlist, host not allowlisted, peak above the ceiling without the override, GUI asked to bind off-loopback without a token |
 | `4` | Nothing usable came out of it | `probe` got ≥400 or no answer, or found an `authed` class whose endpoint does not require the token (1.24.0) — a class that would measure the public path; `record` found no page in the HAR; `weights` classified nothing in the log; `init` found no artefacts to assemble — and, since 1.20.4, a `load` whose generator produced **no summary**: a run that never happened is not a success, and until then it warned on a terminal and exited 0 |
 | `5` | Missing or broken prerequisite | k6 absent, docker absent for `cache-ab`, node absent for `serve`, `validate`, `record` or `weights` — and, since 1.20.2, a profile validator that crashes instead of reaching a verdict: that is the installation, not the profile, and it used to be reported as exit 2 |

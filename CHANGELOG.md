@@ -4,6 +4,51 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.0] — 2026-09-08
+
+**`crowdsim probe --profile p.json --out /tmp/elsewhere` exited 0 and wrote its output to
+`$CROWDSIM_OUT`.** A directory was asked for and a different one was used, in silence. `--out` is a real
+flag — just not one `probe` has — and the argument parser was one flat `case` over every flag the tool
+understands, so every flag was accepted by every subcommand and then ignored by most of them.
+
+This repository already refuses an unknown flag with exit 2 rather than ignoring it, on the grounds that
+a typo must not become a silently different run. A flag that belongs to a *different* subcommand is the
+same mistake wearing a valid name: you believe you asked for something, and you did not.
+
+### Added
+- **A flag the subcommand does not take is an error (exit 2)**, naming the subcommands that do:
+
+  ```
+  ❌ --out is not a flag of `probe`. These subcommands take it:
+       report, init, record
+    It was accepted and then ignored before, which is worse: you asked for something and did not get it.
+    See: crowdsim probe --help
+  ```
+
+  The accepted set comes from the **same `#@ <name>` help blocks** that `crowdsim <sub> --help` and the
+  shell completions read — specifically the lines that *declare* a flag, not the prose that mentions one
+  (`record`'s text says "a journey file for `--shape journey`", and reading that as a flag `record`
+  accepts is exactly how one would slip through). So a flag cannot be accepted without being documented,
+  and cannot be documented without being accepted.
+
+  `tests/cli/flags.bats` holds both directions, including that **every argv the GUI builds stays inside
+  the declared sets** — a gate that refused one of the page's own flags would take the whole page down.
+  The other direction is held by the two hundred existing CLI tests, which drive real flag combinations
+  against every subcommand: a set that was too narrow would turn them red.
+
+### Fixed
+- **The last help block did not end.** `serve` is the last `#@` block in the script, and the extraction
+  only stopped at the *next* one — so it ran on to the end of the file and claimed every long option in
+  the source, curl's `--resolve` and `--max-time` included. `crowdsim serve --<TAB>` offered **55 flags
+  for a subcommand with two**, from 1.25.0. Both completions and the tests now end a block at the first
+  line that is not a comment, and a test asserts `serve` declares no more than four.
+- `crowdsim validate --profile <f>` is documented as well as accepted. It always worked; it was the one
+  flag the new gate would have refused for want of a line in the help.
+
+### Changed
+- `docs/cli.md` §Flags leads with the refusal, and the exit-code table says exit 2 now covers a flag from
+  another subcommand.
+
 ## [1.27.0] — 2026-09-05
 
 Milestone v1.13.0, closed — and the leg it adds found a regression this project had shipped two releases

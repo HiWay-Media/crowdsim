@@ -23,11 +23,16 @@ _crowdsim_subcommands() {
 # description of another is still a flag that subcommand understands.
 _crowdsim_flags() {
   local s; s="$(_crowdsim_script)" || return 0
+  # The block ends at the next `#@` OR at the first line that is not a comment. Without that second
+  # condition the LAST block — serve — ran on to the end of the script and claimed every long option in
+  # the source, curl's --resolve and --max-time included: 55 flags offered for a subcommand with two.
+  # Only the lines that DECLARE a flag count, which is the same rule the driver's own gate uses.
   awk -v want="$1" '
     $0 == "#@ " want { inblock = 1; next }
     /^#@/ && inblock  { exit }
-    inblock           { print }
-  ' "$s" | grep -oE -- '--[a-z0-9][a-z0-9-]*' | sort -u
+    inblock && !/^#/  { exit }
+    inblock { sub(/^# ?/, ""); if ($1 ~ /^--[a-z0-9]/) { sub(/,$/, "", $1); print $1 } }
+  ' "$s" | sort -u
 }
 
 _crowdsim_runs() {
