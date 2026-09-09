@@ -5,6 +5,9 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import {
   buildLoadArgs, buildProbeArgs, buildDiscoverArgs, InvalidRun, buildTrendArgs, buildComparePageArgs,
 } from '../../gui/server/lib/args.js';
@@ -172,13 +175,16 @@ test('the two follow-up flags cannot be combined: one is a retry, the other a ce
 });
 
 test('--server-metrics needs a label, and the path goes through the same traversal refusal', () => {
-  const a = buildLoadArgs({ peak: 10, serverMetrics: 'throttle.csv',
-    serverMetricsLabel: 'cpu_throttled_periods' }, P, NAME);
+  // Since 1.40.0 a series is read only from a configured directory (#91): with none, the field is
+  // refused rather than resolved against the server's own cwd. So this needs one.
+  const { series } = seriesFixture();
+  const a = buildLoadArgs({ peak: 10, serverMetrics: 'cpu.csv',
+    serverMetricsLabel: 'cpu_throttled_periods' }, P, NAME, { seriesDir: series });
   assert.ok(a.includes('--server-metrics'));
   assert.ok(a.includes('--server-metrics-label'));
 
-  assert.throws(() => buildLoadArgs({ peak: 10, serverMetrics: 'throttle.csv' }, P, NAME),
-    (e) => e.field === 'serverMetricsLabel');
+  assert.throws(() => buildLoadArgs({ peak: 10, serverMetrics: 'cpu.csv' }, P, NAME,
+    { seriesDir: series }), (e) => e.field === 'serverMetricsLabel');
   for (const bad of ['../etc/passwd', '/etc/passwd', 'a/../../b']) {
     assert.throws(() => buildLoadArgs({ peak: 10, serverMetrics: bad,
       serverMetricsLabel: 'x' }, P, NAME),
@@ -249,4 +255,79 @@ test('`latest` and `previous` are the CLI resolving a run id, and the page does 
   // The page always knows the exact run: it is showing the archive. A selector here would mean the page
   // and the file it hands over could name different runs.
   assert.throws(() => buildComparePageArgs('latest', 'previous'), /run/);
+});
+
+// ── the series path, resolved rather than pattern-matched (#91) ──────────────────────────────────────
+//
+// Two places let a browser name a file on the server's filesystem, and they were checked to different
+// standards. gui/server/lib/profiles.js resolves and contains:
+//
+//     const base = fs.realpathSync(dir);
+//     const full = path.resolve(base, String(name));
+//     if (path.dirname(full) !== base) throw new BadProfile(…);
+//
+// args.js matched a pattern and stopped. The pattern refuses an absolute path and any `..` segment —
+// the traversal that matters most — and does not resolve, so a symlink under the allowed directory
+// satisfied it and the driver then read whatever it pointed at. The weaker of two checks guarding the
+// same kind of thing, in the newer code.
+
+function seriesFixture() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'crowdsim-series-'));
+  const series = path.join(dir, 'series');
+  fs.mkdirSync(path.join(series, 'nested'), { recursive: true });
+  fs.writeFileSync(path.join(series, 'cpu.csv'), '1757325600,0\n');
+  fs.writeFileSync(path.join(series, 'nested', 'cpu.csv'), '1757325600,0\n');
+  // The escape the pattern cannot see: a name with no `..` in it that resolves outside.
+  fs.writeFileSync(path.join(dir, 'outside.csv'), 'secret\n');
+  fs.symlinkSync(path.join(dir, 'outside.csv'), path.join(series, 'escape.csv'));
+  return { dir, series };
+}
+
+const withSeries = (run, seriesDir) =>
+  buildLoadArgs(Object.assign({ profile: 'p.json', peak: 10 }, run), '/p.json', 'p', { seriesDir });
+
+test('a series inside the allowed directory is accepted, nested or not', () => {
+  const { series } = seriesFixture();
+  for (const rel of ['cpu.csv', 'nested/cpu.csv', './cpu.csv']) {
+    const argv = withSeries({ serverMetrics: rel, serverMetricsLabel: 'cpu' }, series);
+    const at = argv.indexOf('--server-metrics');
+    assert.ok(at !== -1, rel);
+    // Handed over resolved, so the driver reads the file that was checked and not a name re-resolved
+    // against whatever directory it happens to run in.
+    assert.equal(argv[at + 1], fs.realpathSync(path.join(series, rel)), rel);
+  }
+});
+
+test('a symlink that escapes the allowed directory is refused — the case a pattern cannot see', () => {
+  const { series } = seriesFixture();
+  assert.throws(() => withSeries({ serverMetrics: 'escape.csv', serverMetricsLabel: 'cpu' }, series),
+    /outside/i);
+});
+
+test('an absolute path and a .. segment are still refused, and say which it was', () => {
+  const { series } = seriesFixture();
+  assert.throws(() => withSeries({ serverMetrics: '/etc/passwd', serverMetricsLabel: 'x' }, series),
+    /outside|relative/i);
+  assert.throws(() => withSeries({ serverMetrics: '../outside.csv', serverMetricsLabel: 'x' }, series),
+    /outside|relative/i);
+});
+
+test('a file that is not there is refused as missing, not as an escape', () => {
+  // The two refusals send you to different places: one is a typo, the other is a path you may not use.
+  const { series } = seriesFixture();
+  assert.throws(() => withSeries({ serverMetrics: 'nope.csv', serverMetricsLabel: 'x' }, series),
+    /not there|no such|does not exist/i);
+});
+
+test('with no allowed directory configured the field is refused, and names the setting', () => {
+  // Failing closed: a server with nowhere to read series from must not fall back to its own cwd, which
+  // is what made this weaker than the profile browser in the first place.
+  assert.throws(() => withSeries({ serverMetrics: 'cpu.csv', serverMetricsLabel: 'x' }, ''),
+    /CROWDSIM_SERIES_DIR/);
+});
+
+test('no series asked for is not an error', () => {
+  const { series } = seriesFixture();
+  const argv = withSeries({}, series);
+  assert.equal(argv.indexOf('--server-metrics'), -1);
 });

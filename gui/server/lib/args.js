@@ -13,6 +13,9 @@
  *    profile called `x.json; rm -rf /` is just a filename that does not exist.
  */
 
+import fs from 'node:fs';
+import path from 'node:path';
+
 export class InvalidRun extends Error {
   constructor(field, message) {
     super(message);
@@ -158,10 +161,8 @@ export function buildLoadArgs(run, profilePath, profileName, opts) {
   // INTENT.md), so there is no URL to accept here, and a form field that could name any absolute path on
   // the server is a file-read primitive with a text box in front of it.
   if (r.serverMetrics !== undefined && r.serverMetrics !== '') {
-    if (!SAFE_REL_PATH.test(String(r.serverMetrics))) {
-      throw new InvalidRun('serverMetrics',
-        'the series must be a relative path under the server\'s working directory, with no ".." in it');
-    }
+    // The label first, deliberately: it is the cheaper mistake and the simpler fix, and reporting the
+    // path when the label is what is missing sends somebody to look at their filesystem.
     if (!r.serverMetricsLabel) {
       throw new InvalidRun('serverMetricsLabel',
         'a series needs a label: an unnamed column of numbers cannot be read against anything');
@@ -170,7 +171,10 @@ export function buildLoadArgs(run, profilePath, profileName, opts) {
       throw new InvalidRun('serverMetricsLabel',
         'the label must look like a metric name (letters, digits, _ . : -), because it is rendered');
     }
-    args.push('--server-metrics', String(r.serverMetrics));
+    const resolved = seriesPath(r.serverMetrics, opts && opts.seriesDir);
+    // Resolved, so the driver reads the file that was CHECKED. Handing over the name instead would let
+    // it be re-resolved against whatever directory the driver runs in.
+    args.push('--server-metrics', resolved);
     args.push('--server-metrics-label', String(r.serverMetricsLabel));
   } else if (r.serverMetricsLabel) {
     throw new InvalidRun('serverMetrics',
@@ -209,6 +213,58 @@ export function buildDiscoverArgs(run, profilePath) {
   if (r.target) args.push('--target', targetName(r.target));
   if (r.limit !== undefined && r.limit !== '') args.push('--limit', int(r.limit, 'limit', 1, 100000));
   return args;
+}
+
+/**
+ * A server-side series the page named, resolved and contained. (#91)
+ *
+ * WHY THIS IS NOT A PATTERN — `gui/server/lib/profiles.js` has resolved and contained a browser-supplied
+ * name since the beginning: `realpathSync` the base, `resolve` the name against it, refuse if it landed
+ * elsewhere. This field, added later, matched a regex instead. The regex refuses an absolute path and any
+ * `..` segment, which is the traversal that matters most — and it cannot see a **symlink**: a name with
+ * no `..` in it that resolves outside anyway. The driver then read whatever it pointed at and rendered
+ * numbers out of it into a page. The weaker of two checks guarding the same kind of thing, in the newer
+ * code, which is the direction this repository is usually careful about.
+ *
+ * A DEDICATED DIRECTORY rather than the server's working directory: easier to reason about, and easier to
+ * mount read-only in the container. Nothing configured means the field is refused — falling back to the
+ * cwd is what made this weak in the first place.
+ *
+ * Nesting is allowed (a series directory is naturally organised by date), unlike a profile name, which is
+ * flat. Containment is what matters, not depth.
+ */
+function seriesPath(v, seriesDir) {
+  if (!seriesDir) {
+    throw new InvalidRun('serverMetrics', 'this server has no series directory configured, so it will '
+      + 'not read one: set CROWDSIM_SERIES_DIR to a directory holding the series files (mount it '
+      + 'read-only in the container).');
+  }
+  const name = String(v);
+  if (!SAFE_REL_PATH.test(name)) {
+    throw new InvalidRun('serverMetrics', 'the series must be a relative path with no ".." in it, made '
+      + 'of letters, digits, dots, dashes, underscores and slashes');
+  }
+  let base;
+  try {
+    base = fs.realpathSync(seriesDir);
+  } catch (e) {
+    throw new InvalidRun('serverMetrics', `the series directory ${seriesDir} is not there: `
+      + 'create it, or point CROWDSIM_SERIES_DIR somewhere that exists.');
+  }
+  const candidate = path.resolve(base, name);
+  let full;
+  try {
+    // realpath, not existsSync: resolving the symlinks is the whole point, and a file that is not there
+    // cannot be read anyway. The two refusals are kept apart because they send you to different places.
+    full = fs.realpathSync(candidate);
+  } catch (e) {
+    throw new InvalidRun('serverMetrics', `the series ${name} is not there under ${base}`);
+  }
+  if (full !== base && !full.startsWith(base + path.sep)) {
+    throw new InvalidRun('serverMetrics', `the series ${name} resolves outside the series directory `
+      + `(${base}) — a symlink or a mount can leave it without a ".." anywhere in the name.`);
+  }
+  return full;
 }
 
 /**

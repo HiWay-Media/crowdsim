@@ -4,6 +4,41 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.0] — 2026-09-09
+
+**Two places let a browser name a file on the server's filesystem, and they were checked to different
+standards** ([#91](https://github.com/HiWay-Media/crowdsim/issues/91)).
+
+`gui/server/lib/profiles.js` has resolved and contained a browser-supplied name since the beginning:
+`realpathSync` the base, `resolve` the name against it, refuse if it landed elsewhere. The
+`--server-metrics` field, added later, matched a regex instead. The regex refuses an absolute path and any
+`..` segment — the traversal that matters most — and **cannot see a symlink**: a name with no `..` in it
+that resolves outside anyway. The driver then read whatever it pointed at and rendered numbers out of it
+into a page.
+
+Nothing here was exploitable by a stranger: the GUI binds loopback and demands a token for anything else,
+and only numbers survive the parse. It was the weaker of two checks guarding the same kind of thing, in
+the newer code, which is the direction this repository is usually careful about.
+
+### Changed
+- **The series path is resolved and contained**, the same treatment as a profile name: `realpath` the
+  allowed directory, `realpath` the candidate, refuse anything that does not land inside. Nesting is
+  allowed — a series directory is naturally organised by date — because containment is what matters, not
+  depth. The **resolved** path is what reaches the driver, so it reads the file that was checked rather
+  than a name re-resolved against wherever it happens to run.
+- **`CROWDSIM_SERIES_DIR` says where series may be read from, and has no default.** Unset means the page
+  reads none. Falling back to the server's working directory is what made this weak in the first place, so
+  the fallback is gone rather than narrowed. In the container: mount it read-only and point the variable
+  at it.
+- The refusals are kept apart because they send you to different places: *not a relative path*, *the
+  directory is not configured*, *the file is not there*, and *it resolves outside the series directory*.
+  A missing **label** is still reported as the label — checked first, because it is the cheaper mistake
+  and the simpler fix, and reporting the path would send somebody to look at their filesystem.
+
+### Added
+- Tests over the case the pattern could not see: a symlink inside the allowed directory pointing outside
+  it, alongside the absolute path, the `..` and a legitimate nested path.
+
 ## [1.39.0] — 2026-09-09
 
 **The page could hand over one run drawn, and neither the trend nor the delta**

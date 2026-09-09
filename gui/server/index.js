@@ -7,6 +7,8 @@
  *   CROWDSIM_GUI_BIND      address to bind (default 127.0.0.1)
  *   CROWDSIM_GUI_TOKEN     bearer token; REQUIRED when binding off-loopback
  *   CROWDSIM_PROFILES      profile directory (default ./profiles)
+ *   CROWDSIM_SERIES_DIR    directory a handed-in server-side series may be read from. No default:
+ *                          unset means the page will not read one. Mount it read-only in the image.
  *   CROWDSIM_OUT           output directory, shared with the CLI (default ./out)
  *   CROWDSIM_BIN           the driver to spawn. Otherwise: $CROWDSIM_ROOT/bin/crowdsim, then this
  *                          checkout's own bin/crowdsim, then `crowdsim` on PATH — and a refusal if none
@@ -31,6 +33,11 @@ const port = Number(process.env.CROWDSIM_GUI_PORT || 8787);
 const bind = process.env.CROWDSIM_GUI_BIND || '127.0.0.1';
 const token = process.env.CROWDSIM_GUI_TOKEN || null;
 const profilesDir = path.resolve(process.env.CROWDSIM_PROFILES || path.join(root, 'profiles'));
+// Where a handed-in server-side series may be read from (#91). NO DEFAULT, on purpose: unset means the
+// page will not read a series at all. Defaulting to the working directory is what let a symlink under it
+// reach anything on the filesystem.
+const seriesDir = process.env.CROWDSIM_SERIES_DIR
+  ? path.resolve(process.env.CROWDSIM_SERIES_DIR) : null;
 const outDir = path.resolve(process.env.CROWDSIM_OUT || path.join(process.cwd(), 'out'));
 const uiDir = path.join(root, 'gui/ui/dist');
 
@@ -65,6 +72,7 @@ if (!driver.bin) {
 const app = createApp({
   crowdsimBin: driver.bin,
   profilesDir,
+  seriesDir,
   outDir,
   uiDir,
   token,

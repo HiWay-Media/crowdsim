@@ -30,6 +30,10 @@ export function createApp(opts) {
   const profilesDir = o.profilesDir;
   const outDir = o.outDir;
   const uiDir = o.uiDir || null;
+  // Where a handed-in server-side series may be read from. No default: a server with nowhere configured
+  // refuses the field rather than resolving it against its own working directory, which is what made this
+  // weaker than the profile browser. See seriesPath in args.js. (#91)
+  const seriesDir = o.seriesDir || null;
   const token = o.token || null;
   const runner = o.runner || new Runner({ bin: o.crowdsimBin, outDir, env: o.env });
 
@@ -137,7 +141,8 @@ export function createApp(opts) {
       throw e;
     }
     const name = (read.parsed && read.parsed.name) || body.profile;
-    const argv = kind === 'load' ? buildLoadArgs(body, full, name, opts)
+    const argv = kind === 'load'
+      ? buildLoadArgs(body, full, name, Object.assign({ seriesDir }, opts || {}))
       : kind === 'probe' ? buildProbeArgs(body, full)
         : buildDiscoverArgs(body, full);
     return { kind, argv, profileName: name };

@@ -60,8 +60,8 @@ queue needs time to build.
 ### Pull a released tag
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.39.0     # exact version — use this
-docker pull ghcr.io/hiway-media/crowdsim:1.39       # latest patch of 1.2
+docker pull ghcr.io/hiway-media/crowdsim:1.40.0     # exact version — use this
+docker pull ghcr.io/hiway-media/crowdsim:1.40       # latest patch of 1.2
 docker pull ghcr.io/hiway-media/crowdsim:latest    # last release
 ```
 
@@ -134,7 +134,7 @@ docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" \
   -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.39.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.40.0 crowdsim serve
 ```
 
 Or `make image-run`, which does exactly this against `crowdsim:dev` and prints a freshly generated token.
@@ -181,7 +181,7 @@ docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" \
   -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.39.0 \
+  ghcr.io/hiway-media/crowdsim:1.40.0 \
   crowdsim load --profile /profile.json --target edge --peak 60
 ```
 
@@ -209,7 +209,7 @@ by that same container, so the same caveat applies to the runs, not to the page.
 ```bash
 docker run --rm --network host -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.39.0 crowdsim probe --profile /profile.json
+  ghcr.io/hiway-media/crowdsim:1.40.0 crowdsim probe --profile /profile.json
 
 # same shape for: discover --limit 400 · load --dry-run · history · report <run-id> [--html] · init
 ```
@@ -226,12 +226,12 @@ command reads nothing — `❌ the log is empty: no lines to classify.`, exit 2 
 ```bash
 # a log on this host
 docker run --rm -v "$PWD/my-profile.json:/profile.json:ro" -v /var/log/nginx:/logs:ro \
-  ghcr.io/hiway-media/crowdsim:1.39.0 crowdsim weights /logs/access.log --profile /profile.json
+  ghcr.io/hiway-media/crowdsim:1.40.0 crowdsim weights /logs/access.log --profile /profile.json
 
 # a log that never lands on disk here
 ssh edge 'zcat /var/log/nginx/access.log.*.gz' \
   | docker run --rm -i -v "$PWD/my-profile.json:/profile.json:ro" \
-      ghcr.io/hiway-media/crowdsim:1.39.0 crowdsim weights - --profile /profile.json
+      ghcr.io/hiway-media/crowdsim:1.40.0 crowdsim weights - --profile /profile.json
 ```
 
 No `/out` mount is needed and none is used: this subcommand writes nothing, which is deliberate — an access
@@ -279,6 +279,7 @@ and absolutes optimistically.
 | `CROWDSIM_ALLOW_TARGETS` | **none, deliberately** | Comma-separated host globs the tool may generate load against. Without it (and without `safety.allow_hosts` in the profile) every run exits 3. |
 | `CROWDSIM_OUT` | `/out` | Where summaries, logs and `history.tsv` go. |
 | `CROWDSIM_PROFILES` | `/profiles` | The directory the GUI reads and writes. |
+| `CROWDSIM_SERIES_DIR` | *none* | Where a handed-in server-side series may be read from. No default: unset means the GUI reads none. Mount it read-only — `-v /path/to/series:/series:ro` — and set this to `/series`. The path a browser names is resolved and contained inside it. |
 | `CROWDSIM_GUI_PORT` | `8787` | GUI port inside the container. |
 | `CROWDSIM_GUI_BIND` | unset → loopback | Bind address. Anything but loopback requires a token. |
 | `CROWDSIM_GUI_TOKEN` | unset | Bearer token for `/api`. Mandatory for a non-loopback bind. |

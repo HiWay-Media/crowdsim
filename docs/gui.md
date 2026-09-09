@@ -450,6 +450,7 @@ target — not consent. The friction stays where it is useful: an explicit act t
 | `CROWDSIM_GUI_BIND` | `127.0.0.1` | Or `--bind`. Off loopback requires a token. |
 | `CROWDSIM_GUI_TOKEN` | unset | Bearer token on every `/api` route |
 | `CROWDSIM_PROFILES` | `./profiles` | The directory the editor reads and writes |
+| `CROWDSIM_SERIES_DIR` | *none* | The directory a handed-in server-side series may be read from. **Unset means the page reads no series at all** — there is deliberately no default, because falling back to the working directory is what let a symlink under it reach anything. The path is resolved and contained, so a symlink leaving the directory is refused, which a pattern check cannot see. Mount it read-only in the container |
 | `CROWDSIM_OUT` | `./out` | Shared with the CLI — this is the point |
 | `CROWDSIM_ALLOW_TARGETS` | unset | Inherited by every run it starts |
 | `CROWDSIM_BIN` | resolved, see below | Which driver to spawn |

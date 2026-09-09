@@ -96,5 +96,7 @@ export const FOLLOW_UP = {
     + 'separate run, so a swept number and a sustained one never share a label.',
   exclusive: 'Recalibrate and certify are two different follow-up runs: choose one.',
   seriesWhy: 'A server-side series to read against this run\'s steps. crowdsim never fetches one — a '
-    + 'relative path on the machine this server runs on. What comes out is a correlation, not a cause.',
+    + 'path relative to CROWDSIM_SERIES_DIR on the machine this server runs on, and nothing outside it: '
+    + 'the path is resolved and contained, so a symlink that leaves that directory is refused. Unset '
+    + 'means this server reads no series at all. What comes out is a correlation, not a cause.',
 };
