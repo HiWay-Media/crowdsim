@@ -112,22 +112,41 @@ subcommands() { sed -n 's/^#@ \([a-z-][a-z-]*\)$/\1/p' "$CROWDSIM"; }
 }
 
 @test "the GUI cannot be broken by this gate: every argv it builds is inside the declared sets" {
-  # The page spawns this driver for every run. A gate that refused one of the GUI's own flags would take
-  # the whole page down, and tests/gui asserts the argv rather than running it.
-  local f
-  # probe and discover build a fixed argv; assert those two literally
-  for f in --profile --target --insecure; do
-    printf '%s\n' "$(declared probe)" | grep -qx -- "$f" || { echo "probe rejects the GUI's $f"; return 1; }
+  # The page spawns this driver for every run and for every drawn page. A gate that refused one of the
+  # GUI's own flags would take the page down, so each flag in args.js is checked against the subcommand
+  # whose builder emits it.
+  #
+  # It used to assume every flag in args.js belonged to `load`, with `--limit` hand-excepted as
+  # discover's. That held while args.js built one argv; it broke the moment it built five (#90), which is
+  # a test making a claim about the code's shape rather than about its behaviour. Now the shape is read:
+  # each `buildXArgs` names its subcommand in the array it starts with.
+  python3 - "$CROWDSIM_ROOT/gui/server/lib/args.js" > "$BATS_TEST_TMPDIR/emitted" <<'PY'
+import re, sys
+src = open(sys.argv[1], encoding='utf-8').read()
+# Each builder starts its argv with the subcommand: ['load', …], ['history', '--html', …].
+bodies = re.split(r'\nexport function (build\w+)\(', src)
+for i in range(1, len(bodies), 2):
+    body = bodies[i + 1]
+    sub = re.search(r"\[\s*'([a-z-]+)'", body)
+    if not sub:
+        continue
+    for flag in sorted(set(re.findall(r"'(--[a-z0-9-]+)'", body))):
+        print('%s\t%s' % (sub.group(1), flag))
+PY
+  [ -s "$BATS_TEST_TMPDIR/emitted" ] || { echo "no builders found in args.js — check this test"; return 1; }
+
+  local sub flag
+  while IFS="$(printf '\t')" read -r sub flag; do
+    printf '%s\n' "$(declared "$sub")" | grep -qx -- "$flag" \
+      || { echo "the GUI passes $flag to \`$sub\`, which does not declare it"; return 1; }
+  done < "$BATS_TEST_TMPDIR/emitted"
+
+  # And the five subcommands the page spawns are the ones we think they are: a builder for a sixth would
+  # show up here rather than in a 500.
+  run cut -f1 "$BATS_TEST_TMPDIR/emitted"
+  for sub in load probe discover history compare; do
+    [[ "$output" == *"$sub"* ]] || { echo "args.js no longer builds an argv for $sub"; return 1; }
   done
-  for f in --profile --target --limit; do
-    printf '%s\n' "$(declared discover)" | grep -qx -- "$f" || { echo "discover rejects the GUI's $f"; return 1; }
-  done
-  for f in $(grep -ohE "'--[a-z0-9-]+'" "$CROWDSIM_ROOT/gui/server/lib/args.js" | tr -d "'" | sort -u); do
-    case "$f" in --limit) continue;; esac   # discover's, asserted above
-    printf '%s\n' "$(declared load)" | grep -qx -- "$f" || { echo "load rejects the GUI's $f"; return 1; }
-  done
-  printf '%s\n' "$(declared report)" | grep -qx -- --html
-  printf '%s\n' "$(declared compare)" | grep -qx -- --json
 }
 
 # ── the block extraction that feeds all of this ──────────────────────────────────────────────────────

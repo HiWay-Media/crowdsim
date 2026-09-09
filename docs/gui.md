@@ -184,6 +184,33 @@ renderers eventually disagree about what a run means. What travels with the numb
 The refusals travel too. A run the generator could not sustain gets no latency curve in the page — only the
 chart that shows why it is invalid — for the same reason the banner above tells you to discard it.
 
+### The archive, and the delta
+
+Those two buttons draw **one run**. Two more draw what the archive says, and both are the CLI's pages
+handed through in exactly the same way:
+
+- **Trend over time (drawn)**, above the run list, is `crowdsim history --html`: the knee per run, with the
+  requested and delivered rates told apart. *Does the knee move* is the only question the archive exists to
+  answer, and until 1.39.0 it could not leave the page.
+- **Delta, drawn**, in a comparison, is `crowdsim compare a b --html`: the delta as a delta, not two
+  absolute curves to subtract by eye.
+
+Both **open in a new tab** rather than downloading. The run report is a file because it goes into a ticket;
+these two are questions somebody asks on screen while deciding.
+
+Neither is offered when there is nothing to draw, and the page says why instead of hiding a control:
+
+- one run in the archive is **not a trend** — through a single point it is a straight line, which is the
+  same refusal the knee makes from one completed step;
+- a comparison `compare` **refused** gets no drawing. The reasons above it are the answer; two different
+  experiments on one pair of axes would not be. The server refuses it too (`422`), with `compare`'s own
+  text.
+
+The set of drawn pages is not tracked by hand any more. `gui/server/lib/drawn-pages.js` lists them
+exhaustively and `tests/gui/drawn-pages.test.js` asks `bin/crowdsim` which subcommands declare `--html`, so
+a fourth drawn page fails the suite instead of quietly not being offered — which is what happened to these
+two, and to six summary blocks before them.
+
 Reload the page and it is still there. The server keeps the run list, and the page asks for it on load. A run
 in the archive also has an address of its own — `#history=<run-id>` opens that run's result, the same way
 `#history=<run-a>,<run-b>` opens a comparison — which is how you hand somebody a result, report button
@@ -492,6 +519,8 @@ better interface: it is the thing the API calls anyway.
 | `GET` | `/api/history` | `out/history.tsv`, newest first |
 | `GET` | `/api/history/:runId` | Summary, history row, comparable runs, run log |
 | `GET` | `/api/history/:runId/report[?format=md\|html]` | The run as markdown (default) or as a page with charts, written by `crowdsim report` and served as a file. Any other `format` is a `400` |
+| `GET` | `/api/history/trend[?last=&target=&profile=]` | The knee over time, drawn by `crowdsim history --html`. The filters are the ones `history` accepts; anything else is a `400` |
+| `GET` | `/api/compare/page?a=&b=` | The delta between two runs, drawn by `crowdsim compare --html`. `422` with `compare`'s own reason when it refuses the pair |
 | `GET` | `/api/compare?a=&b=` | The delta between two runs, from `crowdsim compare --json`. `422` with `refused[]` when they are not comparable |
 
 ```bash

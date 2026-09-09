@@ -17,7 +17,10 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { listProfiles, readProfile, writeProfile, deleteProfile, profilePath, BadProfile } from './profiles.js';
 import { validateProfile } from '../../../lib/validate.mjs';
-import { buildLoadArgs, buildProbeArgs, buildDiscoverArgs, InvalidRun, SHAPES, RSC_MODES } from './args.js';
+import {
+  buildLoadArgs, buildProbeArgs, buildDiscoverArgs, buildTrendArgs, buildComparePageArgs,
+  InvalidRun, SHAPES, RSC_MODES,
+} from './args.js';
 import { commandLine } from './command.js';
 import { readHistory, readSummary, readRunLog, comparable, readProbe, readDiscover, newestBench } from './history.js';
 import { Runner, Busy } from './runner.js';
@@ -266,6 +269,68 @@ export function createApp(opts) {
     if (body.error) return res.status(404).json(body);
     // Exit 2 with a `refused` list is the CLI saying these two runs are not the same experiment.
     return res.status(body.refused && body.refused.length ? 422 : 200).json(body);
+  }));
+
+  // ── the two drawn pages the archive could not hand over (#90) ───────────────────────────────────
+  //
+  // The page offered `report --html` and nothing else, while `history --html` (the knee over time) and
+  // `compare a b --html` (the delta) had shipped and it could hand over neither — although it already
+  // plots the archive and already knows which runs are comparable.
+  //
+  // Both are SPAWNED, like the report: the CLI draws the page and this sends the bytes. A renderer here
+  // would be a second opinion about what a run means, and the first time the two disagreed the wrong one
+  // would be on screen while somebody decided something. The set of pages is declared in
+  // gui/server/lib/drawn-pages.js and tests/gui/drawn-pages.test.js asks the driver itself, so a fourth
+  // one cannot appear unnoticed — which is how this gap opened four times.
+
+  // The knee over time. Served as HTML to read rather than as an attachment: "does the knee move" is a
+  // question somebody asks on screen while deciding, not one they file.
+  app.get('/api/history/trend', wrap((req, res) => {
+    const dest = path.join(outDir, `trend-gui-${process.pid}.html`);
+    // Filters validated in args.js, because they arrive from a URL and end up in an argv.
+    const argv = buildTrendArgs(req.query || {}, dest);
+    const r = spawnSync(o.crowdsimBin, argv, {
+      encoding: 'utf8',
+      timeout: 30000,
+      env: Object.assign({}, process.env, o.env || {}, { CROWDSIM_OUT: outDir }),
+    });
+    if (r.error) {
+      throw Object.assign(new Error(`could not draw the trend: ${r.error.message}`), { status: 500 });
+    }
+    if (r.status !== 0 || !fs.existsSync(dest)) {
+      throw Object.assign(new Error(`crowdsim history --html exited ${r.status}: `
+        + `${(r.stderr || r.stdout || '').trim()}`), { status: 500 });
+    }
+    res.type('text/html; charset=utf-8').send(fs.readFileSync(dest, 'utf8'));
+  }));
+
+  // The delta, drawn — and only when `compare` agrees the two runs are the same experiment. Its exit 2 is
+  // a refusal, so it becomes a 422 with the CLI's own reason rather than a page of two different
+  // experiments on one pair of axes.
+  app.get('/api/compare/page', wrap((req, res) => {
+    const a = String((req.query || {}).a || '');
+    const b = String((req.query || {}).b || '');
+    const argv = buildComparePageArgs(a, b);
+    const r = spawnSync(o.crowdsimBin, argv, {
+      encoding: 'utf8',
+      timeout: 30000,
+      env: Object.assign({}, process.env, o.env || {}, { CROWDSIM_OUT: outDir }),
+    });
+    if (r.error) {
+      throw Object.assign(new Error(`could not draw the delta: ${r.error.message}`), { status: 500 });
+    }
+    const file = path.join(outDir, `compare-${a}-${b}.html`);
+    if (r.status === 2) {
+      // The refusal is the finding. Passed through as the CLI wrote it, not paraphrased.
+      return res.status(422).type('text/plain; charset=utf-8')
+        .send((r.stderr || r.stdout || '').trim()
+          || 'crowdsim compare refused these two runs and said nothing this server can quote');
+    }
+    if (r.status !== 0 || !fs.existsSync(file)) {
+      throw Object.assign(new Error(`crowdsim compare --html exited ${r.status}: `
+        + `${(r.stderr || r.stdout || '').trim()}`), { status: 500 });
+    }
+    res.type('text/html; charset=utf-8').send(fs.readFileSync(file, 'utf8'));
   }));
 
   // One run as markdown, produced by `crowdsim report` — not by a second renderer here.

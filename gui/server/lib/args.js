@@ -210,3 +210,62 @@ export function buildDiscoverArgs(run, profilePath) {
   if (r.limit !== undefined && r.limit !== '') args.push('--limit', int(r.limit, 'limit', 1, 100000));
   return args;
 }
+
+/**
+ * A filter value that reaches an argv. `--target` is matched by the driver as a substring of the base_url
+ * host, and `--profile` against the profile name in history.tsv: both are opaque strings to us, so the
+ * charset is the check. A leading dash is refused explicitly — a value that starts with one becomes a
+ * flag rather than an argument, which is the oldest way to smuggle one in.
+ */
+const FILTER_VALUE = /^[A-Za-z0-9_.:-]{1,128}$/;
+
+function filterValue(v, field) {
+  const s = String(v);
+  if (!FILTER_VALUE.test(s) || s.startsWith('-')) {
+    throw new InvalidRun(field, `${field} must look like a host or a profile name (letters, digits, `
+      + '. : _ -) and may not start with a dash');
+  }
+  return s;
+}
+
+/**
+ * `crowdsim history --html`: the knee over time, drawn. (#90)
+ *
+ * `--out` is required rather than optional: without it the driver names the file after the invocation
+ * (`trend-<run id>.html`), and the server would have to guess which of them it just wrote.
+ *
+ * The filters are the ones `history` itself accepts, so the page and the table cannot be two answers to
+ * one question — a trend drawn from every run while the table shows five is exactly that.
+ */
+export function buildTrendArgs(query, outFile) {
+  const q = query || {};
+  if (!outFile) throw new InvalidRun('out', 'the trend needs an --out path: the driver names the file '
+    + 'after the invocation, not after a run');
+  const args = ['history', '--html', '--out', String(outFile)];
+  if (q.last !== undefined && q.last !== '') {
+    args.push('--last', String(int(q.last, 'last', 1, 100000)));
+  }
+  if (q.target !== undefined && q.target !== '') args.push('--target', filterValue(q.target, 'target'));
+  if (q.profile !== undefined && q.profile !== '') args.push('--profile', filterValue(q.profile, 'profile'));
+  return args;
+}
+
+/**
+ * `crowdsim compare <a> <b> --html`: the delta, drawn. (#90)
+ *
+ * Exact run ids only. `latest` and `previous` are the CLI resolving an id for somebody typing at a
+ * terminal; the page is showing the archive and already knows which two runs it means, so accepting a
+ * selector here would let the page and the file it hands over name different runs.
+ *
+ * Every refusal stays the CLI's: this builds an argv and decides nothing about whether the two runs are
+ * comparable. `compare` exits 2 with its reasons and the endpoint passes them through.
+ */
+export function buildComparePageArgs(a, b) {
+  const RUN_ID = /^\d{8}T\d{6}Z$/;
+  for (const [v, field] of [[a, 'run a'], [b, 'run b']]) {
+    if (!RUN_ID.test(String(v || ''))) {
+      throw new InvalidRun('run', `${field} must be a run id, as printed by crowdsim history`);
+    }
+  }
+  return ['compare', String(a), String(b), '--html'];
+}

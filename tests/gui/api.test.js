@@ -439,3 +439,69 @@ test('a format the server does not produce is a 400, not a guess', async () => {
     assert.equal(r.json.field, 'format');
   });
 });
+
+// ── the two drawn pages the archive could not hand over (#90) ────────────────────────────────────────
+// Handed over, never re-rendered: the CLI writes the page and the server sends the bytes. A second
+// renderer is a second opinion about what a run means.
+
+test('the archive hands over the trend, as the CLI drew it', async () => {
+  await withServer({}, async ({ api, outDir }) => {
+    const res = await api('GET', '/api/history/trend');
+    assert.equal(res.status, 200, res.text);
+    assert.match(res.text, /FAKE TREND PAGE/);
+    // the CLI's own artefact, not something assembled here
+    assert.match(res.text, /<!doctype html>/i);
+  });
+});
+
+test('the trend forwards the filters it was given, and refuses the ones it was not', async () => {
+  await withServer({}, async ({ api }) => {
+    const ok = await api('GET', '/api/history/trend?last=5&profile=site');
+    assert.equal(ok.status, 200, ok.text);
+    assert.match(ok.text, /--last 5/);
+    assert.match(ok.text, /--profile site/);
+
+    const bad = await api('GET', '/api/history/trend?last=0');
+    assert.equal(bad.status, 400, bad.text);
+    const worse = await api('GET', '/api/history/trend?target=x%20y');
+    assert.equal(worse.status, 400, worse.text);
+  });
+});
+
+test('the comparison hands over the delta, drawn', async () => {
+  await withServer({}, async ({ api }) => {
+    const res = await api('GET', '/api/compare/page?a=20260901T101500Z&b=20260901T121500Z');
+    assert.equal(res.status, 200, res.text);
+    assert.match(res.text, /FAKE COMPARE PAGE/);
+  });
+});
+
+test('a delta the CLI refuses is a refusal, not a page', async () => {
+  // `compare` exits 2 when the two runs are not the same experiment. The page must show that reason
+  // rather than draw two different experiments on one pair of axes.
+  await withServer({ env: { FAKE_EXIT: '2' } }, async ({ api }) => {
+    const res = await api('GET', '/api/compare/page?a=20260901T101500Z&b=20260901T121500Z');
+    assert.equal(res.status, 422, res.text);
+    assert.match(res.text || '', /different pool|refus|not the same/i);
+  });
+});
+
+test('the delta endpoint takes run ids, not selectors', async () => {
+  await withServer({}, async ({ api }) => {
+    for (const q of ['?a=latest&b=previous', '?a=20260901T101500Z', '?a=x&b=y', '']) {
+      const res = await api('GET', '/api/compare/page' + q);
+      assert.equal(res.status, 400, `${q}: ${res.text}`);
+    }
+  });
+});
+
+test('both pages are served as HTML for reading, not as a download', async () => {
+  // The run report is offered as an attachment because it goes into a ticket. These two are looked at:
+  // "does the knee move" is a question somebody asks while deciding, on screen.
+  await withServer({}, async ({ api, base }) => {
+    const res = await fetch(base + '/api/history/trend');
+    assert.match(res.headers.get('content-type') || '', /text\/html/);
+    assert.equal(res.headers.get('content-disposition'), null);
+    await res.text();
+  });
+});

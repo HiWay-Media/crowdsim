@@ -5,7 +5,9 @@
  */
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildLoadArgs, buildProbeArgs, buildDiscoverArgs, InvalidRun } from '../../gui/server/lib/args.js';
+import {
+  buildLoadArgs, buildProbeArgs, buildDiscoverArgs, InvalidRun, buildTrendArgs, buildComparePageArgs,
+} from '../../gui/server/lib/args.js';
 
 const P = '/tmp/profiles/site.json';
 const NAME = 'my-site';
@@ -196,4 +198,55 @@ test('none of them appear when the page did not ask for them', () => {
     '--server-metrics', '--server-metrics-label']) {
     assert.ok(!a.includes(f), f);
   }
+});
+
+// ── the drawn pages the archive can hand over (#90) ──────────────────────────────────────────────────
+// The page had a route for `report --html` and none for the trend or the delta. These two builders are
+// the same shape as buildProbeArgs/buildDiscoverArgs: known flags, validated values, no shell — the
+// values reach an argv, so a filter typed into a URL cannot become an argument the driver did not expect.
+
+test('the trend argv draws every run when nothing is filtered', () => {
+  assert.deepEqual(buildTrendArgs({}, '/tmp/t.html'), ['history', '--html', '--out', '/tmp/t.html']);
+});
+
+test('the trend argv carries the filters `history` itself accepts', () => {
+  const argv = buildTrendArgs({ last: 10, target: 'edge.example.test', profile: 'site' }, '/tmp/t.html');
+  assert.deepEqual(argv, ['history', '--html', '--out', '/tmp/t.html',
+    '--last', '10', '--target', 'edge.example.test', '--profile', 'site']);
+});
+
+test('a filter the CLI would not accept is refused here, not passed through', () => {
+  // The whole reason argv is built in this module: a value from a URL must not reach the driver unchecked.
+  for (const bad of [{ last: 0 }, { last: -3 }, { last: 'many' }, { last: 1e9 }]) {
+    assert.throws(() => buildTrendArgs(bad, '/tmp/t.html'), /last/, JSON.stringify(bad));
+  }
+  for (const bad of [{ target: 'a b' }, { target: 'x;rm -rf /' }, { target: '--peak' }]) {
+    assert.throws(() => buildTrendArgs(bad, '/tmp/t.html'), /target/, JSON.stringify(bad));
+  }
+  for (const bad of [{ profile: '../etc/passwd' }, { profile: 'a b' }, { profile: '--json' }]) {
+    assert.throws(() => buildTrendArgs(bad, '/tmp/t.html'), /profile/, JSON.stringify(bad));
+  }
+});
+
+test('the trend needs somewhere to write: history --html names its file by invocation, not by run', () => {
+  // Without --out the driver writes trend-<this invocation>.html and the server would have to guess.
+  assert.throws(() => buildTrendArgs({}, ''), /out/);
+});
+
+test('the delta argv is two run ids and nothing else', () => {
+  assert.deepEqual(buildComparePageArgs('20260901T101500Z', '20260901T121500Z'),
+    ['compare', '20260901T101500Z', '20260901T121500Z', '--html']);
+});
+
+test('a delta between things that are not run ids is refused', () => {
+  for (const pair of [['x', '20260901T121500Z'], ['20260901T101500Z', 'latest'],
+    ['20260901T101500Z', '../../etc/passwd'], ['', '']]) {
+    assert.throws(() => buildComparePageArgs(pair[0], pair[1]), /run/, JSON.stringify(pair));
+  }
+});
+
+test('`latest` and `previous` are the CLI resolving a run id, and the page does not get to use them', () => {
+  // The page always knows the exact run: it is showing the archive. A selector here would mean the page
+  // and the file it hands over could name different runs.
+  assert.throws(() => buildComparePageArgs('latest', 'previous'), /run/);
 });

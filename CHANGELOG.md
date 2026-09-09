@@ -4,6 +4,52 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.0] — 2026-09-09
+
+**The page could hand over one run drawn, and neither the trend nor the delta**
+([#90](https://github.com/HiWay-Media/crowdsim/issues/90)). `history --html` and `compare a b --html`
+shipped in 1.38.0; `gui/server/lib/app.js` built exactly one drawn-page argv, `['report', runId,
+'--html']`. So the GUI plotted the archive, knew which runs were comparable, and could hand over neither
+of the two pages that say what the archive means.
+
+That was the fourth recurrence of one shape: #53 was two flags the CLI had and the page did not, #78 was
+six summary blocks, #79 was six flags. Every one of them was the page tracking the CLI by hand, and the
+two that stopped recurring are the two that got a test.
+
+### Added
+- **The archive hands over the trend**: `GET /api/history/trend`, and a **Trend over time (drawn)** button
+  above the run list. The filters `history` itself accepts (`last`, `target`, `profile`) are forwarded, so
+  the page and the table cannot become two answers to one question.
+- **A comparison hands over the delta**: `GET /api/compare/page?a=&b=`, and a **Delta, drawn** button. When
+  `compare` refuses the pair the endpoint answers **422 with `compare`'s own text** rather than drawing two
+  different experiments on one pair of axes.
+- Both are **spawned, not re-rendered** — the CLI draws the page and the server sends the bytes, exactly
+  as the run report already worked. A renderer here would be a second opinion about what a run means, and
+  the first time the two disagreed the wrong one would be on screen while somebody decided something.
+- Both **open in a new tab** rather than downloading. The run report is a file because it goes into a
+  ticket; *does the knee move* is a question somebody asks on screen while deciding.
+- **Neither is offered when there is nothing to draw, and the page says why** rather than hiding a control
+  (`gui/ui/src/lib/drawn.js`): one run is not a trend — through a single point it is a straight line,
+  which is the knee's own refusal from one completed step — and a comparison `compare` refused gets no
+  drawing.
+- **A fourth drawn page cannot appear unnoticed.** `gui/server/lib/drawn-pages.js` declares the set
+  exhaustively, with a reason for anything deliberately not offered, and
+  `tests/gui/drawn-pages.test.js` asks `bin/crowdsim` which subcommands declare `--html`. A page in
+  neither table fails the suite; so does a declared route the server does not serve, and a declared page
+  the CLI no longer draws.
+
+### Changed
+- The two argv builders live in `gui/server/lib/args.js` with the others, because the filters arrive from
+  a URL and end up in an argv: `last` is an integer in range, `target` and `profile` are matched against a
+  charset and refused if they start with a dash — a value that starts with one becomes a flag rather than
+  an argument. `latest` and `previous` are refused for the delta: the page is showing the archive and
+  already knows which two runs it means, so a selector there could let the page and the file it hands over
+  name different runs.
+- `tests/cli/flags.bats` attributes each flag in `args.js` to **the subcommand whose builder emits it**.
+  It used to assume they all belonged to `load`, with `--limit` hand-excepted as discover's — a claim
+  about the code's shape that held while `args.js` built one argv and broke the moment it built five. It
+  now reads the subcommand each builder starts its array with, and the hand-coded exception is gone.
+
 ## [1.38.1] — 2026-09-09
 
 ### Added

@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.38.1        # or :1.38, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.39.0        # or :1.39, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.38.1 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.39.0 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.38.1 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.39.0 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -200,6 +200,10 @@ launched from the page are the same kind of object, and appear in the same histo
 - **The command is readable before it runs.** The page shows the argv the server will spawn — rendered by
   the server from that same argv, not reassembled by the page, so it cannot describe a different run.
   Defaults you cannot see are decisions somebody else made for you.
+- **The archive hands over its own pages.** The trend (`history --html`) and the delta
+  (`compare --html`) are drawn by the CLI and opened, the same way the run report already was — and
+  neither is offered when there is nothing to draw: one run is not a trend, and a comparison `compare`
+  refused gets no picture.
 - **`probe` and `discover` come back as tables, not terminal output.** Per declared cache layer: the header,
   what it said, and whether that counts as a hit — with *the header never appeared* kept distinct from
   *miss*, because the first is a wrong header name in your profile and the second is a cold cache.

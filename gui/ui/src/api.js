@@ -63,6 +63,20 @@ export const api = {
   // way: the page renders no report of its own, in either format.
   report: (runId, format) => text('GET', `/api/history/${encodeURIComponent(runId)}/report`
     + `?format=${encodeURIComponent(format || 'md')}`),
+  // The two drawn pages that read the ARCHIVE rather than one run (#90). Both are drawn by the CLI —
+  // `history --html` and `compare a b --html` — and handed through; the page renders neither. Fetched
+  // rather than linked, for the same reason as the report: a link cannot carry the bearer token.
+  trend: (filters) => {
+    const q = new URLSearchParams();
+    for (const k of ['last', 'target', 'profile']) {
+      const v = (filters || {})[k];
+      if (v !== undefined && v !== null && v !== '') q.set(k, String(v));
+    }
+    const qs = q.toString();
+    return text('GET', `/api/history/trend${qs ? `?${qs}` : ''}`);
+  },
+  comparePage: (a, b) => text('GET',
+    `/api/compare/page?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`),
 };
 
 async function text(method, url) {

@@ -6,6 +6,7 @@ import { orderPair } from '../lib/compare.js';
 import { parseHash, formatHash } from '../lib/hash.js';
 import { activatesOn } from '../lib/keys.js';
 import { kneeText, stepCurve, rateAxis } from '../lib/runs.js';
+import { trendOffer } from '../lib/drawn.js';
 
 /*
  * The archive, read from out/history.tsv and out/summary-*.json — the files the driver writes. Runs
@@ -18,6 +19,8 @@ import { kneeText, stepCurve, rateAxis } from '../lib/runs.js';
  */
 export default function HistoryPanel() {
   const [rows, setRows] = useState([]);
+  const [trendError, setTrendError] = useState(null);
+  const [drawingTrend, setDrawingTrend] = useState(false);
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [error, setError] = useState(null);
@@ -76,10 +79,39 @@ export default function HistoryPanel() {
     }
   }, [selected]);
 
+  // The knee over time, drawn by `crowdsim history --html` on the server and opened as it came back.
+  // Opened rather than downloaded: "does the knee move" is a question somebody asks on screen while
+  // deciding, not one they file. Nothing about the trend is rendered here — see lib/drawn.js.
+  async function openTrend() {
+    setTrendError(null);
+    setDrawingTrend(true);
+    try {
+      const html = await api.trend({});
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      window.open(url, '_blank', 'noopener');
+      // Not revoked immediately: the new tab is still reading it.
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      setTrendError(e.message);
+    } finally {
+      setDrawingTrend(false);
+    }
+  }
+
+  const trend = trendOffer(rows);
+
   return (
     <div className="grid">
       <section className="card wide">
         <h2>Runs</h2>
+        <p className="note">
+          {trend.offered ? (
+            <button type="button" onClick={openTrend} disabled={drawingTrend}>
+              {drawingTrend ? 'Drawing the trend…' : 'Trend over time (drawn)'}
+            </button>
+          ) : trend.reason}
+        </p>
+        {trendError ? <div className="banner bad">Could not draw the trend: {trendError}</div> : null}
         {error ? <div className="banner bad">{error}</div> : null}
         {!rows.length ? <p className="note">No runs recorded yet. The archive is written by the driver, in the output directory.</p> : null}
         {rows.length ? (

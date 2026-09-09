@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { valueCell, deltaCell, mayRenderNumbers } from '../lib/compare.js';
+import { deltaOffer } from '../lib/drawn.js';
+import { api } from '../api.js';
 
 /*
  * Two runs, compared.
@@ -12,9 +14,30 @@ import { valueCell, deltaCell, mayRenderNumbers } from '../lib/compare.js';
  * Which is why the refusal is rendered as prominently as a result would have been.
  */
 export default function CompareCard({ result, onClose }) {
+  const [drawing, setDrawing] = useState(false);
+  const [drawError, setDrawError] = useState(null);
   if (!result) return null;
   const refused = result.refused || [];
   const withNumbers = mayRenderNumbers(result);
+  const delta = deltaOffer(result);
+
+  // The delta, drawn by `crowdsim compare --html` on the server. Offered only when `compare` accepted
+  // these two runs — see lib/drawn.js — because a button that leads to a refusal wastes attention at the
+  // moment somebody is deciding something. (#90)
+  async function openDelta() {
+    setDrawError(null);
+    setDrawing(true);
+    try {
+      const html = await api.comparePage(result.a.run_id, result.b.run_id);
+      const url = URL.createObjectURL(new Blob([html], { type: 'text/html' }));
+      window.open(url, '_blank', 'noopener');
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    } catch (e) {
+      setDrawError(e.message);
+    } finally {
+      setDrawing(false);
+    }
+  }
 
   return (
     <section className="card wide">
@@ -30,6 +53,15 @@ export default function CompareCard({ result, onClose }) {
           <tr><th>B</th><td><RunHead h={result.b} /></td></tr>
         </tbody>
       </table>
+
+      <p className="note">
+        {delta.offered ? (
+          <button type="button" onClick={openDelta} disabled={drawing}>
+            {drawing ? 'Drawing the delta…' : 'Delta, drawn'}
+          </button>
+        ) : delta.reason}
+      </p>
+      {drawError ? <div className="banner bad">Could not draw the delta: {drawError}</div> : null}
 
       {refused.length ? (
         <div className="banner bad">

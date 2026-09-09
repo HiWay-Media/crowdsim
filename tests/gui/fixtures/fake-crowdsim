@@ -34,6 +34,38 @@ if [ "${1:-}" = "report" ]; then
   exit 0
 fi
 
+# `history --html --out <file>` and `compare a b --html` write pages where the real driver does, so the
+# API tests can assert the server hands over the CLI's artefact instead of rendering its own. The argv is
+# echoed into the page so a test can see which filters reached the driver.
+if [ "${1:-}" = "history" ]; then
+  case "$*" in
+    *--html*)
+      out=""
+      prev=""
+      for a in "$@"; do
+        if [ "$prev" = "--out" ]; then out="$a"; fi
+        prev="$a"
+      done
+      [ -n "$out" ] || { echo "no --out given" >&2; exit 2; }
+      printf '<!doctype html>\n<title>trend</title>\n<p>FAKE TREND PAGE</p>\n<pre>%s</pre>\n' "$*" > "$out"
+      exit 0;;
+  esac
+fi
+
+if [ "${1:-}" = "compare" ]; then
+  case "$*" in
+    *--html*)
+      if [ "${FAKE_EXIT:-0}" != "0" ]; then
+        echo "different pool names: these two runs are not the same experiment" >&2
+        exit "${FAKE_EXIT}"
+      fi
+      mkdir -p "$CROWDSIM_OUT"
+      printf '<!doctype html>\n<title>delta</title>\n<p>FAKE COMPARE PAGE</p>\n' \
+        > "$CROWDSIM_OUT/compare-${2:-a}-${3:-b}.html"
+      exit 0;;
+  esac
+fi
+
 if [ -n "${FAKE_SUMMARY_SRC:-}" ]; then
   mkdir -p "$CROWDSIM_OUT"
   cp "$FAKE_SUMMARY_SRC" "$CROWDSIM_OUT/summary-20260805T101112Z.json"
