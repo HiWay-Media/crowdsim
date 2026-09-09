@@ -4,6 +4,27 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.1] — 2026-09-09
+
+### Fixed
+- **The docs index listed one drawn page and the tool draws three**
+  ([#93](https://github.com/HiWay-Media/crowdsim/issues/93)). `history --html` and `compare a b --html`
+  shipped in 1.38.0, documented in `cli.md` and listed in the README, and were absent from
+  `docs/index.md` — which is the entry point, and where this repository's own rule says a page has to
+  appear or it does not exist.
+
+  §Start here now answers the three questions those commands exist for, one row each: hand **one run**
+  over, ask whether **the knee moves over time**, ask what **a change actually bought**. With a sentence
+  tying them together, because the useful thing is knowing there are three and which is which.
+- **`make check-docs` covers it now**, the way it already covered documented flags: `check-doc-commands.sh`
+  asks `bin/crowdsim` which subcommands declare `--html` and fails when one of them is missing from the
+  index. A checklist nobody checks is how this happened, so it is not a checklist any more. Verified by
+  deleting a row and watching it name the missing page.
+
+### Changed
+- The index rows spell the commands out (`crowdsim history --html`) rather than naming a flag, so they can
+  be copied.
+
 ## [1.40.0] — 2026-09-09
 
 **Two places let a browser name a file on the server's filesystem, and they were checked to different

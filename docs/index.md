@@ -28,6 +28,11 @@ caching would actually buy you — instead of estimating it from logs after the 
 
 ## Start here
 
+**Three pages, three questions.** `report --html` draws one run, `history --html` draws the archive over
+time, and `compare a b --html` draws the delta between two runs — each one a self-contained file with no
+external resources, so it opens offline and prints to PDF. All three are also handed over by the
+[GUI](gui.md#the-archive-and-the-delta).
+
 **On a machine that already has crowdsim: `crowdsim next`.** It says what has been measured, which
 profiles are still drafts, and the single command to run next — generating nothing and changing nothing.
 
@@ -43,7 +48,9 @@ profiles are still drafts, and the single command to run next — generating not
 | measure the class mix from your own access log | [`weights`](cli.md#weights) |
 | plan and execute a real test | [Running a test](running-a-test.md) |
 | know whether a result means anything | [Reading results](reading-results.md) |
-| hand a run to somebody else, drawn | [`report --html`](cli.md#--html-the-same-run-drawn) |
+| hand **one run** to somebody else, drawn | [`crowdsim report <run> --html`](cli.md#--html-the-same-run-drawn) |
+| ask whether **the knee moves over time** | [`crowdsim history --html`](cli.md#history) |
+| ask what **a change actually bought** | [`crowdsim compare a b --html`](cli.md#compare) |
 | use the browser interface | [GUI](gui.md) |
 | look up a flag or an exit code | [CLI reference](cli.md) |
 | change the code, or cut a release | [Development](development.md) |

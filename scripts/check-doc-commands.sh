@@ -64,6 +64,31 @@ for cmd in "${selfcontained[@]}"; do
   fi
 done
 
+# ── 3. every drawn page is findable from the index ───────────────────────────────────────────────────
+# `docs/index.md` §Start here is where somebody looks to find out the tool can do a thing at all, and this
+# repository's own rule is that a page not in the index does not exist. It listed `report --html` while the
+# tool drew three pages: the trend and the delta shipped documented in `cli.md`, mentioned in the README,
+# and absent from the entry point. A checklist nobody checks is how that happened. (#93)
+drawn=$(sed -n 's/^#@ \([a-z-][a-z-]*\)$/\1/p' "$CROWDSIM" | while read -r sub; do
+  awk -v w="$sub" '
+    $0 == "#@ " w { b = 1; next }
+    /^#@/ && b { exit }
+    b && !/^#/ { exit }
+    b { sub(/^# ?/, ""); if ($1 == "--html") print w }
+  ' "$CROWDSIM"
+done | sort -u)
+
+for sub in $drawn; do
+  # One LINE that names the subcommand and `--html`, not the two glued together: the honest usage is
+  # `crowdsim compare a b --html`, with the run ids in between.
+  if grep -qE "crowdsim $sub\b.*--html" docs/index.md; then
+    printf '✅ docs/index.md points at `crowdsim %s --html`\n' "$sub"
+  else
+    printf '  ❌ `crowdsim %s --html` draws a page and docs/index.md does not mention it\n' "$sub"
+    fail=1
+  fi
+done
+
 if [ "$fail" != "0" ]; then
   printf '\n❌ the documentation describes a tool that does not exist.\n'
   exit 1
