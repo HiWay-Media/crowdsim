@@ -64,6 +64,7 @@
 #                            OUT of the profile: profiles get shared, credentials should not travel with
 #                            them. In the container the file must be mounted and the path is the one
 #                            inside the container.
+#   CROWDSIM_SAMPLE_MAX_TIME seconds a single probe pool/premise sample may take (default 3, no retry)
 #   CROWDSIM_OUT             output directory for logs and summaries (default: ./out)
 #   CROWDSIM_SLACK_WEBHOOK   if set, --slack posts the run recap there. Never hardcode a webhook here.
 #   CROWDSIM_PROFILES        profile dir the GUI reads/writes (default: ./profiles) · CROWDSIM_GUI_TOKEN:
@@ -122,7 +123,9 @@
 #     --insecure           skip TLS verification, for a node addressed by IP
 #     --pool-sample <n>    how many URLs to check PER POOL (default 5, spread across the pool, not the
 #                          first n). It used to check exactly one and assume the other 399. Paced by
-#                          CROWDSIM_VERIFY_DELAY: a preflight must not become the load test.
+#                          CROWDSIM_VERIFY_DELAY and bounded per request by CROWDSIM_SAMPLE_MAX_TIME
+#                          (3s, no retry): a preflight must not become the load test, in requests OR in
+#                          time. Skipped entirely when the target did not answer the first request.
 #
 #   Exits 4 if the target answers >=400, or if an authed class turns out not to need its token.
 #
@@ -1102,6 +1105,11 @@ PY
 # A SAMPLE, never the whole pool, spread across it rather than the first n: the first entries of a
 # sitemap-derived pool are the shallowest pages, which are also the most likely to exist. Paced by the
 # same CROWDSIM_VERIFY_DELAY as discovery, because a preflight must not become the load test.
+# A sample request is bounded and never retried. It answers "does this path exist", and a path that did
+# not answer within the budget has answered that. `probe`'s first request keeps the longer timeout and the
+# retry, because reachability is the one thing worth waiting for.
+POOL_SAMPLE_MAX_TIME="${CROWDSIM_SAMPLE_MAX_TIME:-3}"
+
 pool_sample_check() {
   local n="${POOL_SAMPLE:-5}"
   case "$n" in ''|*[!0-9]*) say ""; say "  ⛔ --pool-sample takes a number of URLs per pool"; return 0;; esac
@@ -1145,8 +1153,7 @@ PY
   : > "$obs"
   local pool total path code
   while IFS="$(printf '\t')" read -r pool total path; do
-    code="$(curl "${curl_opts[@]}" -D /dev/null -o /dev/null -w '%{http_code}' \
-            "$BASE_URL$path" 2>/dev/null || echo 0)"
+    code="$(curl "${sample_opts[@]}" -w '%{http_code}' "$BASE_URL$path" 2>/dev/null || echo 0)"
     printf '%s\t%s\t%s\t%s\n' "$pool" "$total" "$path" "${code:-0}" >> "$obs"
     sleep "$VERIFY_DELAY" 2>/dev/null || true
   done <<< "$plan"
@@ -1241,8 +1248,7 @@ print(1 if any((c or {}).get("kind")=="authed" for c in (d.get("classes") or [])
   local tag a b st
   while IFS="$(printf '\t')" read -r tag a b; do
     case "$tag" in
-      T)  st="$(curl "${curl_opts[@]}" -D /dev/null -o /dev/null -w '%{http_code}' \
-                "$BASE_URL$b" 2>/dev/null || echo 0)"
+      T)  st="$(curl "${sample_opts[@]}" -w '%{http_code}' "$BASE_URL$b" 2>/dev/null || echo 0)"
           printf 'T\t%s\t%s\t%s\n' "$a" "$b" "${st:-0}" >> "$obs_f";;
       S)  printf 'S\t%s\t%s\n' "$a" "$b" >> "$obs_f";;
     esac
@@ -1265,6 +1271,12 @@ cmd_probe() {
   if [ "$INSECURE" = "1" ]; then curl_opts+=(-k); fi
   if [ -n "$HOST_HEADER" ]; then curl_opts+=(-H "Host: $HOST_HEADER"); fi
   if [ -n "$BYPASS" ]; then curl_opts+=(--resolve "${BYPASS/=/:443:}"); fi
+  # The sample's own options: short, no retry, no header dump. Derived from probe's so that --insecure,
+  # the Host header and the bypass still apply — a sample must reach the same target as the preflight.
+  sample_opts=(-sS -o /dev/null -D /dev/null --max-time "$POOL_SAMPLE_MAX_TIME")
+  if [ "$INSECURE" = "1" ]; then sample_opts+=(-k); fi
+  if [ -n "$HOST_HEADER" ]; then sample_opts+=(-H "Host: $HOST_HEADER"); fi
+  if [ -n "$BYPASS" ]; then sample_opts+=(--resolve "${BYPASS/=/:443:}"); fi
   rm -f "$OUT_DIR/.premise-rc" "$OUT_DIR/.pool-rc"
 
   local first; first="$(python3 -c '
@@ -1280,6 +1292,11 @@ print(p[0] if isinstance(p,list) and p else "/")' "$RESOLVED" 2>/dev/null || ech
       -w '%{http_code} %{time_starttransfer} %{size_download}\n' \
       "$BASE_URL$first" 2>/dev/null) || true
     say "status=$code  ttfb=${ttfb}s  bytes=$size"
+    # Recorded to a file, not left in a variable: everything in this block runs in a subshell (it is
+    # piped into tee), so `code` is invisible to the parent. That is why the documented `exit 4` below
+    # never fired — a 404 on the first pool entry, and an address nothing listens on, both reported
+    # success for as long as the tee has been there. Same pattern as .pool-rc and .premise-rc. (#94)
+    printf '%s' "${code:-000}" > "$OUT_DIR/.probe-code"
     # Also written as JSON, and it carries the cache verdict per layer as well as the weight. Prose in a log
     # is for the human reading this run; the JSON is for `load` (which reads the weight back to say what
     # bandwidth a peak implies) and for the GUI, which must show this as a table rather than make somebody
@@ -1367,12 +1384,41 @@ if absent:
     print("     profile rather than a cold cache — and a layer that never speaks is reported as unknown,")
     print("     never as a miss, so it cannot quietly drag a hit ratio to zero.")
 PY
-    pool_sample_check
-    authed_premise
+    # THE FIRST REQUEST ALREADY ANSWERED THE REACHABILITY QUESTION. If the target did not answer it, or
+    # answered >=400, sampling the pools sends thirty more requests to learn the same thing — and against
+    # a target that drops packets each one costs the full budget. That turned one probe into 2m07s and a
+    # 90-second CI job into a 46-minute one. (#94)
+    if [ "${code:-000}" -ge 200 ] 2>/dev/null && [ "${code:-000}" -lt 400 ] 2>/dev/null; then
+      pool_sample_check
+      authed_premise
+    else
+      say ""
+      say "── pools and authed classes not sampled ──"
+      say "  The target did not answer the first request, so there is nothing to learn from asking about"
+      say "  every pool: fix reachability first, then run probe again for the pool and premise checks."
+    fi
   } | tee "$log"
   rm -f "$OUT_DIR/.probe-hdr"
-  local rc="${code:-0}"
-  if [ "$rc" -ge 400 ] 2>/dev/null; then exit 4; fi
+  # Exit 4 covers BOTH shapes of "this target does not serve": no answer at all, and an answer >=400.
+  # Read from the file the subshell wrote, because the variable does not survive the pipeline.
+  local rc="000"
+  if [ -f "$OUT_DIR/.probe-code" ]; then rc="$(cat "$OUT_DIR/.probe-code")"; fi
+  rm -f "$OUT_DIR/.probe-code"
+  case "$rc" in
+    ''|000)
+      say ""
+      say "  ⛔ the target never answered: that is connectivity, not capacity, and not a preflight that"
+      say "     passed. Check the address, the port, TLS and the network path."
+      ok "probe log: $log"
+      exit 4;;
+  esac
+  if [ "$rc" -ge 400 ] 2>/dev/null; then
+    say ""
+    say "  ⛔ the target answered $rc on the first pool entry: a load test against something that does"
+    say "     not serve is not a capacity measurement."
+    ok "probe log: $log"
+    exit 4
+  fi
   # An authed class that cannot measure an authenticated read makes the authenticated half of every run
   # from this profile meaningless, so it is an exit code and not a line somebody may scroll past. 4 is
   # probe's existing "this profile and this target do not go together".

@@ -104,7 +104,7 @@ would only make the gate look like a secret instead of a decision somebody takes
 In the container the files are at `/crowdsim/completions/`, so a shell opened in the image gets them too:
 
 ```bash
-docker run --rm -it --entrypoint sh ghcr.io/hiway-media/crowdsim:1.40.1 \
+docker run --rm -it --entrypoint sh ghcr.io/hiway-media/crowdsim:1.40.2 \
   -c '. /crowdsim/completions/crowdsim.bash; bash'
 ```
 

@@ -114,6 +114,9 @@
   },
   {
    "title": "v1.18.0"
+  },
+  {
+   "title": "v1.19.0"
   }
  ],
  "issues": [
@@ -1923,6 +1926,32 @@
     "- §Start here answers the two questions those commands exist for — *does the knee move over time* and *what did this change buy* — pointing at them.",
     "- The three drawn pages are discoverable together, so it is clear that one draws a run, one an archive and one a delta.",
     "- `make check-docs` covers it: the index is verified against the subcommands the driver dispatches, the way documented flags are already verified against the ones it parses. A checklist nobody checks is how this happened."
+   ]
+  },
+  {
+   "key": "probe-cost-and-dead-exit-code",
+   "title": "A preflight against a target that does not answer cost 2m07s, and reported success",
+   "milestone": "v1.19.0",
+   "labels": [
+    "area:cli",
+    "validity",
+    "area:ci"
+   ],
+   "body": [
+    "Three defects in `probe`, in one neighbourhood, found by asking why the `ci` workflow went red on a green tree.",
+    "",
+    "**1. The pool sample multiplied the cost against a dead target.** 1.33.0 made `probe` sample 5 URLs per pool instead of checking one, paced and bounded in COUNT — and nothing bounded the TIME. Each sample used the preflight's own curl options: `--max-time 10 --retry 1 --retry-connrefused`. Measured against a blackholed address: **2 minutes 7 seconds for one probe**, where before it was one request. The CLI suite makes thirteen probe calls, so a 90-second job became a **46-minute** one and the runner killed it. Locally it never showed, because a resolver that answers NXDOMAIN instantly makes every one of those requests free.",
+    "",
+    "**2. A target that never answered exited 0.** `probe`'s documented contract is *exit 4 if the target answers >=400*, and the tool's exit codes say `4 = target not reachable`. A failed curl leaves the status as `000`, and `\"000\" -ge 400` is false, so an address nothing listens on reported a preflight that passed — to a person, and to a scheduler reading the exit code.",
+    "",
+    "**3. The documented exit 4 was dead code.** Everything that reads the status runs inside `{ … } | tee \"$log\"`, which is a subshell, so the variable it assigns is invisible to the parent that tests it. A 404 on the first pool entry printed *target does not answer 2xx/3xx* and exited **0**. That had been true for as long as the tee had been there — the only exit-4 paths that worked were the marker files added later for the pool and premise checks.",
+    "",
+    "**Done when**",
+    "- A sample request is bounded and never retried: it answers *does this path exist*, and a path that did not answer inside the budget has answered that. The first request keeps the longer timeout and the retry, because reachability is the one thing worth waiting for.",
+    "- **A target that did not answer is not sampled at all.** The first request settled reachability; asking about every pool sends thirty more requests to learn the same thing.",
+    "- Both shapes of *this target does not serve* exit 4 — no answer, and an answer >=400 — and they are told apart in words, because connectivity and a 404 handler send you to different places.",
+    "- The status crosses the subshell boundary the way the other verdicts already do, and a test asserts each exit code rather than trusting the variable.",
+    "- The measured cost is in the CHANGELOG, before and after."
    ]
   }
  ]

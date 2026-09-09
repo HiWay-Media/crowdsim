@@ -189,3 +189,45 @@ PY
   [[ "$output" == *"/api/public-open"* ]]
   [[ "$output" == *"does not require the token"* ]]
 }
+
+# ── a preflight against a target that does not answer must not keep asking (#94) ─────────────────────
+#
+# 1.33.0 made `probe` sample 5 URLs per pool instead of checking one. Against a target that ANSWERS that
+# is a few extra requests, paced, exactly as intended. Against one that does not answer it is 5 more
+# timeouts per pool, plus the authed samples — measured at 2 minutes 7 seconds for a single probe against
+# a blackholed address, where before it was one request. Thirteen probes in this suite turned a 90-second
+# job into a 46-minute one in CI, and the runner killed it.
+#
+# The first request already establishes whether the target answers. If it did not, sampling the pools
+# sends thirty more requests to learn the same thing.
+
+@test "a target that never answers is not sampled: the first request already said so" {
+  local f="$BATS_TEST_TMPDIR/dead.json"
+  # Loopback, a port nothing listens on: refused instantly, so this test is fast whatever the fix costs.
+  python3 - "$f" <<'PY'
+import json, sys
+json.dump({"name": "dead",
+  "targets": {"default": "local", "list": {"local": {"base_url": "http://127.0.0.1:9"}}},
+  "safety": {"allow_hosts": ["127.0.0.1"], "safe_peak_rps": 100},
+  "pools": {"pages": ["/", "/a", "/b", "/c", "/d"]},
+  "classes": [{"name": "html", "kind": "plain", "pool": "pages", "weight": 100}]},
+  open(sys.argv[1], "w"), indent=1)
+PY
+  run "$CROWDSIM" probe --profile "$f"
+  [ "$status" -eq 4 ]
+  # It says the target never answered — which is connectivity, a different finding from a target that
+  # answers 4xx — and does NOT go on to sample the pools.
+  [[ "$output" == *"never answered"* ]]
+  [[ "$output" == *"connectivity, not capacity"* ]]
+  [[ "$output" != *"how much of each pool answers"* ]]
+  [[ "$output" != *"the premise of every authed class"* ]]
+}
+
+@test "the sample is bounded per request, so one dead path cannot cost ten seconds" {
+  # A sample request that times out is information — "this path did not answer" — not something to retry.
+  # The budget is asserted against the source because a timing assertion is a flaky test.
+  run grep -c 'POOL_SAMPLE_MAX_TIME' "$CROWDSIM"
+  [ "$output" -ge 2 ]
+  run bash -c "grep -A6 'pool_sample_check()' '$CROWDSIM' | grep -c -- '--retry'"
+  [ "$output" -eq 0 ]
+}

@@ -171,8 +171,16 @@ has asked whether it renders.
 
 Preflight against one target: status, TTFB, page size, and every cache-relevant response header, saved to
 `out/probe-<run>.log` — and, machine-readably, to `out/probe-<run>.json`. Run it before every load test.
-Exits 4 if the target answers ≥400 — a load test against something that does not serve is not a capacity
-measurement.
+Exits **4** for either shape of *this target does not serve*, and tells them apart in words, because they
+send you to different places:
+
+- **it never answered** — connectivity, not capacity: the address, the port, TLS or the network path;
+- **it answered ≥400** on the first pool entry — a load test against something that does not serve is not
+  a capacity measurement.
+
+Until 1.40.2 both of those exited **0**. Everything that reads the status runs inside `{ … } | tee`, which
+is a subshell, so the variable the parent tested was always empty — the documented exit 4 was dead code
+for as long as the log has been teed, and a scheduler reading it saw a preflight that passed.
 
 The JSON is what makes `load` able to tell you the bandwidth a peak implies (below). Prose in a log is for
 whoever reads this run; the number is for the run somebody starts next week.
@@ -217,6 +225,16 @@ pool, and **spread across it** rather than the first n — the first entries of 
 the shallowest pages, which are also the most likely to exist. Paced by `CROWDSIM_VERIFY_DELAY`, the same
 knob discovery uses: a preflight must not become the load test. Only pools a class actually draws from
 are checked.
+
+**Nothing is sampled when the target did not answer the first request.** That request already settled
+reachability; asking about every pool would send thirty more to learn the same thing — and against an
+address that drops packets each one costs the full budget. That is what made one probe take **2 minutes 7
+seconds** and turned a 90-second CI job into a 46-minute one (1.40.2).
+
+A sample request is **bounded and never retried**: `CROWDSIM_SAMPLE_MAX_TIME` (default `3` seconds). It
+answers *does this path exist*, and a path that did not answer inside the budget has answered that. The
+first request keeps the longer timeout and the retry, because reachability is the one thing worth waiting
+for.
 
 A pool where **more than half** the sample is unserved exits **4**: a class drawing from it would be
 ~100% failed, the brake would stop the run at a few req/s, and the numbers would describe a 404 handler.
@@ -991,6 +1009,7 @@ that every argv the GUI builds stays inside them.
 | `CROWDSIM_GUI_PORT` / `_BIND` / `_TOKEN` | `8787` / `127.0.0.1` / unset | See [GUI](gui.md). |
 | `CROWDSIM_BIN` | see [GUI §the driver](gui.md#which-driver-the-gui-spawns) | Which driver the GUI spawns. Set explicitly in the image. |
 | `CROWDSIM_VERIFY_DELAY` | `0.05` | Seconds between requests during `discover --verify`. Building a pool must not be a load test. |
+| `CROWDSIM_SAMPLE_MAX_TIME` | `3` | Seconds a single `probe` pool/premise sample may take. Not retried: a path that did not answer in time has answered. The preflight's own first request is not bounded by this. |
 
 ## Exit codes
 
@@ -1001,7 +1020,7 @@ They are an API: the Nomad job, CI and the GUI all branch on them.
 | `0` | Executed | Also when the brake tripped — that is an outcome, not an error |
 | `2` | Usage | Unknown flag or subcommand, missing/unparseable profile, unknown target, `--shape journey` without `journey.file` · since 1.28.0 also a flag that belongs to a different subcommand |
 | `3` | A safety gate refused it | No allowlist, host not allowlisted, peak above the ceiling without the override, GUI asked to bind off-loopback without a token |
-| `4` | Nothing usable came out of it | `probe` got ≥400 or no answer, or found an `authed` class whose endpoint does not require the token (1.24.0) — a class that would measure the public path; `record` found no page in the HAR; `weights` classified nothing in the log; `init` found no artefacts to assemble — and, since 1.20.4, a `load` whose generator produced **no summary**: a run that never happened is not a success, and until then it warned on a terminal and exited 0 |
+| `4` | Nothing usable came out of it | `probe` got ≥400 or no answer (both shapes, and both actually exit 4 since 1.40.2), or found an `authed` class whose endpoint does not require the token (1.24.0) — a class that would measure the public path; `record` found no page in the HAR; `weights` classified nothing in the log; `init` found no artefacts to assemble — and, since 1.20.4, a `load` whose generator produced **no summary**: a run that never happened is not a success, and until then it warned on a terminal and exited 0 |
 | `5` | Missing or broken prerequisite | k6 absent, docker absent for `cache-ab`, node absent for `serve`, `validate`, `record` or `weights` — and, since 1.20.2, a profile validator that crashes instead of reaching a verdict: that is the installation, not the profile, and it used to be reported as exit 2 |
 
 ### `compare`

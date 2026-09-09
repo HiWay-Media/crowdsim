@@ -4,6 +4,42 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.2] — 2026-09-09
+
+Three defects in `probe`, in one neighbourhood, found by asking why the `ci` workflow went red on a tree
+where `make test` was green ([#94](https://github.com/HiWay-Media/crowdsim/issues/94)).
+
+### Fixed
+- **A preflight against a target that does not answer cost 2 minutes 7 seconds.** 1.33.0 made `probe`
+  sample five URLs per pool instead of checking one — paced and bounded in *count*, and nothing bounded
+  the *time*. Each sample used the preflight's own curl options: `--max-time 10 --retry 1
+  --retry-connrefused`. The CLI suite makes thirteen probe calls, so a 90-second job became a **46-minute**
+  one and the runner killed it. It never showed locally, because a resolver that answers NXDOMAIN
+  instantly makes every one of those requests free.
+
+  Now: **nothing is sampled when the target did not answer the first request** — that request already
+  settled reachability, and asking about every pool sends thirty more to learn the same thing. A sample
+  request is bounded by `CROWDSIM_SAMPLE_MAX_TIME` (default 3s) and **never retried**: it answers *does
+  this path exist*, and a path that did not answer inside the budget has answered that. The first request
+  keeps the longer timeout and the retry, because reachability is the one thing worth waiting for.
+  Measured on the same blackholed address: **2m07s → 21s**, and the 21 seconds are that first request.
+- **A target that never answered exited 0.** `probe` documents *exit 4 if the target answers ≥400* and the
+  exit-code contract says `4 = target not reachable`. A failed curl leaves the status as `000`, and
+  `"000" -ge 400` is false, so an address nothing listens on reported a preflight that **passed** — to a
+  person, and to a scheduler reading the exit code.
+- **The documented exit 4 was dead code.** Everything that reads the status runs inside
+  `{ … } | tee "$log"`, which is a subshell, so the variable the parent tested was always empty. A 404 on
+  the first pool entry printed *target does not answer 2xx/3xx* and exited **0** — true for as long as the
+  log has been teed. The only exit-4 paths that worked were the marker files added later for the pool and
+  premise checks, and the status now crosses the same boundary the same way.
+
+  The two shapes are told apart in words, because they send you to different places: *the target never
+  answered* is connectivity, and *it answered 404 on the first pool entry* is a pool or a route.
+
+### Added
+- Tests asserting each exit code against a real socket rather than trusting the variable: a refused port,
+  and a first pool entry that answers 404.
+
 ## [1.40.1] — 2026-09-09
 
 ### Fixed
