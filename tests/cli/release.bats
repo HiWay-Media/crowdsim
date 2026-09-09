@@ -171,3 +171,147 @@ PY
   run "$RELEASE" --help
   [ "$status" -eq 0 ]
 }
+
+# ── the image gate (#89) ─────────────────────────────────────────────────────────────────────────────
+#
+# 1.36.0 and 1.37.0 were tagged with a Dockerfile that could not build: the `ui` stage did not copy a file
+# the UI imports. Everything local was green — lint, unit, ui, gui, cli, e2e — because `make test` cannot
+# see the image, and `tag` did not check it. The only gate was remembering `make image-smoke`.
+#
+# So `image-smoke` records a receipt fingerprinting the files that end up in the image, and `tag` refuses
+# unless the receipt matches the tree it is about to tag. The check costs nothing at tag time: it verifies
+# a run that already happened rather than starting one.
+
+# A fake repo that HAS an image surface, plus the fingerprint helper the two share.
+with_image_surface() {
+  mkdir -p "$REPO/.github/workflows" "$REPO/bin" "$REPO/tests/image"
+  cp "$ROOT/scripts/image-fingerprint.sh" "$REPO/scripts/" 2>/dev/null || true
+  cat > "$REPO/.github/workflows/image.yml" <<'YML'
+name: image
+on:
+  push:
+    tags: ['v*']
+    branches: [main]
+    paths:
+      - Dockerfile
+      - bin/**
+      - package.json
+YML
+  printf 'FROM alpine\n' > "$REPO/Dockerfile"
+  printf '#!/usr/bin/env bash\necho hi\n' > "$REPO/bin/crowdsim"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "an image surface"
+}
+
+# Pretend `make image-smoke` passed on the tree as it stands.
+record_receipt() {
+  ( cd "$REPO" && ./scripts/image-fingerprint.sh --record )
+}
+
+@test "tag refuses when the image was never smoke-tested for this tree" {
+  with_image_surface
+  "$RELEASE" prepare patch
+  fill_changelog
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "feat: something worth releasing"
+
+  run "$RELEASE" tag
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"image"* ]]
+  [[ "$output" == *"make image-smoke"* ]]
+  [ -z "$(git -C "$REPO" tag -l v1.2.1)" ]
+}
+
+@test "tag proceeds once the image has been smoke-tested for this tree" {
+  with_image_surface
+  "$RELEASE" prepare patch
+  fill_changelog
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "feat: something worth releasing"
+  record_receipt
+
+  run "$RELEASE" tag
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$REPO" tag -l v1.2.1)" = "v1.2.1" ]
+}
+
+@test "a receipt for a different tree does not count" {
+  # The failure mode this exists for: smoke-test, then change the Dockerfile, then tag. The receipt has to
+  # be about the tree being tagged, not about the last time somebody ran the suite.
+  with_image_surface
+  record_receipt
+  printf 'FROM alpine\nRUN echo changed\n' > "$REPO/Dockerfile"
+  "$RELEASE" prepare patch
+  fill_changelog
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "feat: a different image"
+
+  run "$RELEASE" tag
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"make image-smoke"* ]]
+}
+
+@test "a change that cannot reach the image does NOT invalidate the receipt" {
+  # A gate nobody can satisfy gets worked around. Writing the CHANGELOG after the smoke run is the normal
+  # release order, so it must not send you back to docker for another five minutes.
+  #
+  # `prepare` comes first because it bumps package.json, which IS image-relevant — the version is baked
+  # into the image and the smoke test asserts the image reports it. So the honest order is prepare, then
+  # smoke, then tag; prose after the smoke run is free.
+  with_image_surface
+  "$RELEASE" prepare patch
+  fill_changelog
+  record_receipt
+  printf '\nsome prose\n' >> "$REPO/CHANGELOG.md"
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "docs: words only"
+
+  run "$RELEASE" tag
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$REPO" tag -l v1.2.1)" = "v1.2.1" ]
+}
+
+@test "--no-image tags anyway, and says what it skipped" {
+  # Explicit, on the command line, every time — the safe-peak rule. A machine that cannot build the image
+  # must still be able to cut a release, loudly.
+  with_image_surface
+  "$RELEASE" prepare patch
+  fill_changelog
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "feat: something worth releasing"
+
+  run "$RELEASE" tag --no-image
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$REPO" tag -l v1.2.1)" = "v1.2.1" ]
+  [[ "$output" == *"WITHOUT the image gate"* ]]
+  [[ "$output" == *"--no-image"* ]]
+  # and it names the consequence, not just the flag
+  [[ "$output" == *"published none"* ]]
+}
+
+@test "a tree with no Dockerfile has no image to gate on" {
+  # The gate engages on the surface, not on a flag: a repo with no image cannot fail to build one.
+  "$RELEASE" prepare patch
+  fill_changelog
+  git -C "$REPO" add -A
+  git -C "$REPO" commit -qm "feat: something worth releasing"
+
+  run "$RELEASE" tag
+  [ "$status" -eq 0 ]
+  [ "$(git -C "$REPO" tag -l v1.2.1)" = "v1.2.1" ]
+}
+
+@test "the fingerprint reads the workflow's own paths, so the two cannot drift" {
+  # If the list of image-relevant paths were copied into the script, adding one to the workflow would
+  # leave the gate blind to it — which is the class of bug this whole issue is about.
+  run grep -c "image.yml" "$ROOT/scripts/image-fingerprint.sh"
+  [ "$output" -ge 1 ]
+  run bash -c "cd '$ROOT' && ./scripts/image-fingerprint.sh --paths"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Dockerfile"* ]]
+  [[ "$output" == *"bin"* ]]
+  [[ "$output" == *"k6"* ]]
+  # and NOT things that cannot reach the image
+  [[ "$output" != *"CHANGELOG"* ]]
+  [[ "$output" != *"docs/"* ]]
+}

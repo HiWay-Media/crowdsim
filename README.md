@@ -86,20 +86,20 @@ guide — mounts, environment, permissions, exit codes, troubleshooting — is
 **[docs/docker.md](docs/docker.md)**; the pieces the compose file above is made of:
 
 ```bash
-docker pull ghcr.io/hiway-media/crowdsim:1.38.0        # or :1.38, or :latest
+docker pull ghcr.io/hiway-media/crowdsim:1.38.1        # or :1.38, or :latest
 
 # a run, on a host near the target
 docker run --rm --network host \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/my-profile.json:/profile.json:ro" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.38.0 crowdsim load --profile /profile.json --target edge --peak 60
+  ghcr.io/hiway-media/crowdsim:1.38.1 crowdsim load --profile /profile.json --target edge --peak 60
 
 # the GUI, on your own machine
 docker run --rm -p 127.0.0.1:8787:8787 \
   -e CROWDSIM_GUI_BIND=0.0.0.0 -e CROWDSIM_GUI_TOKEN="$(openssl rand -hex 16)" \
   -e CROWDSIM_ALLOW_TARGETS='www.example.test' \
   -v "$PWD/profiles:/profiles" -v "$PWD/out:/out" \
-  ghcr.io/hiway-media/crowdsim:1.38.0 crowdsim serve
+  ghcr.io/hiway-media/crowdsim:1.38.1 crowdsim serve
 ```
 
 `make image` builds it locally as `crowdsim:dev`, `make image-smoke` asserts it is still the tool, and
@@ -219,8 +219,13 @@ make test         # unit + front end + GUI + CLI — generates no load whatsoeve
 make test-k8s     # ci/kubernetes: safety invariants on the manifests (needs kubectl, no cluster)
 make test-e2e     # a real 12 req/s run against an nginx container on loopback (needs docker + k6)
 make image-smoke  # builds the image, then asserts it is still the tool, gates intact (docker)
-make check-docs   # the three claims the docs make about themselves: versions, commands, quoted output
+make check-docs   # what the docs claim about themselves: versions, commands, quoted output, attribution
 ```
+
+`make image-smoke` is also a **release gate**: it records a receipt for the tree it tested, and
+`scripts/new-release.sh tag` refuses without one. Two releases were tagged with a Dockerfile that could
+not build and published no image, while every other suite was green — `make test` cannot see the image.
+See [Which gate runs when](docs/development.md#which-gate-runs-when).
 
 | Suite | What it covers |
 |---|---|

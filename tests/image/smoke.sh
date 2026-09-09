@@ -300,6 +300,14 @@ fi
 say ""
 if [ "$FAILED" = "0" ]; then
   ok "image smoke test passed"
+  # The receipt `new-release.sh tag` refuses without. It fingerprints the files that end up in the image
+  # — the paths the image workflow itself declares — so a smoke run on a different Dockerfile does not
+  # count as one on this Dockerfile. Recording it here rather than in the Makefile means it happens
+  # whenever the suite really passed, including when the script is run directly. (#89)
+  fp="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/image-fingerprint.sh"
+  if [ -x "$fp" ] && "$fp" --record 2>/dev/null; then
+    ok "recorded for this tree: scripts/new-release.sh tag will accept it"
+  fi
 else
   printf '❌ image smoke test FAILED\n'
   exit 1

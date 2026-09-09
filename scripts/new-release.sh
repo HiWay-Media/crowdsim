@@ -18,6 +18,10 @@
 #       verifies the top CHANGELOG section matches package.json, is filled in, and is not already tagged —
 #       then creates the annotated tag on HEAD. It never pushes: that stays a human decision.
 #
+#   scripts/new-release.sh tag --no-image
+#       tag without checking that the image builds. For a machine with no docker: it says so, loudly,
+#       every time. Two releases were tagged with a Dockerfile that could not build and published none.
+#
 #   scripts/new-release.sh notes [version]
 #       prints one version's CHANGELOG section, which is what the release workflow publishes.
 #
@@ -34,6 +38,9 @@ WORKSPACES=("$ROOT/gui/server/package.json" "$ROOT/gui/ui/package.json")
 PLACEHOLDER='_Describe the change here'
 
 DRY=0
+# Explicit, on the command line, every time — the safe-peak rule. Not an env var: an env var lives in a
+# shell profile and is forgotten, and a gate somebody forgot they disabled is worse than none. (#89)
+NO_IMAGE=0
 CMD=""
 ARG=""
 
@@ -48,6 +55,7 @@ while [ $# -gt 0 ]; do
   case "$1" in
     prepare|tag|notes) CMD="$1"; shift ;;
     --dry-run) DRY=1; shift ;;
+    --no-image) NO_IMAGE=1; shift ;;
     -h|--help) usage; exit 0 ;;
     -*) die "unknown flag: $1" 2 ;;
     *) if [ -z "$ARG" ]; then ARG="$1"; shift; else die "unexpected argument: $1" 2; fi ;;
@@ -191,6 +199,45 @@ tag)
   fi
   if [ -n "$(git -C "$ROOT" status --porcelain)" ]; then
     die "the working tree is not clean: commit the release first, so the tag points at it" 3
+  fi
+
+  # THE IMAGE HAS TO HAVE BUILT. 1.36.0 and 1.37.0 were tagged with a Dockerfile that could not build —
+  # the `ui` stage did not copy a file the UI imports — and published no image at all. Everything local
+  # was green, because `make test` cannot see the image and this script did not ask. The only gate was
+  # remembering `make image-smoke`, which CLAUDE.md requires and which was skipped.
+  #
+  # Nothing is built here: `image-smoke` leaves a receipt fingerprinting the files that end up in the
+  # image, and this compares it against the tree being tagged. A run on a different Dockerfile does not
+  # count; writing the CHANGELOG afterwards does not invalidate it, because prose cannot reach the image.
+  # See scripts/image-fingerprint.sh. (#89)
+  fingerprint="$ROOT/scripts/image-fingerprint.sh"
+  if [ "$NO_IMAGE" = "1" ]; then
+    warn "tagging WITHOUT the image gate (--no-image): nobody has shown that this tree builds an image."
+    say  "     1.36.0 and 1.37.0 went out that way and published none. If docker is unavailable here, let"
+    say  "     CI be the check and watch the image workflow on this tag."
+  elif [ -x "$fingerprint" ]; then
+    rc=0
+    "$fingerprint" --check || rc=$?
+    case "$rc" in
+      0) ok "the image was smoke-tested for this tree" ;;
+      3) : ;;   # no Dockerfile or no image workflow: there is no image to gate on
+      *)
+        reason="the image has not been smoke-tested for this tree"
+        [ "$rc" = "1" ] && reason="the image was smoke-tested for a DIFFERENT tree — something that ends up
+  in the image changed since"
+        extra=""
+        command -v docker >/dev/null 2>&1 \
+          || extra="
+  docker is not available here, so this machine cannot run it: pass --no-image and let CI be the check."
+        die "$reason.
+
+  Run it, then tag:
+      make image-smoke
+
+  Two releases were tagged with a Dockerfile that could not build, and published no image. \`make test\`
+  cannot see the image, so this is the only place that can ask.$extra" 3
+        ;;
+    esac
   fi
 
   if [ "$DRY" = "1" ]; then

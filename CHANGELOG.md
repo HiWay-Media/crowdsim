@@ -4,6 +4,58 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.1] — 2026-09-09
+
+### Added
+- **Tagging a release now requires that the image has built** ([#89](https://github.com/HiWay-Media/crowdsim/issues/89)).
+  1.36.0 and 1.37.0 were tagged with a Dockerfile that could not build — the `ui` stage did not copy a
+  file the UI imports — and published **no image at all**. `make lint`, `make test` and `make test-e2e`
+  were green, because none of them builds the image, and `new-release.sh tag` did not ask. The only gate
+  was remembering `make image-smoke`, which this repository requires and which was skipped.
+
+  `make image-smoke` now records a receipt in `.git/crowdsim-image-smoke`, fingerprinting the files that
+  end up in the image, and `tag` refuses unless the receipt matches the tree it is about to tag:
+
+  ```
+  ❌ the image has not been smoke-tested for this tree.
+
+    Run it, then tag:
+        make image-smoke
+  ```
+
+  Three deliberate properties:
+
+  - **Nothing is built at tag time.** It verifies a run that already happened, so it costs a second and
+    not five minutes — which is why the full smoke test can be the gate rather than a bare `docker build`.
+  - **What counts as image-relevant is not written down twice.** `scripts/image-fingerprint.sh` reads the
+    `paths:` filters in `.github/workflows/image.yml`, the list that already decides whether CI builds.
+    A second copy would leave the gate blind to a path added to the workflow — the shape of the bug it
+    exists to catch.
+  - **The receipt lives in `.git/`.** At the repo root it made the tree dirty, and `tag` refuses a dirty
+    tree, so recording a receipt blocked the command it exists to unblock. In `.git/` it needs no
+    `.gitignore` entry and cannot reach a clone.
+
+  Prose does not invalidate it; `prepare` does, because the version is baked into the image and the smoke
+  test asserts the image reports it. So the honest order is **prepare → CHANGELOG → commit → image-smoke
+  → tag**, and `docs/development.md` now has a table of which gate runs when — the previous answer being
+  *the ones you remember*.
+
+  `tag --no-image` cuts a release without the gate on a machine that cannot build the image, and says so
+  every time. A command-line flag and never an environment variable, the same shape as the safe-peak
+  override: a gate somebody forgot they disabled is worse than none. When docker is missing the refusal
+  names the flag itself.
+
+### Fixed
+- Two defects in the fingerprint, both found by running it rather than reading it, and both of the kind
+  that fail *open*:
+  - it hashed **nothing**. `python3 - <<'PY'` takes its program from stdin, so piping the file list into
+    that heredoc delivered an empty stream and the fingerprint came out as the sha256 of the empty
+    string — a value that matches every tree, i.e. a gate that always passes. This repository had already
+    been caught by that heredoc once, in `crowdsim init`.
+  - it depended on the **current directory**. The file names are repo-relative and were opened as such,
+    so running it from anywhere but the repo root hashed a different repository's files. Now joined to
+    the repo root, and asserted identical from three directories.
+
 ## [1.38.0] — 2026-09-08
 
 Milestone v1.17.0, closed. The two commands that read the **archive** rather than one run had no drawn

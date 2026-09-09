@@ -351,14 +351,59 @@ scripts/new-release.sh prepare patch      # or minor, major, or an explicit X.Y.
 
 $EDITOR CHANGELOG.md                      # write what changed and why it mattered
 git add -A && git commit                  # the release commit
+make image-smoke                          # ← the image has to have built (see below)
 scripts/new-release.sh tag                # verifies, then tags. Never pushes.
 
 git push && git push --tags               # yours to run
 ```
 
-`tag` refuses in three cases, each of which would produce a release nobody can trust: the CHANGELOG section
+`tag` refuses in four cases, each of which would produce a release nobody can trust: the CHANGELOG section
 still holds the placeholder, the tree is dirty (the tag would point at something that is not the release),
-or the top CHANGELOG section does not match `package.json`.
+the top CHANGELOG section does not match `package.json`, or **the image has not been smoke-tested for this
+tree**.
+
+### Which gate runs when
+
+The honest answer used to be *the ones you remember*, and that cost two releases: 1.36.0 and 1.37.0 were
+tagged with a Dockerfile that could not build — the `ui` stage did not copy a file the UI imports — and
+published no image at all. `make lint`, `make test` and `make test-e2e` were all green, because none of
+them builds the image.
+
+| Gate | What it covers | When it runs |
+|---|---|---|
+| `make lint` | `bash -n`, `node --check` | by hand, before a commit |
+| `make test` | unit + ui + gui + cli. **Generates no traffic** | by hand, before a commit; CI on every push |
+| `make test-e2e` | four legs against local containers. **Generates load on loopback** | by hand when the driver, the generator or the API changed; CI on push |
+| `make image-smoke` | builds the image and asserts it is the tool: gates survived, no allowlist default, the GUI can spawn the driver | by hand before a **tag** — now enforced; CI before publishing |
+| `make check-docs` | documented versions, documented flags, quoted output, no customer attribution | by hand; CI on push |
+
+**The image gate is not a memory exercise any more.** `make image-smoke` records a receipt in
+`.git/crowdsim-image-smoke` fingerprinting the files that end up in the image, and `tag` refuses unless
+that receipt matches the tree it is about to tag:
+
+```
+❌ the image has not been smoke-tested for this tree.
+
+  Run it, then tag:
+      make image-smoke
+```
+
+Three things about it are deliberate:
+
+- **Nothing is built at tag time.** The check verifies a run that already happened, so it costs a second
+  rather than five minutes.
+- **What counts as image-relevant is not written down twice.** `scripts/image-fingerprint.sh` reads the
+  `paths:` filters in `.github/workflows/image.yml` — the list that already decides whether CI builds at
+  all. A copy would leave the gate blind to a path somebody adds to the workflow, which is the shape of
+  the bug it exists to catch.
+- **Prose is free, `package.json` is not.** Writing the CHANGELOG after the smoke run does not invalidate
+  the receipt, because prose cannot reach the image. `prepare` does invalidate it: the version is baked
+  into the image and the smoke test asserts the image reports it, so the honest order is **prepare →
+  CHANGELOG → commit → image-smoke → tag**.
+
+On a machine with no docker, `tag --no-image` cuts the release anyway and says so, every time, on the
+command line — the same shape as the safe-peak override, and never an environment variable, because a gate
+somebody forgot they disabled is worse than none. The refusal names the flag when docker is missing.
 
 What the tag triggers once pushed:
 

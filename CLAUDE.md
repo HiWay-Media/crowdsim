@@ -198,6 +198,13 @@ sicurezza). Contorno: GUI (`gui/server` Express + `gui/ui` React/Vite, subcomand
 - **`make image-smoke` prima di ogni modifica a Dockerfile/`bin`/`k6`/`gui`** (la CI lo esegue prima del
   push su GHCR). L'assert che conta: l'immagine **non** dichiara un default per `CROWDSIM_ALLOW_TARGETS`.
   Non aggiungerlo mai, nemmeno "per comodità di test".
+  **Dalla 1.38.1 non è più a memoria**: `image-smoke` scrive una ricevuta in `.git/crowdsim-image-smoke`
+  che impronta i file che finiscono nell'immagine (lista derivata dai `paths:` di `image.yml`, non
+  ricopiata), e `new-release.sh tag` **rifiuta** se non combacia con l'albero che sta taggando. Niente
+  viene costruito al momento del tag: verifica una run già avvenuta. La prosa non invalida la ricevuta,
+  `prepare` sì (la versione è dentro l'immagine) → ordine onesto: **prepare → CHANGELOG → commit →
+  image-smoke → tag**. Senza docker: `tag --no-image`, esplicito sulla riga di comando ogni volta, mai
+  una env var. 1.36.0 e 1.37.0 sono uscite senza immagine perché questo gate non c'era.
 
 ## Puntatori
 
