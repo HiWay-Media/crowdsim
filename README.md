@@ -170,8 +170,10 @@ for a profile that already exists. The log is handed over, never fetched, and no
 
 This repo now ships a local MCP server so VS Code/Copilot can drive the same `crowdsim` CLI used by the
 project itself. The workspace config in [.vscode/mcp.json](.vscode/mcp.json) starts
-`node ./scripts/crowdsim-mcp.js`, which exposes tools such as `crowdsim_help`, `crowdsim_validate_profile`,
-`crowdsim_probe`, `crowdsim_load`, and `crowdsim_history`.
+`node ./scripts/crowdsim-mcp.js`, which exposes the full CLI surface through tools such as
+`crowdsim_help`, `crowdsim_doctor`, `crowdsim_discover`, `crowdsim_probe`, `crowdsim_load`,
+`crowdsim_cache_ab`, `crowdsim_history`, `crowdsim_compare`, `crowdsim_report`, `crowdsim_weights`,
+`crowdsim_init`, `crowdsim_next`, `crowdsim_record`, `crowdsim_serve`, and the profile validators.
 
 The server shells out to the driver rather than re-implementing safety checks, which keeps the same
 allowlist, safe-peak, target and exit-code rules intact. You can run it manually with:

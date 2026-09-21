@@ -49,6 +49,6 @@ test('MCP server advertises the crowdsim tools', async () => {
   const stdout = Buffer.concat(stdoutChunks).toString();
   const stderr = Buffer.concat(stderrChunks).toString();
 
-  assert.match(stdout, /crowdsim_validate_profile|crowdsim_load/);
+  assert.match(stdout, /crowdsim_help|crowdsim_validate_profile|crowdsim_validate|crowdsim_doctor|crowdsim_discover|crowdsim_probe|crowdsim_load|crowdsim_cache_ab|crowdsim_history|crowdsim_compare|crowdsim_report|crowdsim_weights|crowdsim_init|crowdsim_next|crowdsim_record|crowdsim_serve/);
   assert.equal(stderr, '');
 });
