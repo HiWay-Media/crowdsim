@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { isCollectionEnabled, parseMetrics } from '../../k6/lib/server-metrics.js';
+import { isCollectionEnabled, parseMetrics, formatSeries } from '../../k6/lib/server-metrics.js';
 
 test('isCollectionEnabled returns false when no endpoint', () => {
   assert.equal(isCollectionEnabled(null), false);
@@ -47,4 +47,19 @@ test('parseMetrics ignores Prometheus comments', () => {
 some_other=1
 metric 99`;
   assert.equal(parseMetrics(body, 'metric'), 99);
+});
+
+test('formatSeries converts samples to JSON array', () => {
+  const samples = [
+    { t: 1234567890000, v: 5 },
+    { t: 1234567891000, v: 8 },
+    { t: 1234567892000, v: 12 }
+  ];
+  const result = formatSeries(samples);
+  assert.deepEqual(result, samples);
+});
+
+test('formatSeries handles empty array', () => {
+  assert.deepEqual(formatSeries([]), []);
+  assert.deepEqual(formatSeries(null), []);
 });

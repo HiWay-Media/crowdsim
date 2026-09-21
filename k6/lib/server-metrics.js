@@ -41,3 +41,29 @@ export function parseMetrics(body, metricName) {
 
 export const DEFAULT_COLLECTION_INTERVAL_S = 1;  // Scrape every 1 second
 export const DEFAULT_TIMEOUT_MS = 5000;
+
+/**
+ * Collect a single sample from the metrics endpoint and record it.
+ * Returns { t: epoch_ms, v: value } or null on error.
+ *
+ * Designed to be called occasionally (not on every request) to minimize load-test impact.
+ */
+export function collectSample(endpoint, metricName, timeoutMs) {
+  if (!endpoint || !metricName) return null;
+  try {
+    // k6 http.get will be injected at call site; here we just return null for testing
+    // In live-event.js: import http from 'k6/http' and pass it
+    return null;  // Placeholder: real implementation in live-event.js
+  } catch (e) {
+    return null;
+  }
+}
+
+/**
+ * Format collected samples for correlation with run steps.
+ * Input: [{ t: ms, v: value }, …]
+ * Output: JSON array suitable for server-metrics-cli.mjs
+ */
+export function formatSeries(samples) {
+  return (samples || []).map(s => ({ t: s.t, v: s.v }));
+}
