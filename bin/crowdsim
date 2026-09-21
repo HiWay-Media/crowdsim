@@ -3647,6 +3647,7 @@ case "$CMD" in
   discover) cmd_discover;;
   probe)    resolve_profile; cmd_probe;;
   load)     cmd_load;;
+  batch)    cmd_batch "$ARG";;
   cache-ab) cmd_cache_ab;;
   history)  cmd_history;;
   compare)  cmd_compare;;
@@ -3659,3 +3660,64 @@ case "$CMD" in
   serve)    cmd_serve;;
   *)        die "unknown subcommand: $CMD (try --help)" 2;;
 esac
+
+# ─────────────────────────────── batch: sequential load tests ──────────────────────────────────────
+#@
+# batch — run load tests from a JSON config file, one after another
+#     usage: crowdsim batch <config.json>
+#
+#     Each job in the config runs as: crowdsim load --profile ... --target ...
+#     Collects pass/fail and returns exit 0 (all ok) or 1 (any failure).
+#
+#     Config: { "jobs": [ { "name": "test1", "profile": "...", "target": "...", "peak": 60 }, ... ] }
+#@
+cmd_batch() {
+  local cfg="$1"
+  [ -n "$cfg" ] || die "usage: crowdsim batch <config.json>" 2
+  [ -f "$cfg" ] || die "config: $cfg not found" 3
+
+  local passed failed
+  passed=0; failed=0
+
+  say "▶ batch: $(basename "$cfg")"
+  
+  python3 - "$cfg" <<'PYTHON'
+import json, sys
+try:
+  cfg = json.load(open(sys.argv[1]))
+  for job in cfg.get("jobs", []):
+    print(json.dumps(job))
+except Exception as e:
+  sys.exit(f"error reading {sys.argv[1]}: {e}")
+PYTHON
+  
+  while IFS= read -r line; do
+    [ -z "$line" ] && continue
+    
+    local name profile target peak
+    name=$(echo "$line" | python3 -c "import sys, json; j=json.load(sys.stdin); print(j.get('name', 'job'))")
+    profile=$(echo "$line" | python3 -c "import sys, json; j=json.load(sys.stdin); print(j.get('profile', ''))")
+    target=$(echo "$line" | python3 -c "import sys, json; j=json.load(sys.stdin); print(j.get('target', ''))")
+    peak=$(echo "$line" | python3 -c "import sys, json; j=json.load(sys.stdin); print(j.get('peak', 60))")
+    
+    say "  $name @ $peak req/s"
+    
+    # Run as subprocess (not recursive call)
+    if "$ROOT/bin/crowdsim" load --profile "$profile" --target "$target" --peak "$peak" >/dev/null 2>&1; then
+      say "    ✅"
+      ((passed++))
+    else
+      say "    ❌"
+      ((failed++))
+    fi
+  done < <(python3 - "$cfg" 2>/dev/null <<'PYTHON'
+import json, sys
+cfg = json.load(open(sys.argv[1]))
+for job in cfg.get("jobs", []):
+  print(json.dumps(job))
+PYTHON
+)
+  
+  say "batch: $passed pass, $failed fail"
+  [ "$failed" -eq 0 ]
+}
