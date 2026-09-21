@@ -7,6 +7,7 @@ import { parseHash, formatHash } from '../lib/hash.js';
 import { activatesOn } from '../lib/keys.js';
 import { kneeText, stepCurve, rateAxis } from '../lib/runs.js';
 import { trendOffer } from '../lib/drawn.js';
+import { filterRuns, exportAsJSON, exportAsCSV } from '../lib/export.js';
 
 /*
  * The archive, read from out/history.tsv and out/summary-*.json — the files the driver writes. Runs
@@ -28,6 +29,14 @@ export default function HistoryPanel() {
   // row whose full result is on screen: reading one run and comparing two are different questions.
   const [picked, setPicked] = useState([]);
   const [comparison, setComparison] = useState(null);
+  // Filters: date range, outcome status, peak rate range
+  const [filters, setFilters] = useState({
+    dateFrom: '',
+    dateTo: '',
+    status: 'all', // 'all' | 'clean' | 'knee' | 'invalid'
+    peakMin: '',
+    peakMax: '',
+  });
 
   // A comparison is a thing people quote to each other, so it has an address: #history=<a>,<b>. Parsing it
   // (and refusing anything that is not two run ids) is lib/hash.js, with its tests.
@@ -99,6 +108,23 @@ export default function HistoryPanel() {
   }
 
   const trend = trendOffer(rows);
+  const filteredRows = filterRuns(rows, filters);
+
+  const handleFilterChange = (key, value) => {
+    setFilters((f) => ({ ...f, [key]: value }));
+  };
+
+  const handleExportJSON = () => {
+    const data = exportAsJSON(filteredRows);
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    downloadFile(blob, 'runs-export.json');
+  };
+
+  const handleExportCSV = () => {
+    const csv = exportAsCSV(filteredRows);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    downloadFile(blob, 'runs-export.csv');
+  };
 
   return (
     <div className="grid">
@@ -111,12 +137,48 @@ export default function HistoryPanel() {
             </button>
           ) : trend.reason}
         </p>
+
+        {/* Filter Controls */}
+        <fieldset className="filters">
+          <legend>Filter runs</legend>
+          <div className="filter-row">
+            <label>
+              Status:
+              <select value={filters.status} onChange={(e) => handleFilterChange('status', e.target.value)}>
+                <option value="all">All</option>
+                <option value="clean">Clean</option>
+                <option value="knee">Knee (aborted)</option>
+                <option value="invalid">Invalid</option>
+              </select>
+            </label>
+            <label>
+              Peak from:
+              <input
+                type="number"
+                min="0"
+                value={filters.peakMin}
+                onChange={(e) => handleFilterChange('peakMin', e.target.value)}
+                placeholder="req/s"
+              />
+            </label>
+            <label>
+              Peak to:
+              <input
+                type="number"
+                min="0"
+                value={filters.peakMax}
+                onChange={(e) => handleFilterChange('peakMax', e.target.value)}
+                placeholder="req/s"
+              />
+            </label>
+          </div>
+        </fieldset>
         {trendError ? <div className="banner bad">Could not draw the trend: {trendError}</div> : null}
         {error ? <div className="banner bad">{error}</div> : null}
         {!rows.length ? <p className="note">No runs recorded yet. The archive is written by the driver, in the output directory.</p> : null}
         {rows.length ? (
           <KneePlot
-            rows={rows}
+            rows={filteredRows}
             onPick={setSelected}
             selected={selected}
             curve={stepCurve(detail && detail.summary ? detail.summary.per_step : null)}
@@ -128,6 +190,12 @@ export default function HistoryPanel() {
           <div className="actions">
             <button className="primary" disabled={picked.length !== 2} onClick={compareNow}>
               Compare the two ticked runs
+            </button>
+            <button onClick={handleExportJSON} disabled={!filteredRows.length}>
+              Export JSON
+            </button>
+            <button onClick={handleExportCSV} disabled={!filteredRows.length}>
+              Export CSV
             </button>
             <span className="note">
               {orderPair(picked, rows)
@@ -147,7 +215,10 @@ export default function HistoryPanel() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {filteredRows.length === 0 && rows.length > 0 ? (
+              <tr><td colSpan="12" className="note">No runs match the filters</td></tr>
+            ) : null}
+            {filteredRows.map((r) => (
               <tr
                 key={r.run_id}
                 className={`${selected === r.run_id ? 'sel' : ''} ${r.generator_ok === false ? 'invalid' : ''}`}
@@ -199,6 +270,18 @@ export default function HistoryPanel() {
         : null}
     </div>
   );
+}
+
+// Helper: trigger a file download
+function downloadFile(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
 }
 
 /** Inline SVG: no chart dependency for one scatter plot with 20 points. */
