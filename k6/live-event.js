@@ -577,3 +577,29 @@ export function handleSummary(data) {
   res[SUMMARY_F] = JSON.stringify(out, null, 2);
   return res;
 }
+
+// ────────────────────── server-side metrics collection (k6) ───────────────────────
+import { isCollectionEnabled, parseMetrics } from './lib/server-metrics.js';
+
+// Global collector state: [{ t: ms, v: value }, …]
+const serverMetricsSamples = [];
+const SERVER_METRICS_ENDPOINT = __ENV.SERVER_METRICS_ENDPOINT || '';
+const SERVER_METRICS_METRIC_NAME = __ENV.SERVER_METRICS_METRIC_NAME || '';
+const SERVER_METRICS_INTERVAL_S = Number(__ENV.SERVER_METRICS_INTERVAL_S || 5);
+
+// Collect a sample from the metrics endpoint during the run
+function sampleServerMetrics() {
+  if (!SERVER_METRICS_ENDPOINT || !SERVER_METRICS_METRIC_NAME) return;
+  try {
+    const now = Date.now();
+    const res = http.get(SERVER_METRICS_ENDPOINT, { timeout: '3s' });
+    if (res.status === 200) {
+      const value = parseMetrics(res.body, SERVER_METRICS_METRIC_NAME);
+      if (value !== null) {
+        serverMetricsSamples.push({ t: now, v: value });
+      }
+    }
+  } catch (e) {
+    // Silently skip on collection error; the run is not affected
+  }
+}
