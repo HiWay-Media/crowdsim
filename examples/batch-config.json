@@ -1,0 +1,7 @@
+{
+  "jobs": [
+    { "name": "baseline", "profile": "profiles/example.json", "target": "http://localhost:3000", "peak": 50 },
+    { "name": "load", "profile": "profiles/example.json", "target": "http://localhost:3000", "peak": 100 },
+    { "name": "spike", "profile": "profiles/example.json", "target": "http://localhost:3000", "peak": 200 }
+  ]
+}
