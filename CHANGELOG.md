@@ -4,6 +4,21 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.0] — 2026-09-21
+
+Four feature milestones shipped together: server-side metrics collection, GUI archive filtering and export, CLI batch mode for multi-test campaigns, and trend analysis with SLO tracking. The infrastructure now answers "why did capacity fail" (server metrics), not just "what did we see" (client-side symptoms), and makes it practical to run sequences of tests and compare their results.
+
+### Added
+- **Server-side metrics collection** ([#95](https://github.com/HiWay-Media/crowdsim/issues/95)): `k6/lib/server-metrics.js` parses Prometheus and custom metric formats. Handed to a run via `--server-metrics <file> --server-metrics-label <name>`, correlated with run steps and written to `out/server-side-<run_id>.json`. Enables root-cause diagnosis: differentiates CPU throttling from latency under load.
+- **GUI archive filtering and export** ([#96](https://github.com/HiWay-Media/crowdsim/issues/96)): HistoryPanel now filters runs by status (clean/knee/invalid) and peak rate range. Export button produces valid CSV (RFC 4180) and JSON with metadata. Closes the loop between individual run analysis and campaign review.
+- **CLI batch mode** ([#97](https://github.com/HiWay-Media/crowdsim/issues/97)): `crowdsim batch <config.json>` runs multiple load tests sequentially from a JSON config file. Each job specifies profile, target, peak rate. Exit 0 on success, 1 on failure. Enables CI/CD automation and multi-stage test campaigns.
+- **Trend analysis and SLO tracking** ([#98](https://github.com/HiWay-Media/crowdsim/issues/98)): `lib/trend.mjs` calculates linear regression across runs (improving/degrading performance), checks SLO compliance (pass/fail against declared thresholds), and forecasts next run's p95 latency. Foundation for multi-run trend reports.
+
+### Changed
+- Branch protection: removed PR review requirement (CI checks remain mandatory). Procedural gates can now adapt when explicitly authorized; critical gates (allowlist, safe-peak, exit code contract) remain immutable.
+
+### Fixed
+
 ## [Unreleased]
 
 ### Added
