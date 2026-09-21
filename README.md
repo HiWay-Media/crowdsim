@@ -166,6 +166,20 @@ ceiling blank, because no tool gets to decide those for you. Add `--access-log <
 weights are counted from your own traffic instead of drafted as a `TODO`; `crowdsim weights` does the same
 for a profile that already exists. The log is handed over, never fetched, and nothing from it is written.
 
+## MCP server for AI tooling
+
+This repo now ships a local MCP server so VS Code/Copilot can drive the same `crowdsim` CLI used by the
+project itself. The workspace config in [.vscode/mcp.json](.vscode/mcp.json) starts
+`node ./scripts/crowdsim-mcp.js`, which exposes tools such as `crowdsim_help`, `crowdsim_validate_profile`,
+`crowdsim_probe`, `crowdsim_load`, and `crowdsim_history`.
+
+The server shells out to the driver rather than re-implementing safety checks, which keeps the same
+allowlist, safe-peak, target and exit-code rules intact. You can run it manually with:
+
+```bash
+npm run mcp
+```
+
 ## The GUI
 
 `crowdsim serve` puts a page in front of the same CLI: pick a profile and a target, see the mix the peak

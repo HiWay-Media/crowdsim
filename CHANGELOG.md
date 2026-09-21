@@ -4,6 +4,13 @@ All notable changes to crowdsim are documented here.
 The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- A local MCP server for VS Code/Copilot, wired to the same `crowdsim` CLI used by the project itself.
+  The workspace config in `.vscode/mcp.json` starts `node ./scripts/crowdsim-mcp.js` and exposes the
+  help, validate, probe, load and history tools without re-implementing the safety gates.
+
 ## [1.40.2] — 2026-09-09
 
 Three defects in `probe`, in one neighbourhood, found by asking why the `ci` workflow went red on a tree

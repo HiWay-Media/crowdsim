@@ -1,0 +1,15 @@
+{
+  "servers": {
+    "crowdsim": {
+      "type": "stdio",
+      "command": "node",
+      "args": [
+        "./scripts/crowdsim-mcp.js"
+      ],
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "CROWDSIM_ROOT": "${workspaceFolder}"
+      }
+    }
+  }
+}
